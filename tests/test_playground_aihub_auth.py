@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 import httpx
-from dotenv import dotenv_values
 
 from playground import create_app
 from playground.routes import aihub as aihub_routes
@@ -10,25 +9,45 @@ from playground.routes import entry as entry_routes
 from playground.routes import runner as runner_routes
 from playground.services import aihub_client
 from playground.services import aihub_bridge
+from playground.services import key_vault_config
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_create_app_loads_ai_hub_url_from_project_env(monkeypatch):
+def test_create_app_loads_ai_hub_url_from_key_vault(monkeypatch):
     monkeypatch.delenv("AI_HUB_BASE_URL", raising=False)
     monkeypatch.delenv("AIHUB_BASE_URL", raising=False)
     monkeypatch.delenv("AI_HUB_PLAYGROUND_ORIGIN", raising=False)
-    expected_base_url = dotenv_values(REPO_ROOT / ".env").get("AI_HUB_BASE_URL")
-    expected_origin = dotenv_values(REPO_ROOT / ".env").get("AI_HUB_PLAYGROUND_ORIGIN")
-
-    assert expected_base_url
-    assert expected_origin
+    monkeypatch.setenv("KEY_VAULT_NAME", "test-vault")
+    monkeypatch.setattr(
+        key_vault_config,
+        "_key_vault_values",
+        lambda vault_name: {
+            "AI-HUB-BASE-URL": "https://aihub.example",
+            "AI-HUB-PLAYGROUND-ORIGIN": "https://playground.example",
+        },
+    )
 
     create_app()
 
-    assert os.environ["AI_HUB_BASE_URL"] == expected_base_url
-    assert os.environ["AI_HUB_PLAYGROUND_ORIGIN"] == expected_origin
+    assert os.environ["AI_HUB_BASE_URL"] == "https://aihub.example"
+    assert os.environ["AI_HUB_PLAYGROUND_ORIGIN"] == "https://playground.example"
+
+
+def test_key_vault_name_does_not_skip_for_local_or_ci_flags(monkeypatch):
+    monkeypatch.setenv("PLAYGROUND_SKIP_KEY_VAULT_LOAD", "true")
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.delenv("PLAYGROUND_KEY_VAULT_NAME", raising=False)
+    monkeypatch.delenv("AZURE_KEY_VAULT_NAME", raising=False)
+    monkeypatch.delenv("KEY_VAULT_NAME", raising=False)
+
+    assert key_vault_config._key_vault_name() == key_vault_config.DEFAULT_KEY_VAULT_NAME
+
+
+def test_configured_key_vault_name_wins_over_default(monkeypatch):
+    monkeypatch.setenv("PLAYGROUND_SKIP_KEY_VAULT_LOAD", "true")
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("KEY_VAULT_NAME", "release-vault")
+
+    assert key_vault_config._key_vault_name() == "release-vault"
 
 
 def test_verify_credentials_calls_ai_hub_auth_api(monkeypatch):
@@ -1156,6 +1175,7 @@ workflow = Workflow(
             "bundle_error_code": "missing_bundle_api",
         },
     )
+    monkeypatch.setattr(aihub_routes, "prepare_semantic_runtime", lambda *args, **kwargs: {"prepared": True})
     app = create_app()
     app.config.update(TESTING=True, SECRET_KEY="test-secret")
 

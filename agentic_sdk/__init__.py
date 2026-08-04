@@ -1,5 +1,7 @@
 ﻿"""Clean core package for Agentic SDK v2."""
 
+__version__ = "0.1.0"
+
 from agentic_sdk.config import GateConfig, ModuleSpec, WorkflowConfig, build_workflow
 from agentic_sdk.defaults import (
     DEFAULT_NO_MATCHING_ENTRIES_MESSAGE,
@@ -28,22 +30,33 @@ from agentic_sdk.core import (
     WorkflowState,
 )
 from agentic_sdk.memory import InMemoryStore, MemoryEntry, MemorySearchResult, MemoryStore, PersistentMemory
-from agentic_sdk.modules import (
-    DirectAnswerAction,
-    EvidenceCheckReflect,
-    GenerativeAction,
-    KeywordRetrieve,
-    NextStepPlan,
-    PassThroughPerceive,
-    PassThroughRetrieve,
-    ResponseCheckReflect,
-    SemanticRetrieve,
-    TextImagePerceive,
-    TextPerceive,
-    ToolCallAction,
-)
 
-__version__ = "0.0.0-v2"
+_LAZY_MODULE_EXPORTS = {
+    "DirectAnswerAction": "agentic_sdk.modules.action",
+    "EvidenceCheckReflect": "agentic_sdk.modules.reflect",
+    "GenerativeAction": "agentic_sdk.modules.action",
+    "KeywordRetrieve": "agentic_sdk.modules.retrieve",
+    "NextStepPlan": "agentic_sdk.modules.plan",
+    "PassThroughPerceive": "agentic_sdk.modules.perceive",
+    "PassThroughRetrieve": "agentic_sdk.modules.retrieve",
+    "ResponseCheckReflect": "agentic_sdk.modules.reflect",
+    "SemanticRetrieve": "agentic_sdk.modules.retrieve",
+    "TextImagePerceive": "agentic_sdk.modules.perceive",
+    "TextPerceive": "agentic_sdk.modules.perceive",
+    "ToolCallAction": "agentic_sdk.modules.action",
+}
+
+
+def __getattr__(name: str):
+    module_name = _LAZY_MODULE_EXPORTS.get(name)
+    if not module_name:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    from importlib import import_module
+
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value
 
 __all__ = [
     "Attachment",

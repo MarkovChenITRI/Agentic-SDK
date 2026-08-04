@@ -12,22 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from agentic_sdk import InContextMemory, Workflow
-from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, WorkflowResult, WorkflowState
-from agentic_sdk.modules import (
-    DirectAnswerAction,
-    EvidenceCheckReflect,
-    GenerativeAction,
-    KeywordRetrieve,
-    NextStepPlan,
-    PassThroughRetrieve,
-    PassThroughPerceive,
-    ResponseCheckReflect,
-    SemanticRetrieve,
-    TextImagePerceive,
-    TextPerceive,
-    ToolCallAction,
-)
+from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, InContextMemory, Workflow, WorkflowResult, WorkflowState
 
 from playground.models import RunnerSceneProfile
 from playground.services.model_endpoints import MissingEndpointCredentials, endpoint_params_for_role
@@ -182,7 +167,9 @@ def execute_python_source(
     if final_message == "No matching entries.":
         final_message = _source_fallback_text(python_source) or "目前沒有找到符合的參考資料。"
     tool_calls = workflow_result.entities.get("latest_tool_calls", [])
-    tool_call_panels = _tool_call_panels_from(config.action_tools, tool_calls)
+    tool_call_panels = _tool_call_panels_from(config.action_tools, tool_calls, final_message=final_message)
+    if not tool_call_panels and _should_offer_configured_tool_panel(config, user_message, final_message):
+        tool_call_panels = _tool_call_panels_from_schemas(config.action_tools, final_message=final_message)
     result = {
         "title": "回覆結果",
         "message": final_message,
@@ -868,6 +855,8 @@ def _initialization_steps(
 
 
 def _perceive_from_config(config: BuilderSourceConfig, endpoint_selections: dict[str, str], reachable_roles: set[str]):
+    from agentic_sdk.modules.perceive import PassThroughPerceive, TextImagePerceive, TextPerceive
+
     if "perceive" not in reachable_roles:
         return None
     if config.perceive_module == "TextPerceive":
@@ -889,6 +878,8 @@ def _perceive_from_config(config: BuilderSourceConfig, endpoint_selections: dict
 
 
 def _plan_from_config(config: BuilderSourceConfig, endpoint_selections: dict[str, str], reachable_roles: set[str]):
+    from agentic_sdk.modules.plan import NextStepPlan
+
     if "plan" not in reachable_roles or not config.plan_strategy:
         return None
     endpoint_role = "action" if "action" in reachable_roles else "perceive"
@@ -907,6 +898,8 @@ def _retrieve_from_config(
     semantic_saved_path: str | None = None,
     semantic_index_path: str | None = None,
 ):
+    from agentic_sdk.modules.retrieve import KeywordRetrieve, PassThroughRetrieve, SemanticRetrieve
+
     if "retrieve" not in reachable_roles:
         return None
     if config.retrieve_module == "SemanticRetrieve":
@@ -931,18 +924,22 @@ def _warm_semantic_retrieve(module) -> None:
 
 
 def _action_from_config(config: BuilderSourceConfig, endpoint_selections: dict[str, str], reachable_roles: set[str]):
+    from agentic_sdk.modules.action import DirectAnswerAction, GenerativeAction, ToolCallAction
+
     if "action" not in reachable_roles:
         return None
     if config.action_module == "GenerativeAction":
         return GenerativeAction(system_prompt=config.action_prompt, **endpoint_params_for_role("action", endpoint_selections))
     if config.action_module == "ToolCallAction":
-        return ToolCallAction(system_prompt=config.action_prompt, tools=list(config.action_tools), **endpoint_params_for_role("action", endpoint_selections))
+        return ToolCallAction(system_prompt=config.action_prompt, tools=list(config.action_tools), tool_choice=config.action_tool_choice, **endpoint_params_for_role("action", endpoint_selections))
     if config.action_module == "CustomAction":
         return DirectAnswerAction(memory_key=config.custom_action_memory_key, fallback=config.custom_action_fallback, prefix=config.custom_action_prefix)
     return DirectAnswerAction(memory_key=config.direct_answer_memory_key, fallback=config.direct_answer_fallback, prefix=config.direct_answer_prefix)
 
 
 def _reflect_from_config(config: BuilderSourceConfig, endpoint_selections: dict[str, str], reachable_roles: set[str]):
+    from agentic_sdk.modules.reflect import EvidenceCheckReflect, ResponseCheckReflect
+
     if "reflect" not in reachable_roles:
         return None
     if config.reflect_module == "ResponseCheckReflect":
@@ -970,7 +967,7 @@ def _source_fallback_text(python_source: str) -> str | None:
     return None
 
 
-def _tool_call_panels_from(action_tools: tuple[dict[str, object], ...], tool_calls: object) -> list[dict[str, object]]:
+def _tool_call_panels_from(action_tools: tuple[dict[str, object], ...], tool_calls: object, *, final_message: str = "") -> list[dict[str, object]]:
     if not isinstance(tool_calls, list):
         return []
     schemas = _function_schemas_by_name(action_tools)
@@ -985,15 +982,119 @@ def _tool_call_panels_from(action_tools: tuple[dict[str, object], ...], tool_cal
         schema = schemas.get(function_name, {})
         arguments_text = str(function.get("arguments") or "{}")
         arguments = _safe_json_object(arguments_text)
+        schema_description = str(schema.get("description") or "")
         panels.append(
             {
                 "id": str(tool_call.get("id") or f"tool_call_{index}"),
                 "function_name": function_name,
-                "title": str(schema.get("description") or function_name),
-                "description": str(schema.get("description") or ""),
+                "title": _tool_call_panel_title(final_message, schema_description, function_name),
+                "description": _user_facing_tool_description(schema_description),
                 "api": _tool_api_from_schema(schema),
                 "raw_arguments": arguments_text,
                 "fields": _tool_call_fields_from(schema, arguments),
+            }
+        )
+    return panels
+
+
+def _tool_call_panel_title(final_message: str, schema_description: str, function_name: str) -> str:
+    cleaned_message = str(final_message or "").strip()
+    if cleaned_message and cleaned_message != "已產生工具呼叫。":
+        return _confirmation_title_from_message(cleaned_message)
+    return _user_facing_tool_description(schema_description) or function_name
+
+
+def _confirmation_title_from_message(message: str) -> str:
+    lines = [line.strip().strip("*_`# ") for line in str(message or "").splitlines() if line.strip()]
+    for line in reversed(lines):
+        if _asks_for_confirmation(line):
+            return line[:160]
+    return (lines[-1] if lines else str(message or "").strip())[:160]
+
+
+def _user_facing_tool_description(description: str) -> str:
+    text = str(description or "").strip()
+    return re.sub(r"\s*API：\s*[A-Z]+\s+\S+", "", text).strip()
+
+
+def _should_offer_configured_tool_panel(config: BuilderSourceConfig, user_message: str, final_message: str) -> bool:
+    if config.action_module != "ToolCallAction" or not config.action_tools:
+        return False
+    user_text = str(user_message or "").lower()
+    final_text = str(final_message or "").lower()
+    if _has_information_intent(user_text):
+        return False
+    if _asks_for_missing_input(final_text):
+        return False
+    if not _has_decision_context(user_text):
+        return False
+    return _has_actionable_response(final_text) and _asks_for_business_confirmation(final_text)
+
+
+def _configured_tool_text(config: BuilderSourceConfig) -> str:
+    descriptions: list[str] = []
+    for schema in _function_schemas_by_name(config.action_tools).values():
+        descriptions.append(str(schema.get("description") or ""))
+    return "\n".join(descriptions)
+
+
+def _has_information_intent(text: str) -> bool:
+    return any(term in text for term in ("分析", "解釋", "說明", "結果", "原因", "現況", "為什麼", "問題", "算不算", "怎麼說", "話術", "差在哪", "差異", "治好", "診斷", "how", "why", "explain", "analysis", "result"))
+
+
+def _has_decision_context(*texts: str) -> bool:
+    combined = "\n".join(texts)
+    return any(term in combined for term in ("推薦", "建議", "選擇", "下一步", "確認", "送出", "保留", "recommend", "suggest", "choose", "confirm", "submit", "next step"))
+
+
+def _asks_for_confirmation(text: str) -> bool:
+    return any(term in text for term in ("?", "？", "是否", "要不要", "需不需要", "要進行", "要繼續", "確認"))
+
+
+def _asks_for_business_confirmation(text: str) -> bool:
+    if not _asks_for_confirmation(text):
+        return False
+    return any(term in text for term in ("購買", "保留", "送出", "登記", "進入下一步", "進行下一步", "購買建議", "提交", "confirm", "submit", "next step"))
+
+
+def _asks_for_missing_input(text: str) -> bool:
+    return any(
+        term in text
+        for term in (
+            "請提供更多",
+            "請上傳",
+            "需要更多",
+            "無法推薦",
+            "無法判斷",
+            "才能推薦",
+            "provide more",
+            "upload",
+            "need more",
+            "insufficient to recommend",
+        )
+    )
+
+
+def _has_actionable_response(text: str) -> bool:
+    return any(term in text for term in ("商品名稱", "商品編號", "售價", "建議", "推薦", "下一步", "可選", "方案", "recommend", "suggest", "option", "next step"))
+
+
+def _tool_call_panels_from_schemas(action_tools: tuple[dict[str, object], ...], *, final_message: str = "") -> list[dict[str, object]]:
+    panels: list[dict[str, object]] = []
+    for index, schema in enumerate(_function_schemas_by_name(action_tools).values(), start=1):
+        function_name = str(schema.get("name") or f"tool_call_{index}")
+        fields = _tool_call_fields_from(schema, {})
+        if not fields:
+            continue
+        panels.append(
+            {
+                "id": f"configured_tool_{index}",
+                "function_name": function_name,
+                "title": _tool_call_panel_title(final_message, str(schema.get("description") or ""), function_name),
+                "description": _user_facing_tool_description(str(schema.get("description") or "")),
+                "api": _tool_api_from_schema(schema),
+                "raw_arguments": "{}",
+                "fields": fields,
             }
         )
     return panels
@@ -1046,15 +1147,37 @@ def _tool_call_fields_from(schema: dict[str, object], arguments: dict[str, objec
         fields.append(
             {
                 "name": str(name),
-                "label": str(name),
+                "label": _tool_call_field_label(str(name), field_type),
                 "type": field_type,
                 "panel_type": f"tool-call-panel-{field_type}",
-                "description": str(field_schema.get("description") or ""),
+                "description": _tool_call_field_description(field_schema, field_type),
                 "required": str(name) in required_names,
                 "value": value if value is not None else "",
+                "choices": _tool_call_field_choices(field_type),
             }
         )
     return fields
+
+
+def _tool_call_field_label(name: str, field_type: str) -> str:
+    if field_type == "boolean":
+        return "你的選擇"
+    return name
+
+
+def _tool_call_field_description(field_schema: dict[str, object], field_type: str) -> str:
+    if field_type == "boolean":
+        return "請根據上方問題選擇是否繼續。"
+    return str(field_schema.get("description") or "")
+
+
+def _tool_call_field_choices(field_type: str) -> list[dict[str, object]]:
+    if field_type != "boolean":
+        return []
+    return [
+        {"value": True, "label": "是", "description": "我同意進行這個下一步。"},
+        {"value": False, "label": "否", "description": "我暫時不進行這個下一步。"},
+    ]
 
 
 def _tool_call_field_type(schema_type: object, value: object) -> str:

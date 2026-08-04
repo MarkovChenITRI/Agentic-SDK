@@ -39,6 +39,12 @@ _OUTPUT_FORMAT_PROMPTS = {
     "json": "請輸出 JSON；欄位固定、值簡潔，不要加入 JSON 以外的文字。",
     "custom_schema": "請依指定格式輸出；欄位缺資料時使用空字串或明確標註未知。",
 }
+_INTERACTIVE_TOOL_POLICY = """互動元件使用原則：
+請先判斷使用者這一輪的意圖類型，而不是因為已配置互動元件就要求使用者選擇。
+當使用者只是詢問資訊、要求分析、要求解釋、比較原因、了解現況或追問依據時，只用自然語言回答，不要提出確認問題。
+只有當使用者明確進入決策、確認、提交、申請、送出表單、安排後續流程或選擇下一步，且該需求符合工具描述時，才提出互動確認。
+需要互動確認時，請先完整輸出你的建議、依據、限制與下一步，最後用自然語言提出清楚的確認問題；Playground 會依配置顯示互動元件並收集使用者選擇。
+不要把 API URL、component schema、欄位 JSON 或內部工具設定當成使用者可見文字輸出。"""
 _FREE_TEXT_OUTPUT_CHOICES = {"free_text", "natural", "bullets"}
 _INTERACTIVE_OUTPUT_CHOICES = {"interactive", "table", "json", "custom_schema"}
 _TOOL_CALL_OUTPUT_CHOICES = {"interactive"}
@@ -96,6 +102,7 @@ class BuilderSourceConfig:
     action_module: str = "DirectAnswerAction"
     action_prompt: str | None = None
     action_tools: tuple[dict[str, object], ...] = ()
+    action_tool_choice: str | dict[str, object] | None = None
     direct_answer_memory_key: str = "latest_retrieved_content"
     direct_answer_fallback: str = "沒有命中任何條目。"
     direct_answer_prefix: str = ""
@@ -163,7 +170,7 @@ def get_builder_steps() -> list[BuilderStep]:
             "",
             (
                 BuilderChoice("free_text", "純文字回覆", "設定 Agent 的角色、語氣、回答順序與限制。"),
-                BuilderChoice("interactive", "可互動元件", "沿用同一組回覆風格與規範，再追加抽取欄位與 API 提交合約。"),
+                BuilderChoice("interactive", "可互動元件", "沿用同一組回覆風格與規範，再追加抽取欄位與 API 提交規格。"),
             ),
         ),
         BuilderStep(
@@ -258,6 +265,7 @@ def build_python_source_from_builder_choice(step_key: str, choice_label: object,
                     action_module=action_module,
                     action_prompt=_user_authored_action_prompt(config.action_prompt),
                     action_tools=(),
+                    action_tool_choice=None,
                     profile_hint=profile_hint,
                     workflow_name=workflow_name,
                 )
@@ -317,6 +325,7 @@ def build_python_source_from_builder_choice(step_key: str, choice_label: object,
             payload_tools = _tools_from_action_payload(choice_label) if _payload_has_interactive_contract(choice_label) else ()
             action_module = "ToolCallAction" if payload_tools else config.action_module
             action_tools = payload_tools or (config.action_tools if action_module == "ToolCallAction" else ())
+            action_tool_choice = "none" if payload_tools else (config.action_tool_choice if action_module == "ToolCallAction" else None)
             if action_module == "GenerativeAction" and config.profile_hint == "Structured Result":
                 action_prompt = _fixed_format_action_prompt_from_payload(choice_label, action_prompt)
             updated = _replace_config(
@@ -324,6 +333,7 @@ def build_python_source_from_builder_choice(step_key: str, choice_label: object,
                 action_module=action_module,
                 action_prompt=action_prompt,
                 action_tools=action_tools,
+                action_tool_choice=action_tool_choice,
                 direct_answer_memory_key=_clean_allowed_value(str(choice_label.get("direct_memory_key", config.direct_answer_memory_key)), _ALLOWED_DIRECT_RESULT_KEYS, config.direct_answer_memory_key) if "direct_memory_key" in choice_label else config.direct_answer_memory_key,
                 direct_answer_fallback=_clean_short_text(str(choice_label.get("direct_fallback", config.direct_answer_fallback)), "沒有命中任何條目。") if "direct_fallback" in choice_label else config.direct_answer_fallback,
                 direct_answer_prefix=_clean_short_text(str(choice_label.get("direct_prefix", config.direct_answer_prefix)), "") if "direct_prefix" in choice_label else config.direct_answer_prefix,
@@ -368,6 +378,7 @@ def _replace_config(config: BuilderSourceConfig, **overrides: object) -> Builder
         "action_module": config.action_module,
         "action_prompt": config.action_prompt,
         "action_tools": config.action_tools,
+        "action_tool_choice": config.action_tool_choice,
         "direct_answer_memory_key": config.direct_answer_memory_key,
         "direct_answer_fallback": config.direct_answer_fallback,
         "direct_answer_prefix": config.direct_answer_prefix,
@@ -405,6 +416,7 @@ def _config_from_source(existing_source: str | None) -> BuilderSourceConfig:
     semantic_sources = _extract_semantic_sources(source)
     raw_action_prompt = _extract_keyword_value(source, {"GenerativeAction", "ToolCallAction"}, "system_prompt")
     action_tools = tuple(_normalize_tool_items(_extract_keyword_literal(source, {"ToolCallAction"}, "tools", [])))
+    action_tool_choice = _extract_keyword_literal(source, {"ToolCallAction"}, "tool_choice", None)
     action_prompt = _user_authored_action_prompt(raw_action_prompt)
     action_module = "CustomAction" if is_custom_action else action_call_name or "DirectAnswerAction"
     perceive_module = _first_call_name(source, {"PassThroughPerceive", "TextPerceive", "TextImagePerceive"}) or "PassThroughPerceive"
@@ -437,6 +449,7 @@ def _config_from_source(existing_source: str | None) -> BuilderSourceConfig:
         action_module=action_module,
         action_prompt=action_prompt,
         action_tools=action_tools,
+        action_tool_choice=action_tool_choice if action_module == "ToolCallAction" else None,
         direct_answer_memory_key=_clean_allowed_value(_extract_keyword_value(source, {"DirectAnswerAction"}, "memory_key") or "latest_retrieved_content", _ALLOWED_DIRECT_RESULT_KEYS, "latest_retrieved_content"),
         direct_answer_fallback=_extract_keyword_value(source, {"DirectAnswerAction"}, "fallback") or "沒有命中任何條目。",
         direct_answer_prefix=_extract_keyword_value(source, {"DirectAnswerAction"}, "prefix") or "",
@@ -802,7 +815,7 @@ def _tools_from_action_payload(payload: dict[str, Any]) -> tuple[dict[str, objec
         api_method = str(contract.get("api_method") or "POST")
         api_url = str(contract.get("api_url") or "")
         trigger = str(contract.get("interaction_trigger") or "")
-        description_parts = [trigger]
+        description_parts = ["顯示互動元件並收集使用者選擇。", trigger]
         if api_url:
             description_parts.append(f"API：{api_method} {api_url}")
         description = " ".join(part for part in description_parts if part).strip() or "提交 API 所需資料。"
@@ -836,6 +849,8 @@ def _tool_parameters_from_pairs(raw_pairs: str) -> dict[str, object]:
         description, json_type = _field_description_and_json_type(raw_value)
         if not key or key in properties:
             continue
+        if json_type == "boolean" and "暫定" not in description:
+            description = f"{description or key}。若使用者尚未回答，請先用 false 作為暫定值來顯示確認面板。"
         properties[key] = {"type": json_type, "description": description or key}
         required.append(key)
     return {"properties": properties, "required": required}
@@ -845,9 +860,9 @@ def _field_description_and_json_type(raw_value: str) -> tuple[str, str]:
     value = str(raw_value).strip()
     json_type = "string"
     marker = "（資料類型："
-    if marker in value and value.endswith("）"):
+    if marker in value and value.endswith(("）", ")")):
         value, raw_type = value.rsplit(marker, 1)
-        normalized_type = raw_type.removesuffix("）").strip().lower()
+        normalized_type = raw_type.removesuffix("）").removesuffix(")").strip().lower()
         if "number" in normalized_type or "數字" in normalized_type:
             json_type = "number"
         elif "boolean" in normalized_type or "是/否" in normalized_type:
@@ -1064,6 +1079,13 @@ def _custom_action_return_parts(python_source: str) -> list[object]:
 
     fallback_parts: list[object] = []
     for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "content" for target in node.targets):
+            parts = _flatten_string_addition(node.value)
+            if "summary" not in parts:
+                continue
+            if "\n\n" in parts:
+                return parts
+            fallback_parts = parts
         if isinstance(node, ast.Return):
             parts = _flatten_string_addition(node.value)
             if "summary" not in parts:
@@ -1232,18 +1254,15 @@ def _build_workflow_source(config: BuilderSourceConfig, endpoint_bindings: dict[
     workflow_metadata_lines = [f"    workflow_name={workflow_name_literal},"]
     if config.task_goal:
         workflow_metadata_lines.append(f"    description={json.dumps(config.task_goal, ensure_ascii=False)},")
-    workflow_metadata_lines.append("    memory_type=memory,")
-    workflow_metadata_lines.extend(_stage_label_lines(config))
-    workflow_block = f"""memory = InContextMemory()
-
-workflow = Workflow(
+    workflow_block = f"""workflow = Workflow(
 {chr(10).join(workflow_metadata_lines)}
 {workflow_arguments}
 )"""
     import_block = _format_module_imports(_module_names_for_source(workflow_block))
-    sections = [_core_import_line(endpoint_bindings)]
+    import_lines = [_core_import_line(endpoint_bindings)]
     if import_block:
-        sections.append(import_block)
+        import_lines.append(import_block)
+    sections = ["\n".join(import_lines)]
     runner_config_block = _runner_config_block(config)
     if runner_config_block:
         sections.append(runner_config_block)
@@ -1269,18 +1288,27 @@ def _build_custom_action_source(config: BuilderSourceConfig, endpoint_bindings: 
     workflow_metadata_lines = [f"    workflow_name={workflow_name_literal},"]
     if config.task_goal:
         workflow_metadata_lines.append(f"    description={json.dumps(config.task_goal, ensure_ascii=False)},")
-    workflow_metadata_lines.append("    memory_type=memory,")
-    workflow_metadata_lines.extend(_stage_label_lines(config))
     workflow_block = f"""class {custom_action_class}:
-    def __call__(self, memory):
-        summary = memory.lookup({memory_key_literal}) or {fallback_literal}
+    name = "action"
+
+    def __call__(self, state: WorkflowState) -> ModuleOutput:
+        summary = state.lookup({memory_key_literal}) or {fallback_literal}
         instruction = {rule_instruction_literal}
         if instruction:
-            return {prefix_literal} + summary + "\\n\\n" + {rule_title_literal} + "：" + instruction
-        return {prefix_literal} + summary
-
-
-memory = InContextMemory()
+            content = {prefix_literal} + summary + "\\n\\n" + {rule_title_literal} + "：" + instruction
+        else:
+            content = {prefix_literal} + summary
+        return ModuleOutput(
+            next_module=None,
+            payload={{"latest_final_message": content}},
+            context_updates=[
+                ContextEntry(
+                    type=ContextEntryType.ACTION_RESULT,
+                    content=content,
+                    metadata={{"source": {json.dumps(custom_action_class, ensure_ascii=False)}}},
+                )
+            ],
+        )
 
 workflow = Workflow(
 {chr(10).join(workflow_metadata_lines)}
@@ -1288,9 +1316,13 @@ workflow = Workflow(
 )
 """
     import_block = _format_module_imports(_module_names_for_source(workflow_block))
-    sections = [_core_import_line(endpoint_bindings)]
+    import_lines = [
+        _core_import_line(endpoint_bindings),
+        "from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState",
+    ]
     if import_block:
-        sections.append(import_block)
+        import_lines.append(import_block)
+    sections = ["# Playground profile hint: Custom Action", "\n".join(import_lines)]
     runner_config_block = _runner_config_block(config)
     if runner_config_block:
         sections.append(runner_config_block)
@@ -1299,7 +1331,7 @@ workflow = Workflow(
 
 
 def _core_import_line(endpoint_bindings: dict[str, dict[str, str]] | None = None) -> str:
-    return "from agentic_sdk import InContextMemory, Workflow"
+    return "from agentic_sdk import Workflow"
 
 
 def _stage_label_lines(config: BuilderSourceConfig) -> list[str]:
@@ -1353,11 +1385,22 @@ def _action_expression(config: BuilderSourceConfig, endpoint_bindings: dict[str,
         ]
         return f"DirectAnswerAction({', '.join(arguments)})"
     arguments = _llm_arguments("ACTION", binding_role="action", endpoint_bindings=endpoint_bindings)
-    if config.action_prompt:
-        arguments.append(f"system_prompt={json.dumps(config.action_prompt, ensure_ascii=False)}")
+    action_prompt = _action_system_prompt_for_config(config, action_class)
+    if action_prompt:
+        arguments.append(f"system_prompt={json.dumps(action_prompt, ensure_ascii=False)}")
     if action_class == "ToolCallAction" and config.action_tools:
         arguments.append(f"tools={_format_python_literal(list(config.action_tools), 8)}")
+        if config.action_tool_choice is not None:
+            arguments.append(f"tool_choice={_format_python_literal(config.action_tool_choice, 8)}")
     return f"{action_class}({', '.join(arguments)})"
+
+
+def _action_system_prompt_for_config(config: BuilderSourceConfig, action_class: str) -> str | None:
+    if action_class != "ToolCallAction":
+        return config.action_prompt
+    if config.action_prompt:
+        return f"{_INTERACTIVE_TOOL_POLICY}\n\n使用者設定的回覆規範：\n{config.action_prompt}"
+    return _INTERACTIVE_TOOL_POLICY
 
 
 def _perceive_expression(config: BuilderSourceConfig, endpoint_bindings: dict[str, dict[str, str]] | None = None) -> str:
@@ -1511,6 +1554,10 @@ def _user_authored_action_prompt(prompt: str | None) -> str | None:
     cleaned = _clean_prompt(str(prompt or ""))
     if not cleaned:
         return None
+    if cleaned == _INTERACTIVE_TOOL_POLICY:
+        return None
+    if cleaned.startswith(f"{_INTERACTIVE_TOOL_POLICY}\n\n使用者設定的回覆規範：\n"):
+        cleaned = cleaned.split("使用者設定的回覆規範：\n", 1)[1].strip()
     if cleaned in _OUTPUT_FORMAT_PROMPTS.values():
         return None
     return cleaned
@@ -1547,29 +1594,29 @@ def get_workflow_summary(python_source: str) -> WorkflowSummary:
     name = parsed.workflow_name
     if parsed.profile_hint == "Recommendation":
         template = "建議卡"
-        output_contract = "輸出：建議卡"
+        output_contract = "輸出規格：建議卡"
     elif parsed.profile_hint == "Summary":
         template = "摘要審閱"
-        output_contract = "輸出：摘要卡"
+        output_contract = "輸出規格：摘要卡"
     elif parsed.profile_hint == "Structured Form":
         template = "表單收件"
-        output_contract = "輸出：摘要卡"
+        output_contract = "輸出規格：摘要卡"
     elif parsed.profile_hint == "Structured Result":
         template = "結構化結果"
-        output_contract = "輸出：結果卡"
+        output_contract = "輸出規格：結果卡"
     elif parsed.profile_hint == "OpenAI Client":
         template = "模型回覆"
-        output_contract = "輸出：答案卡"
+        output_contract = "輸出規格：答案卡"
     elif parsed.profile_hint == "Custom Action":
         template = "自訂處理"
-        output_contract = "輸出：自訂結果"
+        output_contract = "輸出規格：自訂結果"
     else:
         template = "回覆助理"
-        output_contract = "輸出：回覆內容"
+        output_contract = "輸出規格：回覆內容"
 
     return WorkflowSummary(
         name=name,
-        input_contract="輸入：使用者內容",
+        input_contract="輸入規格：使用者內容",
         output_contract=output_contract,
         template=template,
         readiness="可開始使用" if parsed.supported_subset else "可預覽",
@@ -1582,6 +1629,19 @@ def _interactive_api_contracts(payload: dict[str, Any]) -> list[dict[str, str | 
     raw_contracts = str(payload.get("api_contracts", "") or "").strip()
     contracts: list[dict[str, str | None]] = []
     if not raw_contracts:
+        direct_fields = _rule_instruction_from_pairs(str(payload.get("component_fields", "")))
+        direct_trigger = _clean_prompt(str(payload.get("interaction_trigger", "")))
+        direct_api_method = _clean_short_text(str(payload.get("api_method", "POST")), "POST").upper()
+        direct_api_url = _clean_prompt(str(payload.get("api_url", "")))
+        if direct_trigger or direct_api_url or direct_fields:
+            return [
+                {
+                    "interaction_trigger": direct_trigger,
+                    "api_method": direct_api_method,
+                    "api_url": direct_api_url,
+                    "component_fields": direct_fields,
+                }
+            ]
         return []
     try:
         decoded_contracts = json.loads(raw_contracts)

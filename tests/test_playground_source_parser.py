@@ -22,11 +22,12 @@ def test_parse_supported_default_source_name():
     assert parsed.workflow_name == "default"
     assert parsed.supported_subset is True
     assert "WorkflowSettings" not in source
-    assert "from agentic_sdk import InContextMemory, Workflow" in source
-    assert "memory = InContextMemory()" in source
-    assert "memory_type=memory" in source
-    assert config.stage_labels["retrieve"] == "正在查找參考資料"
-    assert "stage_labels={" in source
+    assert "from agentic_sdk import Workflow" in source
+    assert "InContextMemory" not in source
+    assert "memory = InContextMemory()" not in source
+    assert "memory_type=memory" not in source
+    assert config.stage_labels is None
+    assert "stage_labels={" not in source
 
 
 def test_stage_labels_roundtrip_from_workflow_source():
@@ -148,6 +149,36 @@ def test_retrieve_builder_ignores_legacy_semantic_weight_fields():
     assert "importance_weight" not in source
 
 
+def test_custom_action_builder_emits_module_standard_action():
+    source = _sample_workflow_source("固定格式 Agent", "Custom Action")
+    source = build_python_source_from_builder_choice(
+        "action",
+        {
+            "class_name": "SupportRule",
+            "memory_key": "latest_retrieved_content",
+            "fallback": "沒有可用資料。",
+            "prefix": "處理結果：",
+            "rule_title": "規則",
+            "rule_instruction": "只回覆已知資料。",
+        },
+        source,
+    )
+
+    assert "from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState" in source
+    assert "class SupportRule:" in source
+    assert 'name = "action"' in source
+    assert "def __call__(self, state: WorkflowState) -> ModuleOutput:" in source
+    assert "state.lookup(\"latest_retrieved_content\")" in source
+    assert 'payload={"latest_final_message": content}' in source
+    assert "ContextEntry(" in source
+
+    result = execute_python_source(source, message="請處理", process_observer=lambda _event: None)
+
+    assert result["status"] == "completed"
+    assert result["final_message"].startswith("處理結果：")
+    assert result["result"]["message"] == result["final_message"]
+
+
 def test_keyword_retrieve_builder_emits_only_keyword_items_without_retrieve_fallback():
     source = build_python_source_from_builder_choice(
         "retrieve",
@@ -196,3 +227,34 @@ def test_builder_form_state_roundtrips_generated_text_parameters():
     assert state["values"]["retrieve"]["semantic_support_files"] == "AI Hub 上架教學.pptx"
     assert state["values"]["retrieve"]["semantic_search_goal"] == "查找 AI Hub 上架流程、限制與部署步驟"
     assert state["values"]["action"]["response_instruction"] == "請用 FAE 口吻分步說明。"
+
+
+def test_interactive_action_adds_generic_intent_gate_without_polluting_form_state():
+    source = build_python_source_from_builder_choice("output_format", "interactive", None)
+    source = build_python_source_from_builder_choice(
+        "action",
+        {
+            "response_instruction": "請依使用者情境回覆，必要時才請使用者確認下一步。",
+            "api_contracts": "",
+            "interaction_trigger": "使用者需要確認下一步時呼叫。",
+            "api_method": "POST",
+            "api_url": "https://example.com/confirm",
+            "component_fields": "是否確認 = 使用者是否確認下一步（資料類型：是/否)",
+        },
+        source,
+    )
+
+    assert "請先判斷使用者這一輪的意圖類型" in source
+    assert "當使用者只是詢問資訊、要求分析、要求解釋" in source
+    assert "Playground 會依配置顯示互動元件並收集使用者選擇" in source
+    assert "顯示互動元件並收集使用者選擇" in source
+    assert "若使用者尚未回答，請先用 false 作為暫定值來顯示確認面板" in source
+    assert "tool_choice=\"none\"" in source
+    assert "使用者設定的回覆規範" in source
+
+    config = config_from_source(source)
+    state = get_builder_form_state(source)
+
+    assert config.action_prompt == "請依使用者情境回覆，必要時才請使用者確認下一步。"
+    assert config.action_tool_choice == "none"
+    assert state["values"]["action"]["response_instruction"] == "請依使用者情境回覆，必要時才請使用者確認下一步。"
