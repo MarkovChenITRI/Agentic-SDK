@@ -3,6 +3,7 @@
 __version__ = "0.1.0"
 
 from agentic_sdk.config import GateConfig, ModuleSpec, WorkflowConfig, build_workflow
+from agentic_sdk.core.events import ALL_STRUCTURED_FIELDS, DEFAULT_EVENTS_SCHEMA, default_events_schema
 from agentic_sdk.defaults import (
     DEFAULT_NO_MATCHING_ENTRIES_MESSAGE,
     DEFAULT_NO_RETRIEVED_CONTEXT_MESSAGE,
@@ -28,6 +29,7 @@ from agentic_sdk.core import (
     WorkflowAborted,
     WorkflowResult,
     WorkflowState,
+    WorkflowStream,
 )
 from agentic_sdk.memory import InMemoryStore, MemoryEntry, MemorySearchResult, MemoryStore, PersistentMemory
 
@@ -60,11 +62,14 @@ def __getattr__(name: str):
 
 __all__ = [
     "Attachment",
+    "ALL_STRUCTURED_FIELDS",
     "ConversationTurn",
     "ContextEntry",
     "ContextEntryType",
     "DirectAnswerAction",
+    "default_events_schema",
     "DEFAULT_NO_MATCHING_ENTRIES_MESSAGE",
+    "DEFAULT_EVENTS_SCHEMA",
     "DEFAULT_NO_RETRIEVED_CONTEXT_MESSAGE",
     "DEFAULT_RETRIEVED_CONTENT_KEY",
     "DEFAULT_SESSION_ID",
@@ -101,6 +106,7 @@ __all__ = [
     "WorkflowConfig",
     "WorkflowResult",
     "WorkflowState",
+    "WorkflowStream",
     "build_workflow",
     "__version__",
 ]

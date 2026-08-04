@@ -38,6 +38,12 @@ class MissingEndpointCredentials(ValueError):
         self.missing_envs = missing_envs
 
 
+class MissingEndpointBinding(ValueError):
+    def __init__(self, role_label: str) -> None:
+        super().__init__(f"{role_label} 尚未選擇模型 endpoint。請先完成部署選項設定。")
+        self.role_label = role_label
+
+
 def endpoint_options() -> list[dict[str, str]]:
     return [asdict(endpoint) for endpoint in _model_endpoints()]
 
@@ -55,6 +61,14 @@ def endpoint_state(python_source: str | None, selections: dict[str, str] | None)
     }
     missing_envs_by_role = {
         requirement.role: _missing_endpoint_envs(requirement.role, selected_endpoints[requirement.role])
+        for requirement in requirements
+    }
+    binding_missing_roles = {
+        requirement.role: selected_endpoints[requirement.role] is None
+        for requirement in requirements
+    }
+    credential_missing_roles = {
+        requirement.role: bool(missing_envs_by_role[requirement.role]) and not binding_missing_roles[requirement.role]
         for requirement in requirements
     }
     configured_roles = {
@@ -76,6 +90,8 @@ def endpoint_state(python_source: str | None, selections: dict[str, str] | None)
             for role, endpoint in selected_endpoints.items()
         },
         "missing_envs_by_role": missing_envs_by_role,
+        "binding_missing_roles": binding_missing_roles,
+        "credential_missing_roles": credential_missing_roles,
         "configured": all(configured_roles.values()) if requirements else True,
         "configured_roles": configured_roles,
     }
@@ -92,16 +108,16 @@ def normalize_endpoint_selections(python_source: str | None, selections: dict[st
         endpoints_by_id = _endpoints_by_id(_endpoint_options_for_role(requirement.role))
         if not endpoints_by_id:
             continue
-        default_endpoint_id = next(iter(endpoints_by_id))
-        endpoint_id = str(raw.get(requirement.role) or default_endpoint_id)
-        if endpoint_id not in endpoints_by_id:
-            endpoint_id = default_endpoint_id
-        normalized[requirement.role] = endpoint_id
+        endpoint_id = str(raw.get(requirement.role) or "")
+        if endpoint_id in endpoints_by_id:
+            normalized[requirement.role] = endpoint_id
     return normalized
 
 
 def endpoint_params_for_role(role: str, selections: dict[str, str] | None) -> dict[str, str]:
     endpoint = _endpoint_for_role(role, selections or {})
+    if endpoint is None:
+        raise MissingEndpointBinding(_role_label(role))
     missing_envs = _missing_endpoint_envs(role, endpoint)
     if missing_envs:
         raise MissingEndpointCredentials(_role_label(role), endpoint, missing_envs)
@@ -145,9 +161,7 @@ def _deployment_requirements(config: BuilderSourceConfig) -> list[OpenAIRequirem
 def _endpoint_for_role(role: str, selections: dict[str, str]) -> ModelEndpoint | None:
     endpoints_by_id = _endpoints_by_id(_endpoint_options_for_role(role))
     endpoint_id = selections.get(role, "")
-    if endpoint_id:
-        return endpoints_by_id.get(endpoint_id)
-    return next(iter(endpoints_by_id.values()), None)
+    return endpoints_by_id.get(endpoint_id)
 
 
 def _missing_endpoint_envs(role: str, endpoint: ModelEndpoint | None) -> list[str]:

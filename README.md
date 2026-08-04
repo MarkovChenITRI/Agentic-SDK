@@ -64,6 +64,8 @@ print(result.final_message)
 
 如果你之後用同一個 `session_id` 再次呼叫同一個 `Workflow`，新的使用者輸入與前一次 assistant 回覆都會保留在 `result.memory` 中。
 
+這段快速開始同時是 [00：跑出第一條 Agentic SDK Workflow](docs/tutorials/getting-started.md) 的可執行基準；完整的 00–07 學習順序見 [Notebook 教材總覽](docs/tutorials/index.md)。
+
 ### 2. 使用 OpenAI-compatible 生成回覆
 
 可搭配任何 OpenAI-compatible endpoint，例如 Azure AI Foundry、Ollama 或其他相容服務。
@@ -75,6 +77,10 @@ from agentic_sdk.modules import GenerativeAction, KeywordRetrieve, PassThroughPe
 workflow = Workflow(
     workflow_name="Foundry 回覆 Agent",
     description="用 OpenAI-compatible 模型整理檢索結果並生成自然語句回覆。",
+    events_schema={
+        "retrieve": {"label": "正在查找參考資料"},
+        "action": {"label": "正在準備回覆"},
+    },
     perceive=PassThroughPerceive(),
     retrieve=KeywordRetrieve(
         items=[
@@ -95,7 +101,54 @@ result = workflow.run("TSiP 是什麼？")
 print(result.final_message)
 ```
 
-### 3. 使用 ToolCallAction 產生 OpenAI 標準工具呼叫
+### 3. 觀察 workflow 與直接串流 Action 回覆
+
+沒有傳入 `events_schema` 時，Workflow 會使用 SDK 的完整預設觀測契約：所有執行到的 Perceive、Plan、Retrieve、Action、Reflect 都會送出 start／finish／abort stage event，標準 label 依序為「理解輸入」、「判斷工具順序」、「整理相關來源」、「準備輸出回覆」、「檢查回覆」；所有 LLM token delta 都會送出，且結構化 JSON 的每個欄位與巢狀值都會送出 `structured_field`。欄位值必須已是完整 JSON value，不會送出 partial JSON。
+
+傳入 `events_schema` 則是明確覆寫／限制：只有列出的 module 會送出 stage event，`fields` 只送出列出的 dot path；若明確要保留完整欄位觀測，可指定 `"*"`. 下例刻意只觀察部分欄位：
+
+```python
+events_schema = {
+    "perceive": {
+        "label": "理解輸入",
+        "fields": ["summary", "details.next_step"],
+    },
+    "plan": {
+        "label": "判斷工具順序",
+        "fields": ["thought", "next_module"],
+    },
+    "action": {"label": "準備輸出回覆"},
+}
+
+workflow = Workflow(
+    perceive=TextPerceive(api_key=API_KEY, base_url=BASE_URL, model=MODEL),
+    plan=NextStepPlan(api_key=API_KEY, base_url=BASE_URL, model=MODEL),
+    action=GenerativeAction(api_key=API_KEY, base_url=BASE_URL, model=MODEL),
+    events_schema=events_schema,
+)
+```
+
+`Workflow.stream(...)` 會直接迭代使用者可見的 Action text，不會輸出 Perceive、Plan 或 Reflect 的結構化 JSON。可串流的 Action 會即時產生 token；非串流 Action 會在完成時產生一次最終文字。完整迭代後可從 `stream.result` 取得 `WorkflowResult`：
+
+```python
+def on_event(event):
+    if event["type"] == "stage" and event["phase"] == "start":
+        print(f"\n【{event['module']}】{event['label']}")
+    elif event["type"] == "stage" and event["phase"] == "finish":
+        for item in event["fields"]:
+            print(f"\n{item['field']}：{item['value']}")
+
+
+stream = workflow.stream("TSiP 是什麼？", event_callback=on_event)
+for delta in stream:
+    print(delta, end="", flush=True)
+
+result = stream.result
+```
+
+`run(..., event_callback=on_event)` 與 `stream(..., event_callback=on_event)` 使用同一份預設或自訂 `events_schema`、送出相同的 `stage`、`token_delta` 與 `structured_field` 事件。`stream()` 接受與 `run()` 相同的輸入、session、memory 與 attachment 參數。若 callback 自己輸出 `token_delta`，預設 iterator 不會再 yield Action token，避免重複輸出；此時只要迭代 stream 以等待完成即可。若確實需要兩條通道，設定 `yield_action_deltas=True`。`events_schema` 是唯一的事件設定入口。
+
+### 4. 使用 ToolCallAction 產生 OpenAI 標準工具呼叫
 
 `ToolCallAction` 使用 OpenAI SDK 的 `tools` / `tool_choice` 標準格式，並把模型回傳的 `message.tool_calls` 正規化到 `result.entities["latest_tool_calls"]`。
 
@@ -155,7 +208,7 @@ print(result.entities["latest_tool_calls"])
 
 SDK 只負責產生與保存標準 tool call 結果；真正呼叫外部 API、呈現確認面板或提交表單，可以由應用層或 Playground Runner 承接。
 
-### 4. 自訂 Action
+### 5. 自訂 Action
 
 Action 也可以是一般 Python class。自訂 Action 會收到 `WorkflowState`，可以透過 `state.lookup(...)` 讀取前面模組產生的資料。
 

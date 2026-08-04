@@ -14,6 +14,8 @@ from playground.services.source_builder import build_default_python_source
 
 _AUTH_VERIFY_PATH = "/api/playground/auth/verify"
 _HANDOFF_VERIFY_PATH = "/api/playground/handoff/verify"
+_HANDOFF_EXCHANGE_PATH = "/api/playground/handoff/exchange"
+_SESSION_REFRESH_PATH = "/api/playground/session/refresh"
 _AGENTS_PATH = "/api/playground/agents"
 _CONFIG_LOAD_PATH = "/api/playground/agents/{agent_id}/config/load"
 _PUBLIC_CONFIG_LOAD_PATH = "/api/playground/agents/{agent_id}/config/public/load"
@@ -31,6 +33,7 @@ class AiHubCredentials:
     token: str = ""
     api_base_url: str = ""
     display_name: str = ""
+    expires_at: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -42,12 +45,15 @@ class _CredentialTicket:
 _credential_tickets: dict[str, _CredentialTicket] = {}
 
 
-def issue_credential_ticket(username: str, password: str, *, token: str = "", api_base_url: str = "", display_name: str = "") -> str:
+def issue_credential_ticket(username: str, password: str, *, token: str = "", api_base_url: str = "", display_name: str = "", expires_at: float = 0.0) -> str:
     _cleanup_expired_tickets()
     ticket = token_urlsafe(32)
+    local_expires_at = time() + _credential_ttl_seconds()
+    if expires_at > time():
+        local_expires_at = min(local_expires_at, expires_at)
     _credential_tickets[ticket] = _CredentialTicket(
-        credentials=AiHubCredentials(username=username.strip(), password=password, token=token, api_base_url=api_base_url.strip().rstrip("/"), display_name=display_name.strip()),
-        expires_at=time() + _credential_ttl_seconds(),
+        credentials=AiHubCredentials(username=username.strip(), password=password, token=token, api_base_url=api_base_url.strip().rstrip("/"), display_name=display_name.strip(), expires_at=expires_at),
+        expires_at=local_expires_at,
     )
     return ticket
 
@@ -128,6 +134,68 @@ def verify_handoff_token(token: str, *, api_base_url: str | None = None, origin:
     if not username:
         return None
     return {"username": username, "agent_id": agent_id, "display_name": str(payload.get("display_name") or "").strip()}
+
+
+def exchange_handoff_token(token: str, *, api_base_url: str | None = None, origin: str | None = None) -> AiHubCredentials | None:
+    resolved_token = str(token or "").strip()
+    base_url = (str(api_base_url or "").strip().rstrip("/") or _ai_hub_base_url())
+    if not resolved_token or not base_url:
+        return None
+    try:
+        response = httpx.post(
+            f"{base_url}{_HANDOFF_EXCHANGE_PATH}",
+            json={"token": resolved_token},
+            headers=_json_headers(origin),
+            timeout=_request_timeout_seconds(),
+        )
+        if response.status_code >= 400:
+            return None
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    username = str(payload.get("username") or "").strip()
+    session_token = str(payload.get("session_token") or "").strip()
+    if not username or not session_token:
+        return None
+    return AiHubCredentials(
+        username=username,
+        password="",
+        token=session_token,
+        api_base_url=base_url,
+        display_name=str(payload.get("display_name") or "").strip(),
+        expires_at=_parse_expiry_timestamp(payload.get("expires_at")),
+    )
+
+
+def refresh_playground_session(credentials: AiHubCredentials, *, origin: str | None = None) -> AiHubCredentials | None:
+    if not credentials.token:
+        return None
+    base_url = _base_url_for_credentials(credentials)
+    if not base_url:
+        return None
+    try:
+        response = httpx.post(
+            f"{base_url}{_SESSION_REFRESH_PATH}",
+            json={},
+            headers=_auth_headers(credentials, origin),
+            timeout=_request_timeout_seconds(),
+        )
+        if response.status_code >= 400:
+            return None
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    session_token = str(payload.get("session_token") or "").strip()
+    if not session_token:
+        return None
+    return AiHubCredentials(
+        username=str(payload.get("username") or credentials.username).strip(),
+        password="",
+        token=session_token,
+        api_base_url=base_url,
+        display_name=str(payload.get("display_name") or credentials.display_name).strip(),
+        expires_at=_parse_expiry_timestamp(payload.get("expires_at")),
+    )
 
 
 def bridge_credentials(token: str | None, *, api_base_url: str | None = None) -> AiHubCredentials | None:
@@ -229,6 +297,7 @@ def load_config(
         "workflow_name": payload.get("workflow_name") or payload.get("agent_name") or "",
         "description": payload.get("description") or "",
         "python_source": payload.get("python_source") or build_default_python_source(),
+        "endpoint_bindings": _endpoint_bindings_from_payload(payload),
         "exported_at": payload.get("playground_exported_at") or payload.get("exported_at") or "",
         "integration_status": "aihub",
         "requires_real_aihub_api": False,
@@ -273,6 +342,7 @@ def load_public_config(
         "workflow_name": response_payload.get("workflow_name") or response_payload.get("agent_name") or "",
         "description": response_payload.get("description") or "",
         "python_source": response_payload.get("python_source") or build_default_python_source(),
+        "endpoint_bindings": _endpoint_bindings_from_payload(response_payload),
         "exported_at": response_payload.get("playground_exported_at") or response_payload.get("exported_at") or "",
         "integration_status": "aihub",
         "access_mode": "public_readonly",
@@ -286,6 +356,7 @@ def save_config(
     *,
     workflow_name: str | None = None,
     description: str | None = None,
+    endpoint_bindings: dict[str, str] | None = None,
     credentials: AiHubCredentials | None = None,
     origin: str | None = None,
 ) -> dict[str, object]:
@@ -307,6 +378,7 @@ def save_config(
         "python_source": python_source,
         "workflow_name": resolved_workflow_name,
         "description": resolved_description,
+        "endpoint_bindings": endpoint_bindings or {},
     }
     payload.update(_credential_payload(credentials))
     resolved_agent_id = (agent_id or "").strip()
@@ -340,10 +412,22 @@ def save_config(
         "agent_id": payload.get("agent_id") or resolved_agent_id,
         "workflow_name": payload.get("workflow_name") or payload.get("agent_name") or resolved_workflow_name,
         "description": payload.get("description") or resolved_description,
+        "endpoint_bindings": _endpoint_bindings_from_payload(payload),
         "saved": bool(saved),
         "exported_at": payload.get("playground_exported_at") or payload.get("exported_at") or payload.get("saved_at") or datetime.now(timezone.utc).isoformat(),
         "integration_status": "aihub",
         "requires_real_aihub_api": False,
+    }
+
+
+def _endpoint_bindings_from_payload(payload: object) -> dict[str, str]:
+    raw_bindings = payload.get("endpoint_bindings") if isinstance(payload, dict) else None
+    if not isinstance(raw_bindings, dict):
+        return {}
+    return {
+        str(role): str(endpoint_id)
+        for role, endpoint_id in raw_bindings.items()
+        if isinstance(role, str) and isinstance(endpoint_id, str)
     }
 
 
@@ -456,7 +540,7 @@ def _bundle_download_headers(credentials: AiHubCredentials, origin: str | None) 
 
 def _credential_payload(credentials: AiHubCredentials) -> dict[str, str]:
     if credentials.token:
-        return {"token": credentials.token}
+        return {}
     return {"username": credentials.username, "password": credentials.password}
 
 
@@ -489,6 +573,8 @@ def _save_error(message: str, code: str, *, agent_id: str | None = None, status_
         result["agent_id"] = agent_id
     if status_code is not None:
         result["status_code"] = status_code
+        if status_code == 401:
+            result["reauthentication_required"] = True
     return result
 
 
@@ -522,3 +608,11 @@ def _cleanup_expired_tickets() -> None:
     for ticket, stored in list(_credential_tickets.items()):
         if stored.expires_at < now:
             _credential_tickets.pop(ticket, None)
+
+
+def _parse_expiry_timestamp(value: object) -> float:
+    try:
+        timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return timestamp.timestamp()
+    except (TypeError, ValueError):
+        return 0.0

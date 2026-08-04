@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from io import BytesIO
 
-from agentic_sdk.core import WorkflowResult
+from agentic_sdk.core import WorkflowResult, WorkflowState
+from agentic_sdk.core.events import default_events_schema
 from playground.app import create_app
 from playground.routes import builder as builder_routes
 from playground.routes import runner as runner_routes
+from playground.services import model_endpoints
 from playground.services import runner_service
 from playground.services.source_builder import build_default_python_source, build_python_source_from_builder_choice, config_from_source
 from playground.services.workflow_reachability import reachable_workflow_roles
@@ -39,6 +42,19 @@ def test_builder_choices_map_to_runtime_modules():
     assert interactive.action_module == "ToolCallAction"
     assert "action" in reachable_workflow_roles(free_text)
     assert "action" in reachable_workflow_roles(interactive)
+
+
+def test_endpoint_binding_missing_is_distinct_from_missing_credentials(monkeypatch):
+    monkeypatch.setenv("PLAYGROUND_FAST_MODEL", "gpt-test")
+    monkeypatch.setenv("PLAYGROUND_FAST_BASE_URL", "https://models.example")
+    monkeypatch.setenv("PLAYGROUND_FAST_API_KEY", "test-key")
+
+    with __import__("pytest").raises(model_endpoints.MissingEndpointBinding):
+        model_endpoints.endpoint_params_for_role("perceive", {})
+
+    monkeypatch.delenv("PLAYGROUND_FAST_API_KEY")
+    with __import__("pytest").raises(model_endpoints.MissingEndpointCredentials):
+        model_endpoints.endpoint_params_for_role("perceive", {"perceive": "playground-fast"})
 
 
 def test_interactive_action_contract_roundtrips_to_boolean_tool_schema():
@@ -268,6 +284,30 @@ def test_source_preview_roundtrip_preserves_current_draft():
     assert preserved_config.perceive_module == "TextPerceive"
 
 
+def test_runner_starter_questions_use_session_metadata_not_python_source():
+    app = create_app()
+    app.config.update(TESTING=True)
+    source = build_python_source_from_builder_choice("memory_type", {"starter_questions": "如何上架？"}, build_default_python_source())
+
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["python_source"] = source
+            session["builder_form_state"] = {
+                "choices": {},
+                "values": {"memory_type": {"starter_questions": "如何上架？\n如何部署？"}},
+            }
+
+        source_response = client.get("/playground/source/preview")
+        runner_response = client.get("/playground/run")
+
+    assert source_response.status_code == 200
+    assert "RUNNER_CONFIG" not in source_response.get_data(as_text=True)
+    assert "starter_questions" not in source_response.get_data(as_text=True)
+    assert runner_response.status_code == 200
+    assert "如何上架？" in runner_response.get_data(as_text=True)
+    assert "如何部署？" in runner_response.get_data(as_text=True)
+
+
 def test_streaming_execute_route_forwards_attachment_payloads(monkeypatch):
     app = create_app()
     app.config.update(TESTING=True)
@@ -312,6 +352,119 @@ def test_streaming_execute_route_forwards_attachment_payloads(monkeypatch):
 
     assert response.status_code == 200
     assert captured["attachments"][0]["content"] == "data:image/png;base64,abc"
+
+
+def test_streaming_execute_route_forwards_finish_fields_as_ndjson_process_events(monkeypatch):
+    app = create_app()
+    app.config.update(TESTING=True)
+    schema = default_events_schema()
+
+    def standard_event(module, phase, **extra):
+        return {
+            "type": "stage",
+            "phase": phase,
+            "status": "running" if phase == "start" else "done",
+            "module": module,
+            "label": schema[module]["label"],
+            "schema": schema[module],
+            "metadata": {
+                "schema_label": schema[module]["label"],
+                "schema_fields": list(schema[module]["fields"]),
+                "schema_metadata": dict(schema[module]["metadata"]),
+            },
+            "visit_id": f"workflow-1:{module}:1",
+            **extra,
+        }
+
+    class FakeWorkflow:
+        def run(self, _message, *, event_callback=None, **_kwargs):
+            assert event_callback is not None
+            state = WorkflowState(user_message="測試輸入", workflow_id="workflow-1", session_id="session-1")
+            events = [
+                standard_event("perceive", "start"),
+                standard_event("perceive", "finish", fields=[{"field": "summary", "value": '包含 "引號" 的理解'}], state=state),
+                standard_event("plan", "start"),
+                standard_event("plan", "finish", fields=[{"field": "thought", "value": "需要先整理來源"}], state=state),
+            ]
+            for event in events:
+                event_callback(event)
+            return WorkflowResult(
+                workflow_id="workflow-1",
+                session_id="session-1",
+                final_message="完成",
+                visit_counts={"perceive": 1, "plan": 1, "action": 1},
+            )
+
+    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["python_source"] = build_default_python_source()
+        response = client.post(
+            "/playground/run/execute/stream",
+            json={"message": "測試輸入"},
+        )
+        lines = [
+            json.loads(line)
+            for line in response.get_data(as_text=True).splitlines()
+            if line.strip()
+        ]
+
+    process_events = [item["event"] for item in lines if item["type"] == "process"]
+    final = next(item["result"] for item in lines if item["type"] == "final")
+
+    assert response.status_code == 200
+    assert [event["description"] for event in process_events if event["role"] == "perceive"] == [
+        "正在讀取使用者輸入，整理成後續步驟可使用的內容。",
+        '目前理解為：包含 "引號" 的理解',
+    ]
+    assert [event["description"] for event in process_events if event["role"] == "plan"] == [
+        "正在判斷這次需要先整理來源，或可以直接準備回覆。",
+        "判斷依據：需要先整理來源",
+    ]
+    assert final["process_events"] == process_events
+
+
+def test_runner_process_event_rejects_legacy_stage_event_without_schema():
+    config = config_from_source(build_default_python_source())
+
+    try:
+        runner_service._process_event_for_workflow_event(
+            config,
+            {
+                "type": "stage",
+                "phase": "start",
+                "status": "running",
+                "module": "perceive",
+                "label": "理解輸入",
+            },
+        )
+    except TypeError as exc:
+        assert "schema" in str(exc)
+    else:
+        raise AssertionError("legacy stage events without schema must be rejected")
+
+
+def test_runner_process_event_rejects_legacy_stage_alias_without_module():
+    config = config_from_source(build_default_python_source())
+    schema = default_events_schema()["perceive"]
+
+    try:
+        runner_service._process_event_for_workflow_event(
+            config,
+            {
+                "type": "stage",
+                "phase": "start",
+                "status": "running",
+                "stage": "perceive",
+                "label": "理解輸入",
+                "schema": schema,
+            },
+        )
+    except ValueError as exc:
+        assert "module" in str(exc)
+    else:
+        raise AssertionError("legacy stage alias events without module must be rejected")
 
 
 def test_tool_call_panel_does_not_fallback_for_information_intent(monkeypatch):

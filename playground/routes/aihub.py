@@ -3,7 +3,7 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, request, session
 
 from playground.services.aihub_bundle_flow import restore_runtime_bundle, save_runtime_bundle
-from playground.services.aihub_client import credentials_for_ticket, issue_credential_ticket, list_agents, load_config, save_config, verify_credentials, verify_identity
+from playground.services.aihub_client import credentials_for_ticket, issue_credential_ticket, list_agents, load_config, refresh_playground_session, save_config, verify_credentials, verify_identity
 from playground.services.model_endpoints import normalize_endpoint_selections
 from playground.services.runner_service import prepare_semantic_runtime
 from playground.services.security import is_allowed_origin
@@ -39,6 +39,7 @@ def load_aihub_config():
     session["mode"] = "aihub_editable" if editable else "aihub_readonly"
     session["agent_id"] = loaded["agent_id"]
     session["python_source"] = loaded["python_source"]
+    session["endpoint_bindings"] = loaded.get("endpoint_bindings") or {}
     bundle_result = _restore_bundle_for_session(str(loaded["agent_id"]), credentials)
     if _semantic_bundle_required_for_source(loaded.get("python_source")) and not bundle_result.get("bundle_restored"):
         return jsonify({**loaded, **bundle_result, "loaded": False, "error": _semantic_bundle_restore_error(bundle_result), "error_code": bundle_result.get("bundle_error_code") or "semantic_bundle_not_restored"}), 502
@@ -76,6 +77,7 @@ def reload_aihub_config():
     session["agent_id"] = result["agent_id"]
     session["agent_name"] = result.get("agent_name") or ""
     session["python_source"] = result["python_source"]
+    session["endpoint_bindings"] = result.get("endpoint_bindings") or {}
     bundle_result = _restore_bundle_for_session(str(result["agent_id"]), credentials)
     if _semantic_bundle_required_for_source(result.get("python_source")) and not bundle_result.get("bundle_restored"):
         return jsonify({**result, **bundle_result, "loaded": False, "error": _semantic_bundle_restore_error(bundle_result), "error_code": bundle_result.get("bundle_error_code") or "semantic_bundle_not_restored"}), 502
@@ -95,7 +97,7 @@ def save_aihub_config():
 
     credentials = credentials_for_ticket(session.get("ai_hub_credential_ticket"))
     if not credentials:
-        return jsonify({"saved": False, "error": "AI Hub login is required before saving."}), 401
+        return jsonify({"saved": False, "error": "AI Hub login is required before saving.", "reauthentication_required": True}), 401
 
     python_source = payload.get("python_source") or session.get("python_source")
     if not python_source:
@@ -106,12 +108,21 @@ def save_aihub_config():
     workflow_config = config_from_source(python_source)
     workflow_name = workflow_summary.name
     description = workflow_config.task_goal or ""
-    result = save_config(agent_id, python_source, workflow_name=workflow_name, description=description, credentials=credentials, origin=request.host_url)
+    result = save_config(
+        agent_id,
+        python_source,
+        workflow_name=workflow_name,
+        description=description,
+        endpoint_bindings=session.get("endpoint_bindings") or {},
+        credentials=credentials,
+        origin=request.host_url,
+    )
     if result.get("saved"):
         if result.get("agent_id"):
             session["agent_id"] = result["agent_id"]
         if result.get("workflow_name"):
             session["agent_name"] = result["workflow_name"]
+        session["endpoint_bindings"] = result.get("endpoint_bindings") or {}
         session["source_origin"] = "aihub_loaded"
         semantic_ready = _prepare_semantic_runtime_for_save(python_source) if _semantic_bundle_required(workflow_config) else {"prepared": False}
         if semantic_ready.get("error"):
@@ -166,6 +177,30 @@ def login_aihub_session():
     return jsonify({"authenticated": True, "username": identity["username"], "display_name": identity.get("display_name", ""), "redirect_url": "/playground/run"})
 
 
+@aihub_bp.post("/session/refresh")
+def refresh_aihub_session():
+    if not is_allowed_origin(request):
+        return jsonify({"refreshed": False, "error": "Origin is not allowed for AI Hub config access."}), 403
+
+    credentials = credentials_for_ticket(session.get("ai_hub_credential_ticket"))
+    if not credentials or not credentials.token:
+        return jsonify({"refreshed": False, "reauthentication_required": True}), 401
+    refreshed = refresh_playground_session(credentials, origin=request.host_url)
+    if not refreshed:
+        return jsonify({"refreshed": False, "reauthentication_required": True}), 401
+    session["ai_hub_username"] = refreshed.username
+    session["ai_hub_display_name"] = refreshed.display_name
+    session["ai_hub_credential_ticket"] = issue_credential_ticket(
+        refreshed.username,
+        refreshed.password,
+        token=refreshed.token,
+        api_base_url=refreshed.api_base_url,
+        display_name=refreshed.display_name,
+        expires_at=refreshed.expires_at,
+    )
+    return jsonify({"refreshed": True, "expires_at": refreshed.expires_at})
+
+
 def _verified_identity(username: str, password: str) -> dict[str, str] | None:
     identity = verify_identity(username, password, origin=request.host_url)
     if identity:
@@ -205,8 +240,8 @@ def _prepare_semantic_runtime_for_save(python_source: str) -> dict[str, object]:
     upload_id = session.get("builder_upload_id")
     if not isinstance(upload_id, str) or not upload_id.strip():
         return {"error": "SemanticRetrieve knowledge files are not available in this Playground session."}
-    endpoint_selections = normalize_endpoint_selections(python_source, session.get("runner_endpoint_selections") or {})
-    session["runner_endpoint_selections"] = endpoint_selections
+    endpoint_selections = normalize_endpoint_selections(python_source, session.get("endpoint_bindings") or {})
+    session["endpoint_bindings"] = endpoint_selections
     try:
         return prepare_semantic_runtime(
             python_source,

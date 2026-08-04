@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
-from agentic_sdk.llm import chat_json, require_model, resolve_openai_client
+from agentic_sdk.llm import chat_stream_json, require_model, resolve_openai_client
 from agentic_sdk.memory import MemoryEntry
 from agentic_sdk.memory.in_context import build_module_messages
 
@@ -65,7 +65,23 @@ class TextPerceive:
 
     def __call__(self, state: WorkflowState) -> ModuleOutput:
         message = state.latest_user_message().strip()
-        response = chat_json(self._client, model=self._model, messages=self._messages(state))
+        response = chat_stream_json(
+            self._client,
+            model=self._model,
+            messages=self._messages(state),
+            on_delta=lambda content: state.emit_token_delta(
+                self.name,
+                content,
+                metadata={"model": self._model, "structured": True},
+            ),
+            structured_fields=state.structured_fields_for(self.name),
+            on_field=lambda field, value: state.emit_structured_field(
+                self.name,
+                field,
+                value,
+                metadata={"model": self._model, "structured": True},
+            ),
+        )
         parsed = response.as_json()
         intent = str(parsed.get("intent", "general"))
         summary = str(parsed.get("summary", message))
@@ -115,7 +131,7 @@ class TextImagePerceive(TextPerceive):
         self,
         welcome_message: str = "",
         options: list[dict] | None = None,
-        importance: float = 1.0,
+        importance: float = 1.5,
         *,
         image_instruction: str = "",
         api_key: str | None = None,
