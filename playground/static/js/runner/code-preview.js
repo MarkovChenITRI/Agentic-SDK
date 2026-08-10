@@ -13,16 +13,22 @@ export function bindCodePreview(toggles, modal) {
   let lastToggle = null;
   const customScrollbar = bindCustomScrollbar(code, scrollbar, scrollbarThumb);
 
-  async function open(event) {
+  async function open(event, toggle) {
     event.preventDefault();
-    lastToggle = event.currentTarget;
+    lastToggle = toggle;
     modal.hidden = false;
     modal.classList.add("open");
     modal.dataset.open = "true";
-    code?.replaceChildren();
+    if (code) {
+      const loading = document.createElement("p");
+      loading.textContent = "正在載入程式碼...";
+      code.replaceChildren(loading);
+    }
     closeButton?.focus();
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
     try {
-      const response = await fetch("/playground/source/preview", { cache: "no-store" });
+      const response = await fetch("/playground/source/preview", { cache: "no-store", signal: controller.signal });
       if (!response.ok) {
         throw new Error(`source preview failed with ${response.status}`);
       }
@@ -34,9 +40,11 @@ export function bindCodePreview(toggles, modal) {
     } catch (error) {
       if (code) {
         const paragraph = document.createElement("p");
-        paragraph.textContent = "程式碼載入失敗，請關閉後重新預覽。";
+        paragraph.textContent = error.name === "AbortError" ? "程式碼載入逾時，請關閉後重新預覽。" : "程式碼載入失敗，請關閉後重新預覽。";
         code.replaceChildren(paragraph);
       }
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   }
 
@@ -48,7 +56,12 @@ export function bindCodePreview(toggles, modal) {
     lastToggle?.focus();
   }
 
-  toggles.forEach((toggle) => toggle.addEventListener("click", open));
+  document.addEventListener("click", (event) => {
+    const toggle = event.target.closest?.("[data-code-preview-open]");
+    if (toggle && toggles instanceof NodeList && Array.from(toggles).includes(toggle)) {
+      open(event, toggle);
+    }
+  });
   closeButtons.forEach((button) => button.addEventListener("click", close));
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !modal.hidden) {

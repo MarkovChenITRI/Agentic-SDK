@@ -3,7 +3,7 @@
 import json
 from typing import Any
 
-from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
+from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, ModuleOutput, WorkflowAborted, WorkflowState
 from agentic_sdk.llm import chat_stream_json, require_model, resolve_openai_client
 from agentic_sdk.memory import MemoryEntry
 from agentic_sdk.memory.in_context import build_module_messages
@@ -12,7 +12,14 @@ from agentic_sdk.memory.in_context import build_module_messages
 _SYSTEM_PROMPT = (
     "PERCEIVE. Understand the user message and return JSON with fields "
     "intent, summary, and details. Use a concise snake_case English intent. "
-    "When fields_to_notice is provided, use those names in details when possible."
+    "When fields_to_notice is provided, use those names in details when possible. "
+    "For image-derived measurements, only report a value as a named fact when both its label "
+    "and value are legible. Never infer a label from a value's position or surrounding layout; "
+    "record it as uncertain when either is unclear. Never treat an unmarked comparison chart, "
+    "legend, or example category as the user's selected classification. A category name appearing "
+    "beside a foot illustration is only an example, even when its text is legible. Report a left or "
+    "right foot classification only when the image explicitly identifies that user's foot side and "
+    "shows a selected result or result field; otherwise state that the classification is uncertain."
 )
 
 
@@ -65,23 +72,26 @@ class TextPerceive:
 
     def __call__(self, state: WorkflowState) -> ModuleOutput:
         message = state.latest_user_message().strip()
-        response = chat_stream_json(
-            self._client,
-            model=self._model,
-            messages=self._messages(state),
-            on_delta=lambda content: state.emit_token_delta(
-                self.name,
-                content,
-                metadata={"model": self._model, "structured": True},
-            ),
-            structured_fields=state.structured_fields_for(self.name),
-            on_field=lambda field, value: state.emit_structured_field(
-                self.name,
-                field,
-                value,
-                metadata={"model": self._model, "structured": True},
-            ),
-        )
+        try:
+            response = chat_stream_json(
+                self._client,
+                model=self._model,
+                messages=self._messages(state),
+                on_delta=lambda content: state.emit_token_delta(
+                    self.name,
+                    content,
+                    metadata={"model": self._model, "structured": True},
+                ),
+                structured_fields=state.structured_fields_for(self.name),
+                on_field=lambda field, value: state.emit_structured_field(
+                    self.name,
+                    field,
+                    value,
+                    metadata={"model": self._model, "structured": True},
+                ),
+            )
+        except Exception as exc:
+            _abort_for_provider_failure(state, self.name, exc)
         parsed = response.as_json()
         intent = str(parsed.get("intent", "general"))
         summary = str(parsed.get("summary", message))
@@ -179,3 +189,16 @@ class TextImagePerceive(TextPerceive):
             latest_user_message=self._user_prompt(state),
             latest_user_attachments=state.attachments,
         )
+
+
+def _abort_for_provider_failure(state: WorkflowState, stage: str, exc: Exception) -> None:
+    message = "Unable to understand the input right now."
+    state.last_workflow_error = {"stage": stage, "message": message}
+    state.append(
+        ContextEntry(
+            type=ContextEntryType.PERCEIVED,
+            content=f"error:{type(exc).__name__}",
+            metadata={"ok": False, "stage": stage, "error_type": type(exc).__name__},
+        )
+    )
+    raise WorkflowAborted(message) from exc

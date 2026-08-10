@@ -3,12 +3,21 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, request, session
 
 from playground.services.aihub_bundle_flow import restore_runtime_bundle, save_runtime_bundle
-from playground.services.aihub_client import credentials_for_ticket, issue_credential_ticket, list_agents, load_config, refresh_playground_session, save_config, verify_credentials, verify_identity
+from playground.services.aihub_client import credentials_for_ticket, issue_credential_ticket, list_agents, load_config, refresh_playground_session, save_contract_v2, verify_credentials, verify_identity
+from playground.services.aihub_session import active_credentials, reauthentication_payload
 from playground.services.model_endpoints import normalize_endpoint_selections
 from playground.services.runner_service import prepare_semantic_runtime
 from playground.services.security import is_allowed_origin
 from playground.services.semantic_runtime import runtime_root, source_files_dir
-from playground.services.source_builder import config_from_source, get_workflow_summary, semantic_bundle_required_from_source
+from playground.services.source_builder import semantic_bundle_required_from_source
+from playground.services.workflow_spec import (
+    compile_python_source,
+    default_runner_presentation,
+    hash_spec,
+    semantic_bundle_required,
+    validate_runner_presentation,
+    validate_spec,
+)
 
 
 aihub_bp = Blueprint("aihub", __name__, url_prefix="/playground/aihub")
@@ -27,9 +36,9 @@ def load_aihub_config():
         return jsonify({"loaded": False, "error": "Origin is not allowed for AI Hub config access."}), 403
 
     payload = request.get_json(silent=True) or {}
-    credentials = credentials_for_ticket(session.get("ai_hub_credential_ticket"))
+    credentials = active_credentials()
     if not credentials:
-        return jsonify({"loaded": False, "error": "AI Hub login is required before loading."}), 401
+        return jsonify(reauthentication_payload("load", loaded=False)), 401
 
     loaded = load_config(payload.get("agent_id") or session.get("agent_id"), credentials=credentials, origin=request.host_url)
     if not loaded.get("loaded"):
@@ -40,6 +49,7 @@ def load_aihub_config():
     session["agent_id"] = loaded["agent_id"]
     session["python_source"] = loaded["python_source"]
     session["endpoint_bindings"] = loaded.get("endpoint_bindings") or {}
+    _load_v2_contract_into_session(loaded)
     bundle_result = _restore_bundle_for_session(str(loaded["agent_id"]), credentials)
     if _semantic_bundle_required_for_source(loaded.get("python_source")) and not bundle_result.get("bundle_restored"):
         return jsonify({**loaded, **bundle_result, "loaded": False, "error": _semantic_bundle_restore_error(bundle_result), "error_code": bundle_result.get("bundle_error_code") or "semantic_bundle_not_restored"}), 502
@@ -52,9 +62,9 @@ def list_aihub_agents():
     if not is_allowed_origin(request):
         return jsonify({"loaded": False, "error": "Origin is not allowed for AI Hub agent access."}), 403
 
-    credentials = credentials_for_ticket(session.get("ai_hub_credential_ticket"))
+    credentials = active_credentials()
     if not credentials:
-        return jsonify({"loaded": False, "error": "AI Hub login is required before listing agents."}), 401
+        return jsonify(reauthentication_payload("list_agents", loaded=False)), 401
 
     result = list_agents(credentials=credentials, origin=request.host_url)
     return jsonify(result), 200 if result.get("loaded") else 502
@@ -65,9 +75,9 @@ def reload_aihub_config():
     if not is_allowed_origin(request):
         return jsonify({"loaded": False, "error": "Origin is not allowed for AI Hub config access."}), 403
 
-    credentials = credentials_for_ticket(session.get("ai_hub_credential_ticket"))
+    credentials = active_credentials()
     if not credentials:
-        return jsonify({"loaded": False, "error": "AI Hub login is required before loading."}), 401
+        return jsonify(reauthentication_payload("reload", loaded=False)), 401
 
     result = load_config(session.get("agent_id"), credentials=credentials, origin=request.host_url)
     if not result.get("loaded"):
@@ -78,6 +88,7 @@ def reload_aihub_config():
     session["agent_name"] = result.get("agent_name") or ""
     session["python_source"] = result["python_source"]
     session["endpoint_bindings"] = result.get("endpoint_bindings") or {}
+    _load_v2_contract_into_session(result)
     bundle_result = _restore_bundle_for_session(str(result["agent_id"]), credentials)
     if _semantic_bundle_required_for_source(result.get("python_source")) and not bundle_result.get("bundle_restored"):
         return jsonify({**result, **bundle_result, "loaded": False, "error": _semantic_bundle_restore_error(bundle_result), "error_code": bundle_result.get("bundle_error_code") or "semantic_bundle_not_restored"}), 502
@@ -95,24 +106,28 @@ def save_aihub_config():
     if session.get("mode") not in {"manual_auth", "aihub_editable"}:
         return jsonify({"saved": False, "error": "Current mode cannot save to AI Hub."}), 403
 
-    credentials = credentials_for_ticket(session.get("ai_hub_credential_ticket"))
+    credentials = active_credentials()
     if not credentials:
-        return jsonify({"saved": False, "error": "AI Hub login is required before saving.", "reauthentication_required": True}), 401
-
-    python_source = payload.get("python_source") or session.get("python_source")
-    if not python_source:
-        return jsonify({"saved": False, "error": "No Python source is available to save."}), 400
+        return jsonify(reauthentication_payload("save", saved=False)), 401
 
     agent_id = payload.get("agent_id") or session.get("agent_id")
-    workflow_summary = get_workflow_summary(python_source)
-    workflow_config = config_from_source(python_source)
-    workflow_name = workflow_summary.name
-    description = workflow_config.task_goal or ""
-    result = save_config(
+
+    spec = session.get("workflow_spec")
+    if not isinstance(spec, dict) or spec.get("version") != "2":
+        return jsonify({"saved": False, "error": "Workflow v2 contract is required before saving to AI Hub."}), 409
+
+    python_source = compile_python_source(spec)
+    semantic_ready = _prepare_semantic_runtime_for_save(python_source) if semantic_bundle_required(spec, builder_upload_id=session.get("builder_upload_id") if isinstance(session.get("builder_upload_id"), str) else None) else {"prepared": False}
+    if semantic_ready.get("error"):
+        return jsonify({"saved": False, "bundle_saved": False, "error": semantic_ready["error"], "error_code": "semantic_bundle_not_prepared"}), 409
+    result = save_contract_v2(
         agent_id,
-        python_source,
-        workflow_name=workflow_name,
-        description=description,
+        spec,
+        runner_presentation=session.get("runner_presentation") if isinstance(session.get("runner_presentation"), dict) else None,
+        generated_source=python_source,
+        contract_hash=hash_spec(spec),
+        workflow_name=str(spec.get("workflow_name") or ""),
+        description=str(spec.get("description") or ""),
         endpoint_bindings=session.get("endpoint_bindings") or {},
         credentials=credentials,
         origin=request.host_url,
@@ -124,27 +139,17 @@ def save_aihub_config():
             session["agent_name"] = result["workflow_name"]
         session["endpoint_bindings"] = result.get("endpoint_bindings") or {}
         session["source_origin"] = "aihub_loaded"
-        semantic_ready = _prepare_semantic_runtime_for_save(python_source) if _semantic_bundle_required(workflow_config) else {"prepared": False}
-        if semantic_ready.get("error"):
-            result["config_saved"] = True
-            result["saved"] = False
-            result["bundle_saved"] = False
-            result["bundle_error"] = semantic_ready["error"]
-            result["error"] = semantic_ready["error"]
-            result["error_code"] = "semantic_bundle_not_prepared"
-            session["last_aihub_save"] = result
-            return jsonify(result), 502
         bundle_result = save_runtime_bundle(
             agent_id=str(result.get("agent_id") or agent_id or ""),
             credentials=credentials,
             origin=request.host_url,
             python_source=python_source,
-            workflow_name=workflow_name,
-            description=description,
+            workflow_name=str(spec.get("workflow_name") or ""),
+            description=str(spec.get("description") or ""),
             builder_upload_id=session.get("builder_upload_id") if isinstance(session.get("builder_upload_id"), str) else None,
         )
         result = {**result, **bundle_result}
-        if _semantic_bundle_required(workflow_config) and not bundle_result.get("bundle_saved"):
+        if semantic_bundle_required(spec) and not bundle_result.get("bundle_saved"):
             result["config_saved"] = True
             result["saved"] = False
             result["error"] = bundle_result.get("bundle_error") or "SemanticRetrieve knowledge bundle was not saved."
@@ -173,7 +178,6 @@ def login_aihub_session():
     session["ai_hub_username"] = identity["username"]
     session["ai_hub_display_name"] = identity.get("display_name", "")
     session["ai_hub_credential_ticket"] = issue_credential_ticket(identity["username"], password, display_name=identity.get("display_name", ""))
-    session["pending_runner_auto_save"] = True
     return jsonify({"authenticated": True, "username": identity["username"], "display_name": identity.get("display_name", ""), "redirect_url": "/playground/run"})
 
 
@@ -182,12 +186,12 @@ def refresh_aihub_session():
     if not is_allowed_origin(request):
         return jsonify({"refreshed": False, "error": "Origin is not allowed for AI Hub config access."}), 403
 
-    credentials = credentials_for_ticket(session.get("ai_hub_credential_ticket"))
+    credentials = active_credentials()
     if not credentials or not credentials.token:
-        return jsonify({"refreshed": False, "reauthentication_required": True}), 401
+        return jsonify(reauthentication_payload("refresh", refreshed=False)), 401
     refreshed = refresh_playground_session(credentials, origin=request.host_url)
     if not refreshed:
-        return jsonify({"refreshed": False, "reauthentication_required": True}), 401
+        return jsonify(reauthentication_payload("refresh", refreshed=False)), 401
     session["ai_hub_username"] = refreshed.username
     session["ai_hub_display_name"] = refreshed.display_name
     session["ai_hub_credential_ticket"] = issue_credential_ticket(
@@ -226,6 +230,21 @@ def _clear_bundle_runtime_state() -> None:
 
 def _semantic_bundle_required(workflow_config) -> bool:
     return workflow_config.retrieve_module == "SemanticRetrieve" and semantic_bundle_required_from_source(session.get("python_source"), builder_upload_id=session.get("builder_upload_id") if isinstance(session.get("builder_upload_id"), str) else None)
+
+
+def _load_v2_contract_into_session(loaded: dict) -> None:
+    """Populate session spec and runner_presentation from a loaded v2 contract."""
+    spec = loaded.get("workflow_spec")
+    if isinstance(spec, dict) and spec.get("version") == "2":
+        session["workflow_spec"] = spec
+        pres = loaded.get("runner_presentation")
+        session["runner_presentation"] = pres if isinstance(pres, dict) else default_runner_presentation()
+        session.pop("builder_form_state", None)
+    else:
+        # No v2 spec – clear any stale spec so builder derives it from python_source
+        session.pop("workflow_spec", None)
+        session.pop("runner_presentation", None)
+        session.pop("builder_form_state", None)
 
 
 def _semantic_bundle_required_for_source(python_source: object) -> bool:

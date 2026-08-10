@@ -51,9 +51,9 @@ function endpointStatusText(state) {
   const requirements = Array.isArray(state?.requirements) ? state.requirements : [];
   const hasOptions = requirements.some((requirement) => Array.isArray(requirement.options) && requirement.options.length);
   if (!hasOptions) {
-    return "目前沒有可用的模型端點。請先在 .env 設定至少一組 <PREFIX>_MODEL / <PREFIX>_BASE_URL / <PREFIX>_API_KEY。";
+    return "Key Vault 中沒有可用的模型端點。請確認至少一組模型的 MODEL、BASE-URL 與 API-KEY secret。";
   }
-  return state.configured ? "" : "請選擇部署選項。";
+  return state.configured ? "模型設定由 Key Vault 自動提供。" : "Key Vault 的模型設定不完整，請確認所需 secret。";
 }
 
 function reviewAnswerForStep(stepKey) {
@@ -156,9 +156,7 @@ function renderBuilderEndpointState(state) {
           const option = document.createElement("option");
           option.value = endpoint.id;
           option.textContent = endpoint.label;
-          if (selections[requirement.role] === endpoint.id) {
-            option.selected = true;
-          }
+          option.selected = selections[requirement.role] === endpoint.id;
           select.append(option);
         });
 
@@ -166,17 +164,30 @@ function renderBuilderEndpointState(state) {
         form.append(label);
       });
       body.append(form);
+      return;
     }
 
     const statusText = endpointStatusText(state);
     if (statusText) {
       const status = document.createElement("p");
-      status.className = `inline-status${hasOptions ? "" : " error"}`;
+      status.className = "inline-status error";
       status.dataset.builderEndpointStatus = "true";
       status.textContent = statusText;
       body.append(status);
     }
   });
+}
+
+async function syncBuilderEndpointSelections() {
+  const forms = Array.from(document.querySelectorAll("[data-builder-endpoint-form]"));
+  if (!forms.length) {
+    return;
+  }
+  const selections = {};
+  forms.forEach((form) => Object.assign(selections, Object.fromEntries(new FormData(form).entries())));
+  const result = await postJson("/playground/builder/endpoints", { selections });
+  renderBuilderEndpointState(result);
+  renderBuilderReviewState(result.builder_review_state, result.builder_review_ready);
 }
 
 async function postBuilderState(payload) {
@@ -189,26 +200,6 @@ async function postBuilderState(payload) {
   });
   stateQueue = task.then(() => undefined, () => undefined);
   return task;
-}
-
-async function syncBuilderEndpointSelections() {
-  const forms = Array.from(document.querySelectorAll("[data-builder-endpoint-form]"));
-  if (!forms.length) {
-    return;
-  }
-  document.querySelectorAll("[data-builder-endpoint-status]").forEach((status) => {
-    status.textContent = "正在更新部署選項...";
-    status.classList.remove("error");
-  });
-  const selections = {};
-  forms.forEach((form) => {
-    Object.assign(selections, Object.fromEntries(new FormData(form).entries()));
-  });
-  const result = await postJson("/playground/builder/endpoints", {
-    selections,
-  });
-  renderBuilderEndpointState(result);
-  renderBuilderReviewState(result.builder_review_state, result.builder_review_ready);
 }
 
 async function flushBuilderState() {
@@ -665,13 +656,30 @@ function uploadSemanticFiles(panel) {
     return Promise.resolve();
   }
 
+  const allowedExtensions = new Set(
+    String(input.accept || "")
+      .split(",")
+      .map((extension) => extension.trim().toLowerCase())
+      .filter((extension) => extension.startsWith(".")),
+  );
+  const rejectedNames = files
+    .filter((file) => !allowedExtensions.has(`.${file.name.split(".").pop()?.toLowerCase() || ""}`))
+    .map((file) => file.name);
+  const acceptedFiles = files.filter((file) => !rejectedNames.includes(file.name));
+  if (!acceptedFiles.length) {
+    status.classList.add("error");
+    status.textContent = `不支援上傳：${rejectedNames.join("、")}。`;
+    input.value = "";
+    return Promise.resolve();
+  }
+
   status.classList.remove("error");
-  status.textContent = `準備上傳 ${files.length} 份參考文件...`;
+  status.textContent = `準備上傳 ${acceptedFiles.length} 份參考文件...`;
   progress.hidden = false;
   progress.value = 0;
 
   const formData = new FormData();
-  files.forEach((file) => formData.append("files", file));
+  acceptedFiles.forEach((file) => formData.append("files", file));
 
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
@@ -686,13 +694,23 @@ function uploadSemanticFiles(panel) {
       progress.value = 100;
       try {
         const response = JSON.parse(xhr.responseText || "{}");
+        const rejectedFiles = Array.isArray(response.rejected_files) ? response.rejected_files : [];
         if (xhr.status >= 400 || response.updated === false) {
-          throw new Error(response.error || "上傳失敗。");
+          const rejectedMessage = rejectedFiles.map((file) => `${file.name}：${file.reason}`).join("；");
+          throw new Error(rejectedMessage || response.error || "上傳失敗。");
         }
         output.value = Array.isArray(response.semantic_support_files)
           ? response.semantic_support_files.join("\n")
           : "";
         syncSemanticUploadPanel(panel);
+        const rejectedMessage = [
+          ...rejectedNames.map((name) => `${name}：不支援的檔案格式。`),
+          ...rejectedFiles.map((file) => `${file.name}：${file.reason}`),
+        ].join("；");
+        if (rejectedMessage) {
+          status.classList.add("error");
+          status.textContent = rejectedMessage;
+        }
         updateSummary(response.workflow_summary);
         renderBuilderEndpointState(response.builder_endpoint_state);
         renderBuilderReviewState(response.builder_review_state, response.builder_review_ready);
@@ -747,6 +765,38 @@ function syncApiEditor(editor) {
 
 function syncApiEditors(root) {
   root.querySelectorAll("[data-api-editor]").forEach(syncApiEditor);
+}
+
+function requiredStepError(panel) {
+  const selectedChoice = panel?.querySelector("[data-choice-card].selected:not([hidden])")
+    || panel?.querySelector("[data-choice-card].selected");
+  if (!panel || !selectedChoice) {
+    return "請先選擇這一題的設定。";
+  }
+  if (panel.dataset.stepPanel === "retrieve_policy" && selectedChoice.dataset.choiceLabel === "semantic") {
+    const sources = panel.querySelector("[data-semantic-upload-output]")?.value.trim();
+    return sources ? "" : "請完成必填欄位。";
+  }
+  if (panel.dataset.stepPanel === "output_format" && selectedChoice.dataset.choiceLabel === "interactive") {
+    const contracts = apiContracts(panel.querySelector("[data-api-editor]"));
+    const hasCompleteContract = contracts.some((contract) => contract.api_url && contract.component_fields);
+    return hasCompleteContract ? "" : "請完成必填欄位。";
+  }
+  return "";
+}
+
+function showStepValidationError(panel, message) {
+  let status = panel?.querySelector("[data-step-validation-error]");
+  if (!status && panel) {
+    status = document.createElement("p");
+    status.className = "inline-status error";
+    status.dataset.stepValidationError = "true";
+    panel.append(status);
+  }
+  if (status) {
+    status.textContent = message;
+    status.hidden = !message;
+  }
 }
 
 function clearApiBlock(block) {
@@ -969,6 +1019,12 @@ cards.forEach((card) => {
   });
 });
 
+document.addEventListener("change", async (event) => {
+  if (event.target.matches("[data-builder-endpoint-select]")) {
+    await syncBuilderEndpointSelections();
+  }
+});
+
 document.querySelectorAll("[data-name-form]").forEach((form) => {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1090,10 +1146,16 @@ document.querySelectorAll("[data-param-form]").forEach((form) => {
 document.querySelectorAll("[data-step-continue]").forEach((button) => {
   button.addEventListener("click", async () => {
     const activeIndex = panels.findIndex((panel) => !panel.hidden);
+    const activePanel = panels[activeIndex];
     await flushBuilderState();
-    await syncSelectedChoice(panels[activeIndex]);
-    await syncTextInput(panels[activeIndex]);
-    await syncParamForms(panels[activeIndex]);
+    await syncSelectedChoice(activePanel);
+    await syncTextInput(activePanel);
+    await syncParamForms(activePanel);
+    const validationError = requiredStepError(activePanel);
+    showStepValidationError(activePanel, validationError);
+    if (validationError) {
+      return;
+    }
     const nextStep = progressSteps[activeIndex + 1];
     if (nextStep) {
       showStep(nextStep.dataset.progressStep);
@@ -1127,10 +1189,3 @@ document.querySelectorAll("[data-runner-link], [data-complete-link]").forEach((l
   });
 });
 
-document.addEventListener("change", async (event) => {
-  const select = event.target.closest?.("[data-builder-endpoint-select]");
-  if (!select) {
-    return;
-  }
-  await syncBuilderEndpointSelections();
-});

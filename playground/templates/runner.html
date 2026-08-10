@@ -3,12 +3,12 @@
 {% block title %}試跑 Agent - AI Hub Agent 建立工具{% endblock %}
 
 {% block body %}
-<main class="runner-page layout-{{ scene_profile.layout_variant }}" data-page="runner" data-archetype="{{ scene_profile.task_archetype }}" data-layout-variant="{{ scene_profile.layout_variant }}" data-save-requires-login="{{ 'true' if not mode_context.can_save and mode_context.can_edit else 'false' }}" data-auto-save-after-login="{{ 'true' if auto_save_after_login else 'false' }}">
+<main class="runner-page layout-{{ scene_profile.layout_variant }}" data-page="runner" data-archetype="{{ scene_profile.task_archetype }}" data-layout-variant="{{ scene_profile.layout_variant }}" data-save-requires-login="{{ 'true' if not mode_context.can_save and mode_context.can_edit else 'false' }}" data-auto-save-after-login="{{ 'true' if auto_save_after_login else 'false' }}" data-semantic-retrieve="{{ 'true' if uses_semantic_retrieve else 'false' }}">
   <section class="runner-initialization-overlay" role="status" aria-live="polite" aria-label="準備對話環境" data-initialization-overlay>
     <div class="runner-initialization-card">
       <div class="runner-initialization-status-row">
         <span class="runner-initialization-status">準備中</span>
-        <span class="runner-initialization-count" data-initialization-count>0 / 0</span>
+        <span class="runner-initialization-count" data-initialization-count>尚未開始</span>
       </div>
       <h2>正在準備對話</h2>
       <p data-initialization-message>正在載入所需內容...</p>
@@ -43,10 +43,10 @@
           <span class="runner-sidebar-label">編輯流程</span>
         </a>
         {% if mode_context.can_view_code %}
-        <a class="runner-sidebar-action" href="{{ url_for('source.source_page') }}" aria-label="檢視程式碼" data-code-preview-open>
+        <button class="runner-sidebar-action" type="button" aria-label="檢視程式碼" data-code-preview-open>
           <span class="runner-sidebar-icon runner-sidebar-icon-export" aria-hidden="true"></span>
           <span class="runner-sidebar-label">檢視程式碼</span>
-        </a>
+        </button>
         {% endif %}
       </nav>
       {% endif %}
@@ -79,6 +79,13 @@
           <div class="message-avatar user-avatar" aria-hidden="true">你</div>
           <div class="message-bubble user-bubble">
             <p data-user-message-text></p>
+            <div class="message-attachments" data-user-message-attachments aria-label="已送出的附件" hidden></div>
+          </div>
+        </article>
+        <article class="chat-message user-message user-interaction-message" data-user-interaction-message hidden>
+          <div class="message-avatar user-avatar" aria-hidden="true">你</div>
+          <div class="message-bubble user-bubble user-interaction-bubble assistant-bubble">
+            <div class="tool-call-panel-list" data-user-interaction-panels aria-label="等待你的選擇" hidden></div>
           </div>
         </article>
         <article class="chat-message assistant-message" data-result-surface hidden>
@@ -94,7 +101,6 @@
             <div class="assistant-response" aria-live="polite">
               <div class="process-trace" data-process-trace aria-label="AI 處理過程" hidden></div>
               <div class="markdown-output" data-result-message></div>
-              <div class="tool-call-panel-list" data-tool-call-panels aria-label="工具呼叫互動面板" hidden></div>
             </div>
           </div>
           <div class="message-debug" data-debug-status hidden></div>
@@ -106,7 +112,7 @@
         <div class="composer-attachment-preview" data-artifact-list aria-label="已選擇的參考資料"></div>
         <div class="composer-main-row">
           <div class="attachment-picker" data-artifact-panel>
-            <label class="attachment-trigger" for="runner-attachments" aria-label="上傳參考檔案">
+            <label class="attachment-trigger" for="runner-attachments" aria-label="上傳本次試跑附件" title="上傳本次試跑附件">
               <span aria-hidden="true">+</span>
             </label>
             <input class="visually-hidden" id="runner-attachments" name="attachments" type="file" multiple data-attachment-input>
@@ -135,10 +141,10 @@
         </div>
       </header>
       <form class="workflow-info-form" data-workflow-info-form>
-        <label for="runner-side-workflow-name">名稱</label>
-        <input id="runner-side-workflow-name" class="workflow-side-title-input" name="name" type="text" value="{{ workflow_summary.name }}" maxlength="64" autocomplete="off" data-side-workflow-title-input>
+        <label for="runner-workflow-info-name">名稱</label>
+        <input id="runner-workflow-info-name" class="workflow-side-title-input" name="name" type="text" value="{{ workflow_summary.name }}" maxlength="64" autocomplete="off" data-workflow-info-name-input>
         <label for="runner-workflow-description">簡介</label>
-        <textarea id="runner-workflow-description" class="workflow-description-input" name="description" rows="5" maxlength="500" placeholder="{{ workflow_description_placeholder }}" data-workflow-description-input>{{ workflow_description }}</textarea>
+        <textarea id="runner-workflow-description" class="workflow-description-input" name="description" rows="5" maxlength="500" placeholder="{{ workflow_description_placeholder }}" data-workflow-info-description-input>{{ workflow_description }}</textarea>
         <div class="context-actions">
           <button class="button button-ghost" type="button" data-workflow-info-close>取消</button>
           <button class="button button-primary" type="submit" data-workflow-info-submit>套用</button>
@@ -199,5 +205,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module" src="{{ url_for('static', filename='js/runner/runner-page.js') }}?v=process-trace-v2"></script>
+<script type="module" src="{{ url_for('static', filename='js/runner/runner-page.js') }}?v=metadata-hydration-v1"></script>
 {% endblock %}

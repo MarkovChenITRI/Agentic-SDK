@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import os
 from secrets import token_urlsafe
 from time import time
 from urllib.parse import quote
 
 import httpx
 
+from playground.services.key_vault_config import KeyVaultConfigurationError, key_vault_settings
 from playground.services.source_builder import build_default_python_source
 
 
@@ -19,10 +19,10 @@ _SESSION_REFRESH_PATH = "/api/playground/session/refresh"
 _AGENTS_PATH = "/api/playground/agents"
 _CONFIG_LOAD_PATH = "/api/playground/agents/{agent_id}/config/load"
 _PUBLIC_CONFIG_LOAD_PATH = "/api/playground/agents/{agent_id}/config/public/load"
-_CONFIG_SAVE_PATH = "/api/playground/config/save"
+_CONTRACT_SAVE_PATH = "/api/playground/contract/save"
 _BUNDLE_SAVE_PATH = "/api/playground/agents/{agent_id}/bundle/save"
 _BUNDLE_LOAD_PATH = "/api/playground/agents/{agent_id}/bundle/load"
-_DEFAULT_TIMEOUT_SECONDS = 5.0
+_DEFAULT_TIMEOUT_SECONDS = 20.0
 _DEFAULT_CREDENTIAL_TTL_SECONDS = 8 * 60 * 60
 
 
@@ -206,7 +206,10 @@ def bridge_credentials(token: str | None, *, api_base_url: str | None = None) ->
 
 
 def _ai_hub_base_url() -> str:
-    return (os.environ.get("AI_HUB_BASE_URL") or os.environ.get("AIHUB_BASE_URL") or "").strip().rstrip("/")
+    try:
+        return key_vault_settings().ai_hub.base_url
+    except KeyVaultConfigurationError:
+        return ""
 
 
 def _base_url_for_credentials(credentials: AiHubCredentials | None = None) -> str:
@@ -214,17 +217,14 @@ def _base_url_for_credentials(credentials: AiHubCredentials | None = None) -> st
 
 
 def _playground_origin(origin: str | None) -> str:
-    return (os.environ.get("AI_HUB_PLAYGROUND_ORIGIN") or origin or "").strip().rstrip("/")
+    try:
+        return key_vault_settings().ai_hub.playground_origin
+    except KeyVaultConfigurationError:
+        return ""
 
 
 def _request_timeout_seconds() -> float:
-    raw_timeout = os.environ.get("AI_HUB_REQUEST_TIMEOUT_SECONDS", "")
-    if not raw_timeout:
-        return _DEFAULT_TIMEOUT_SECONDS
-    try:
-        return max(float(raw_timeout), 0.1)
-    except ValueError:
-        return _DEFAULT_TIMEOUT_SECONDS
+    return _DEFAULT_TIMEOUT_SECONDS
 
 
 def list_agents(*, credentials: AiHubCredentials | None = None, origin: str | None = None) -> dict[str, object]:
@@ -299,6 +299,12 @@ def load_config(
         "python_source": payload.get("python_source") or build_default_python_source(),
         "endpoint_bindings": _endpoint_bindings_from_payload(payload),
         "exported_at": payload.get("playground_exported_at") or payload.get("exported_at") or "",
+        # v2 contract fields
+        "contract_version": payload.get("contract_version") or "",
+        "workflow_spec": payload.get("workflow_spec") if isinstance(payload.get("workflow_spec"), dict) else None,
+        "runner_presentation": payload.get("runner_presentation") if isinstance(payload.get("runner_presentation"), dict) else None,
+        "generated_source": payload.get("generated_source") or "",
+        "contract_hash": payload.get("contract_hash") or "",
         "integration_status": "aihub",
         "requires_real_aihub_api": False,
     }
@@ -344,42 +350,59 @@ def load_public_config(
         "python_source": response_payload.get("python_source") or build_default_python_source(),
         "endpoint_bindings": _endpoint_bindings_from_payload(response_payload),
         "exported_at": response_payload.get("playground_exported_at") or response_payload.get("exported_at") or "",
+        "contract_version": response_payload.get("contract_version") or "",
+        "workflow_spec": response_payload.get("workflow_spec") if isinstance(response_payload.get("workflow_spec"), dict) else None,
+        "runner_presentation": response_payload.get("runner_presentation") if isinstance(response_payload.get("runner_presentation"), dict) else None,
+        "generated_source": response_payload.get("generated_source") or "",
+        "contract_hash": response_payload.get("contract_hash") or "",
         "integration_status": "aihub",
         "access_mode": "public_readonly",
         "requires_real_aihub_api": False,
     }
 
 
-def save_config(
+def save_contract_v2(
     agent_id: str | None,
-    python_source: str | None,
+    workflow_spec: dict,
     *,
+    runner_presentation: dict | None = None,
+    generated_source: str | None = None,
+    contract_hash: str | None = None,
+    semantic_bundle_ref: str | None = None,
     workflow_name: str | None = None,
     description: str | None = None,
     endpoint_bindings: dict[str, str] | None = None,
     credentials: AiHubCredentials | None = None,
     origin: str | None = None,
 ) -> dict[str, object]:
-    if not python_source:
-        return _save_error("No Python source is available to save.", "missing_python_source", agent_id=agent_id)
+    """Save a v2 workflow contract to AI Hub."""
+    if not isinstance(workflow_spec, dict):
+        return _save_error("workflow_spec must be a dict.", "missing_workflow_spec", agent_id=agent_id)
     if not _has_aihub_auth(credentials):
         return _save_error("AI Hub login is required before saving.", "missing_credentials", agent_id=agent_id)
-
     base_url = _base_url_for_credentials(credentials)
     if not base_url:
         return _save_error("AI Hub base URL is not configured.", "missing_base_url", agent_id=agent_id)
 
-    resolved_workflow_name = (workflow_name or "").strip()
-    resolved_description = (description or "").strip()
+    resolved_workflow_name = (workflow_name or str(workflow_spec.get("workflow_name") or "")).strip()
+    resolved_description = (description or str(workflow_spec.get("description") or "")).strip()
     if not resolved_workflow_name:
         return _save_error("Workflow name is required before saving to AI Hub.", "missing_workflow_name", agent_id=agent_id)
 
-    payload = {
-        "python_source": python_source,
+    payload: dict[str, object] = {
+        "workflow_spec": workflow_spec,
         "workflow_name": resolved_workflow_name,
         "description": resolved_description,
         "endpoint_bindings": endpoint_bindings or {},
     }
+    if runner_presentation is not None:
+        payload["runner_presentation"] = runner_presentation
+    if generated_source:
+        payload["generated_source"] = generated_source
+    if contract_hash:
+        payload["contract_hash"] = contract_hash
+    if semantic_bundle_ref:
+        payload["semantic_bundle_ref"] = semantic_bundle_ref
     payload.update(_credential_payload(credentials))
     resolved_agent_id = (agent_id or "").strip()
     if resolved_agent_id:
@@ -387,7 +410,7 @@ def save_config(
 
     try:
         response = httpx.post(
-            f"{base_url}{_CONFIG_SAVE_PATH}",
+            f"{base_url}{_CONTRACT_SAVE_PATH}",
             json=payload,
             headers=_auth_headers(credentials, origin),
             timeout=_request_timeout_seconds(),
@@ -395,26 +418,26 @@ def save_config(
         if response.status_code >= 400:
             return _save_error(
                 _response_error_message(response),
-                "aihub_save_failed",
+                "aihub_contract_save_failed",
                 agent_id=resolved_agent_id or agent_id,
                 status_code=response.status_code,
             )
-        payload = response.json()
+        response_payload = response.json()
     except (httpx.HTTPError, ValueError) as error:
-        return _save_error(str(error) or "AI Hub save request failed.", "aihub_save_failed", agent_id=resolved_agent_id or agent_id)
+        return _save_error(str(error) or "AI Hub contract save request failed.", "aihub_contract_save_failed", agent_id=resolved_agent_id or agent_id)
 
-    saved = payload.get("saved")
-    if saved is None:
-        saved = payload.get("ok")
+    saved = response_payload.get("saved")
     if saved is None:
         saved = True
     return {
-        "agent_id": payload.get("agent_id") or resolved_agent_id,
-        "workflow_name": payload.get("workflow_name") or payload.get("agent_name") or resolved_workflow_name,
-        "description": payload.get("description") or resolved_description,
-        "endpoint_bindings": _endpoint_bindings_from_payload(payload),
+        "agent_id": response_payload.get("agent_id") or resolved_agent_id,
+        "workflow_name": response_payload.get("workflow_name") or resolved_workflow_name,
+        "description": response_payload.get("description") or resolved_description,
+        "endpoint_bindings": _endpoint_bindings_from_payload(response_payload),
         "saved": bool(saved),
-        "exported_at": payload.get("playground_exported_at") or payload.get("exported_at") or payload.get("saved_at") or datetime.now(timezone.utc).isoformat(),
+        "contract_version": response_payload.get("contract_version") or "2",
+        "contract_hash": response_payload.get("contract_hash") or contract_hash or "",
+        "exported_at": response_payload.get("playground_contract_saved_at") or response_payload.get("exported_at") or datetime.now(timezone.utc).isoformat(),
         "integration_status": "aihub",
         "requires_real_aihub_api": False,
     }
@@ -594,13 +617,7 @@ def _bundle_error(message: str, code: str, *, agent_id: str | None = None, statu
 
 
 def _credential_ttl_seconds() -> float:
-    raw_ttl = os.environ.get("AI_HUB_CREDENTIAL_TTL_SECONDS", "")
-    if not raw_ttl:
-        return _DEFAULT_CREDENTIAL_TTL_SECONDS
-    try:
-        return max(float(raw_ttl), 60.0)
-    except ValueError:
-        return _DEFAULT_CREDENTIAL_TTL_SECONDS
+    return _DEFAULT_CREDENTIAL_TTL_SECONDS
 
 
 def _cleanup_expired_tickets() -> None:

@@ -71,6 +71,19 @@ class StaticEmbedder:
 
 
 class DocumentedModuleUnitTests(unittest.TestCase):
+    def test_image_category_examples_require_an_explicit_selected_result(self) -> None:
+        from agentic_sdk.modules.action.generative import _build_messages
+        from agentic_sdk.modules.perceive.text import _SYSTEM_PROMPT
+
+        state = WorkflowState(user_message="請分析圖片")
+        state.payload["perceived_details"] = {"image": "foot chart"}
+        messages = _build_messages(state, "test system prompt")
+        extra_context = next(message["content"] for message in messages if message["role"] == "system")
+
+        self.assertIn("selected result or result field", _SYSTEM_PROMPT)
+        self.assertIn("左右腳", extra_context)
+        self.assertIn("選取結果或結果欄位", extra_context)
+
     def test_faiss_knowledge_base_chunks_long_documents(self) -> None:
         from agentic_sdk.modules.retrieve.semantic import FaissKnowledgeBase
 
@@ -281,6 +294,9 @@ class DocumentedModuleUnitTests(unittest.TestCase):
         self.assertIn("input_images", user_content[0]["text"])
         self.assertEqual("image_url", user_content[1]["type"])
         self.assertEqual("data:image/png;base64,AAAA", user_content[1]["image_url"]["url"])
+        system_prompt = client.last_create_kwargs["messages"][0]["content"]
+        self.assertIn("only report a value as a named fact", system_prompt)
+        self.assertIn("Never treat an unmarked comparison chart", system_prompt)
 
     def test_next_step_plan_uses_openai_decision(self) -> None:
         state = WorkflowState(user_message="TSiP 是什麼？")
@@ -297,6 +313,51 @@ class DocumentedModuleUnitTests(unittest.TestCase):
 
         self.assertEqual("action", output["next_module"])
         self.assertEqual("route to action", output["payload"]["plan_thought"])
+
+    def test_next_step_plan_retrieves_catalog_facts_before_action(self) -> None:
+        state = WorkflowState(user_message="請依 catalog 推薦產品編號 230619521，列出價格與限制。")
+        state.append(
+            ContextEntry(
+                type=ContextEntryType.PERCEIVED,
+                content="intent=product_recommendation",
+                metadata={"intent": "product_recommendation"},
+            )
+        )
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
+            output = NextStepPlan(retrieve_description="LaNew catalog", **_llm_params())(state)
+
+        self.assertEqual("retrieve", output["next_module"])
+
+    def test_next_step_plan_retrieves_retail_sku_and_availability_before_action(self) -> None:
+        state = WorkflowState(user_message="SKU 7037191 有現貨、展示品或調貨資訊嗎？")
+        state.append(
+            ContextEntry(
+                type=ContextEntryType.PERCEIVED,
+                content="intent=store_availability",
+                metadata={"intent": "store_availability"},
+            )
+        )
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
+            output = NextStepPlan(retrieve_description="LaNew catalog", **_llm_params())(state)
+
+        self.assertEqual("retrieve", output["next_module"])
+
+    def test_next_step_plan_retrieves_ai_hub_workshop_facts_before_action(self) -> None:
+        state = WorkflowState(user_message="AI Hub 支援哪些模型部署方式？")
+        state.append(
+            ContextEntry(
+                type=ContextEntryType.PERCEIVED,
+                content="intent=ai_hub_deployment",
+                metadata={"intent": "ai_hub_deployment"},
+            )
+        )
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
+            output = NextStepPlan(retrieve_description="AI Hub workshop materials", **_llm_params())(state)
+
+        self.assertEqual("retrieve", output["next_module"])
 
     def test_keyword_retrieve_hits_expected_items(self) -> None:
         state = WorkflowState(user_message="TSiP 是什麼？")
@@ -478,8 +539,8 @@ class DocumentedModuleUnitTests(unittest.TestCase):
 
         output = module(state)
 
-        self.assertEqual("已產生工具呼叫。", output["payload"]["latest_final_message"])
-        self.assertEqual("已產生工具呼叫。", state.last_action_result["content"])
+        self.assertEqual("請確認下列選項。", output["payload"]["latest_final_message"])
+        self.assertEqual("請確認下列選項。", state.last_action_result["content"])
         self.assertEqual(tool_calls, output["payload"]["latest_tool_calls"])
 
     def test_llm_modules_send_explicit_model(self) -> None:

@@ -7,6 +7,8 @@ on:
       - "agentic_sdk/**"
       - "assets/**"
       - "playground/**"
+      - "scripts/**"
+      - "pyproject.toml"
       - "requirements.txt"
       - ".github/workflows/deploy-playground.yml"
   workflow_dispatch:
@@ -17,7 +19,7 @@ permissions:
 
 concurrency:
   group: deploy-playground
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -120,9 +122,12 @@ jobs:
 
       - name: Configure App Service runtime
         uses: azure/CLI@v2
+        timeout-minutes: 10
         with:
           azcliversion: latest
           inlineScript: |
+            set -euo pipefail
+
             STARTUP_COMMAND='python -m playground.main'
             CURRENT_STARTUP=$(az webapp show \
               --name "${{ vars.AZURE_WEBAPP_NAME }}" \
@@ -205,15 +210,58 @@ jobs:
                 --output none
             fi
 
+            assert_setting() {
+              local name="$1"
+              local expected="$2"
+              local actual
+              actual=$(az webapp config appsettings list \
+                --name "${{ vars.AZURE_WEBAPP_NAME }}" \
+                --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+                --query "[?name=='${name}'].value | [0]" \
+                -o tsv)
+              if [ "$actual" != "$expected" ]; then
+                echo "::error::App Service setting ${name} did not match the required runtime value."
+                exit 1
+              fi
+            }
+
+            ACTUAL_STARTUP=$(az webapp show \
+              --name "${{ vars.AZURE_WEBAPP_NAME }}" \
+              --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+              --query "siteConfig.appCommandLine" \
+              -o tsv)
+            if [ "$ACTUAL_STARTUP" != "$STARTUP_COMMAND" ]; then
+              echo "::error::App Service startup command did not match the required runtime command."
+              exit 1
+            fi
+
+            assert_setting "PORT" "8000"
+            assert_setting "WEBSITES_PORT" "8000"
+            assert_setting "SCM_DO_BUILD_DURING_DEPLOYMENT" "false"
+            assert_setting "ENABLE_ORYX_BUILD" "false"
+            assert_setting "PYTHONPATH" "$DESIRED_PYTHONPATH"
+            assert_setting "KEY_VAULT_NAME" "${{ vars.KEY_VAULT_NAME }}"
+
+            if [ -z "$CURRENT_SECRET" ]; then
+              echo "::error::PLAYGROUND_SECRET_KEY is not configured."
+              exit 1
+            fi
+
       - name: Install Python dependencies into package
         run: |
           python -m pip install --upgrade pip
           python -m pip install --target .python_packages/lib/site-packages -r requirements.txt
 
+      - name: Verify packaged semantic ingestion conversion dependencies
+        env:
+          PYTHONPATH: .python_packages/lib/site-packages:.
+        run: python scripts/verify_semantic_ingestion_dependencies.py
+
       - name: Verify FastAPI Playground package
         env:
           PYTHONPATH: .python_packages/lib/site-packages:.
           KEY_VAULT_NAME: ${{ vars.KEY_VAULT_NAME }}
+          PLAYGROUND_TEST_MODE: "true"
         run: |
           python - <<'PY'
           from fastapi.testclient import TestClient
@@ -240,13 +288,15 @@ jobs:
 
       - name: Create deployment package
         run: |
-          zip -r deploy.zip \
+          set -euo pipefail
+          zip -rq deploy.zip \
             agentic_sdk/ \
             assets/ \
             playground/ \
             .python_packages/ \
             requirements.txt \
             -x "*.pyc" -x "*/__pycache__/*" -x "playground/visual-audit/*"
+          unzip -t deploy.zip
 
       - name: Deploy package to Azure App Service
         uses: azure/webapps-deploy@v3

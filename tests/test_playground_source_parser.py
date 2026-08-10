@@ -4,6 +4,7 @@ from agentic_sdk.core.events import default_events_schema
 from playground.services.source_builder import build_default_python_source, build_python_source_from_builder_choice, config_from_source, get_builder_form_state, get_workflow_summary
 from playground.services.source_parser import parse_supported_source
 from playground.services.runner_service import _process_event_for_workflow_event, execute_python_source
+from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec
 
 
 def _sample_workflow_source(workflow_name: str, profile_hint: str | None = None) -> str:
@@ -82,11 +83,13 @@ def test_runner_process_event_uses_workflow_stage_label():
         },
     )
 
-    assert event == {
-        "role": "retrieve",
-        "title": "正在查詢產品資料",
-        "description": "正在整理這一步可用的參考內容。",
-    }
+    assert event["role"] == "retrieve"
+    assert event["module"] == "retrieve"
+    assert event["title"] == "正在查詢產品資料"
+    assert event["description"] == "正在整理這一步可用的參考內容。"
+    assert event["phase"] == "start"
+    assert event["status"] == "running"
+    assert event["tracked_fields"] == []
 
 
 def test_execute_python_source_streams_configured_stage_label():
@@ -211,6 +214,18 @@ def test_generated_retrieve_source_omits_empty_default_parameters():
     assert "SemanticRetrieve(" in semantic_source
     assert "sources=[]" not in semantic_source
     assert "retrieve_description=" not in semantic_source
+
+
+def test_generated_semantic_source_preserves_original_pptx_filename():
+    source = build_python_source_from_builder_choice("retrieve_policy", "semantic", None)
+    source = build_python_source_from_builder_choice(
+        "retrieve",
+        {"semantic_support_files": "AI-Hub.pptx"},
+        source,
+    )
+
+    assert '"./AI-Hub.pptx"' in source
+    assert config_from_source(source).semantic_support_files == ("AI-Hub.pptx",)
 
 
 def test_generated_reflect_source_omits_default_retry_policy_but_roundtrips():
@@ -338,17 +353,32 @@ def test_interactive_action_adds_generic_intent_gate_without_polluting_form_stat
         source,
     )
 
-    assert "請先判斷使用者這一輪的意圖類型" in source
+    assert "先在內部判斷使用者這一輪的意圖類型" in source
     assert "當使用者只是詢問資訊、要求分析、要求解釋" in source
     assert "Playground 會依配置顯示互動元件並收集使用者選擇" in source
     assert "顯示互動元件並收集使用者選擇" in source
-    assert "若使用者尚未回答，請先用 false 作為暫定值來顯示確認面板" in source
-    assert "tool_choice=\"none\"" in source
+    assert "若使用者尚未回答，請先用 false 作為暫定值來顯示確認面板" not in source
+    assert "tool_choice=\"auto\"" in source
     assert "使用者設定的回覆規範" in source
 
     config = config_from_source(source)
     state = get_builder_form_state(source)
 
     assert config.action_prompt == "請依使用者情境回覆，必要時才請使用者確認下一步。"
-    assert config.action_tool_choice == "none"
+    assert config.action_tool_choice == "auto"
     assert state["values"]["action"]["response_instruction"] == "請依使用者情境回覆，必要時才請使用者確認下一步。"
+
+
+def test_v2_interactive_action_enables_tool_calling_after_builder_update():
+    spec = apply_builder_step(default_spec(), "output_format", "interactive")
+    spec = apply_builder_step(
+        spec,
+        "action",
+        {
+            "response_instruction": "只有明確需要門市協助時才呼叫工具。",
+            "api_contracts": '[{"interaction_trigger":"顧客明確要求門市協助時呼叫。","api_method":"POST","api_url":"https://example.com/assist","component_fields":"是否協助 = 顧客同意（資料類型：是/否）"}]',
+        },
+    )
+
+    assert spec["action"]["params"]["tool_choice"] == "auto"
+    assert 'tool_choice="auto"' in compile_python_source(spec)

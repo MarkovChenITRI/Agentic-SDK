@@ -8,7 +8,9 @@ on:
       - 'tests/**'
       - 'demo/**'
       - 'playground/**'
+      - 'scripts/**'
       - 'docs/**'
+      - 'pyproject.toml'
       - 'requirements.txt'
       - '.github/workflows/ci.yml'
   pull_request:
@@ -18,7 +20,9 @@ on:
       - 'tests/**'
       - 'demo/**'
       - 'playground/**'
+      - 'scripts/**'
       - 'docs/**'
+      - 'pyproject.toml'
       - 'requirements.txt'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
@@ -30,6 +34,8 @@ jobs:
   test:
     name: Python tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      PLAYGROUND_TEST_MODE: "true"
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +54,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pytest
+
+      - name: Verify semantic ingestion conversion dependencies
+        run: python scripts/verify_semantic_ingestion_dependencies.py
 
       - name: Run tests
         run: python -m pytest -q

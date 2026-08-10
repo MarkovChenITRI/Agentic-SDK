@@ -242,23 +242,46 @@ class FaissKnowledgeBase:
         return documents
 
     def _read_document(self, file_path: Path) -> str:
-        if file_path.suffix.lower() in {".txt", ".md", ".py", ".json", ".yaml", ".yml", ".csv"}:
+        try:
             return file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return self._extract_binary_document(file_path)
+
+    def _extract_binary_document(self, file_path: Path) -> str:
+        if file_path.suffix.lower() == ".pdf":
+            try:
+                from pdfminer.high_level import extract_text
+
+                return str(extract_text(str(file_path)) or "")
+            except Exception:
+                try:
+                    from pypdf import PdfReader
+
+                    return "\n".join(str(page.extract_text() or "") for page in PdfReader(str(file_path)).pages)
+                except Exception:
+                    pass
         try:
             from markitdown import MarkItDown
         except Exception as exc:
             raise RuntimeError(
-                "非文字檔解析需要 markitdown。請使用 Python 3.12 建立專案虛擬環境，"
-                "再執行 uv add -r requirements.txt。"
+                f"無法讀取知識庫來源 {file_path.name}：文件轉換服務目前不可用。"
             ) from exc
         try:
-            result = MarkItDown().convert(str(file_path))
+            return str(getattr(MarkItDown().convert(str(file_path)), "text_content", "") or "")
         except Exception as exc:
-            raise RuntimeError(
-                "非文字檔解析需要 MarkItDown 的格式轉換套件。請使用 Python 3.12，"
-                "並執行 uv add -r requirements.txt 安裝 markitdown[all]。"
-            ) from exc
-        return str(getattr(result, "text_content", "") or "")
+            if file_path.suffix.lower() == ".pdf":
+                try:
+                    from pdfminer.high_level import extract_text
+
+                    return str(extract_text(str(file_path)) or "")
+                except Exception:
+                    try:
+                        from pypdf import PdfReader
+
+                        return "\n".join(str(page.extract_text() or "") for page in PdfReader(str(file_path)).pages)
+                    except Exception:
+                        pass
+            raise RuntimeError(f"無法讀取知識庫來源 {file_path.name}：文件格式無法轉換為文字。") from exc
 
     def _is_stale(self) -> bool:
         source_files = self._iter_source_files()
