@@ -1,127 +1,198 @@
-# 用 Fara 看懂畫面並操作電腦
+# 模型說「送出請款」時，系統該怎麼做：用 Fara 產生可檢視操作提案
 
-固定網頁定位方式很容易在版面或內容改變時失效。按鈕換了位置、標籤改了文字或彈出提示視窗後，原本能用的選取器可能立刻失效。這在需要跨多個版本的內部系統上特別棘手：自動化腳本看起來成功執行，卻可能把資料填進錯誤欄位，或在不該送出的頁面按下確認。
+Fara1.5 是以螢幕截圖與對話歷程進行 observe-think-act 的電腦使用模型；它會產生滑鼠、鍵盤或其他操作。這不表示每一個建議都可以直接執行。在採購表單中，使用者要的是「找出尚未核對的請款單，提出填入已核對金額的操作」。模型可能正確找到金額欄位，也可能接著提出「送出請款」。如果應用程式把兩種輸出都當成可直接執行的命令，錯誤就從模型判斷變成真實外部副作用。
 
-我們用一個可重置的採購測試網站驗證 Fara 1.5。任務是「找出尚未核對的請款單，填入已核對金額，但不要送出」。第一版只讓模型輸出動作並直接交給控制器。它在表單改版後仍找到金額欄位，卻也提出點擊「送出請款」的操作。這不是模型辨識失敗，而是系統把「提出下一步」誤當成「可以執行下一步」。
+這篇把 Fara 的輸出放進 Agentic SDK 的回覆與動作（Action）模組，但只讓它產生**可檢視的操作提案**。讀完後，你會得到一筆包含目標、輸入值、理由與來源版本的結構化結果；你的應用程式可顯示、記錄、核准或拒絕它，卻不會因為這個 Action 而自動控制瀏覽器。
 
-最後的做法是把 Fara 部署為 AI Hub 模型卡，並透過 OpenAI 相容端點接入 Agentic SDK。Action 只負責根據任務、畫面與操作歷程提出一個動作；Reflect 擁有執行權，檢查動作是否落在允許範圍、頁面是否真的往前推進，以及是否應該交由人員確認。模型不再直接控制瀏覽器，而是在可中止、可重播的迴圈中提出下一個操作。
+## 先看使用者與應用程式的差異
 
-## 為什麼不直接讓模型連到瀏覽器
-
-把完整瀏覽器控制權直接交給模型，會讓每一次錯誤判斷都直接變成外部副作用。我們改成「截圖、提出一個動作、驗證結果」三個階段。模型只負責提出操作，控制器只負責執行已核准的操作，Reflect 決定是否繼續。
-
-這個區分讓「填入金額」和「送出請款」成為兩種不同的事件。前者是測試案例明確允許的輸入；後者是有外部副作用的操作，必須停止自動迴圈並要求人工確認。下表是 Action 與 Reflect 之間保留的最小契約，操作紀錄不再只是一段模型文字。
-
-| 欄位 | Action 提供的內容 | Reflect 檢查的問題 |
+| 情境 | 把模型輸出當命令 | 以 FaraProposalAction 接入後 |
 | --- | --- | --- |
-| `kind` | `click`、`type`、`scroll` 或 `key` | 這個動作是否在允許清單內？ |
-| `target` | 座標或頁面元素描述 | 是否位於目前允許的網域與畫面區域？ |
-| `value` | 要輸入的金額或按鍵 | 是否可寫入這個欄位，且不含敏感資料？ |
-| `reason` | 模型採取此步驟的依據 | 前一步畫面真的支持這個判斷嗎？ |
+| 找到已核對金額欄位 | 呼叫端必須猜測輸出代表什麼 | 收到含 `kind`、`target`、`value` 與 `reason` 的提案 |
+| 模型提出「送出請款」 | 提案可能直接造成送出 | 應用程式只看到一筆可檢視資料，可依自己的授權流程停止處理 |
+| Fara 服務失敗 | 錯誤格式依 client 而異 | Action 留下統一的錯誤 entry 與 `last_action_error` |
 
-流程從任務開始，依序擷取畫面、呼叫 Fara 模型服務、取得單一步驟操作並交給操作政策。政策允許時，瀏覽器控制器執行操作，再由 Reflect 比對操作前後的畫面；政策要求確認時，流程停在可檢閱的操作紀錄；任務完成或中止時，才回傳結果。
+Fara 的視覺輸入、對話歷程、client 呼叫與模型部署細節都封裝在 runner；本文聚焦它與 SDK 的交界。Fara 官方也將 Fara1.5 定位為研究預覽，建議在隔離環境中監看執行並避開敏感資料或高風險領域；本篇的 proposal 模式正是把模型建議與應用程式的執行決定分開。
 
-## 將 Fara 看懂畫面與操作電腦的能力做成模型卡
-
-模型卡記錄 Fara 的版本、權重精度、vLLM 執行環境、CUDA 目標、內容長度、畫面輸入、單一步驟操作輸出、授權條件與研究預覽限制。模型卡不只用來列出模型名稱；它也是控制器判斷輸入輸出格式是否相容的依據。這讓部署版本更換時，團隊可以明確重跑畫面處理、動作格式與安全政策三類驗證，而不是只確認端點仍能回應。
-
-將畫面輸入與操作輸出明確列在模型卡中，讓部署平台、Action 模組和測試工具都依同一份契約運作。當我們更新模型版本時，可以立即知道需要重新驗證的是畫面處理、操作格式還是安全政策。
-
-## 在 A100 上部署可透過 OpenAI SDK 使用的 Fara 推論服務
-
-部署路徑是 Fara 權重、vLLM、`NC24ads_A100_v4 VM`，再提供版本化端點與 `api_key`、`base_url`、`model` 設定。Fara 官方公開 vLLM 與 OpenAI 相容服務的自架方式，讓我們可以沿用 SDK 已有的模型連線介面。
-
-應用程式不需要知道 A100 或 vLLM 的細節，只需要讀取版本化組態：
-
-```python title="fara_deployment.py"
-fara_endpoint = {
-    "base_url": "https://models.example.ai/fara/v1",
-    "api_key": os.environ["AI_HUB_API_KEY"],
-    "model": "fara-1.5",
-    "max_actions": 12,
-}
+```text
+使用者任務 -> FaraProposalAction -> action result
 ```
 
-把操作上限放在同一份設定裡，是因為它和模型能力一樣屬於部署契約。某個模型版本如果在相同任務下需要更多步驟，就必須重新驗證，而不是讓應用程式悄悄放寬限制。
+```mermaid
+flowchart LR
+    Request[使用者任務] --> Action[FaraProposalAction]
+    Action --> Runner[FaraRunner]
+    Runner --> Proposal[結構化操作提案]
+    Proposal --> Result[Action result]
+    Result --> App[應用程式檢視與後續處理]
+```
 
-## 讓 Action 逐步執行 Fara 產生的操作
+!!! note "本文的責任邊界"
 
-`FaraComputerUseAction` 將任務、先前操作與畫面傳給模型服務，一次取得一個操作並記錄結果。瀏覽器控制器負責擷取畫面與執行點擊、輸入、按鍵或捲動；`FaraReflect` 檢查座標、回傳格式、頁面是否前進、操作上限與人工確認條件。
+    `FaraProposalAction` 只產生可檢視的提案，不執行瀏覽器控制、不決定是否核准操作，也不安排下一輪流程。任何操作執行、授權與人工確認都由呼叫 workflow 的應用程式處理。
 
-核心迴圈保持單純，讓每個外部副作用都有紀錄：
+這個範例透過 `entry_module="action"` 直接開始工作流程。目的是將 Fara 與 SDK 的 Action 介面本身說清楚。
 
-```python title="fara_workflow.py"
-class FaraComputerUseAction:
+## 把模型建議變成可檢視的 Action 結果
+
+SDK 的自訂模組只需要 `name`、`__call__(state)` 與 `ModuleOutput`。`FaraProposalAction` 將 Fara 呼叫封裝在 Action 內，輸出限制為一筆操作提案。`runner` 是應用程式提供的轉接器，刻意不假定 Fara 的特定 client API。
+
+```python title="fara_action.py"
+from typing import Literal, Protocol, TypedDict
+
+from agentic_sdk import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
+
+
+class FaraProposal(TypedDict):
+    proposal_id: str
+    kind: Literal["click", "type", "scroll", "key"]
+    target: str
+    value: str | None
+    reason: str
+    source_revision: str
+
+
+class FaraRunner(Protocol):
+    def propose(self, task: str) -> FaraProposal: ...
+
+
+class FaraProposalAction:
     name = "action"
 
-    def __call__(self, state):
-        screenshot = controller.capture()
-        action = fara_client.next_action(
-            task=state.latest_user_message(),
-            screenshot=screenshot,
-            history=state.lookup("computer_history") or [],
+    def __init__(self, runner: FaraRunner) -> None:
+        self.runner = runner
+
+    def __call__(self, state: WorkflowState) -> ModuleOutput:
+        try:
+            proposal = self.runner.propose(state.latest_user_message())
+        except Exception as exc:
+            state.last_action_error = {"type": type(exc).__name__, "message": str(exc)}
+            return ModuleOutput(
+                next_module=None,
+                payload={"fara_proposal": None},
+                context_updates=[
+                    ContextEntry(
+                        type=ContextEntryType.ACTION_RESULT,
+                        content=f"error:{type(exc).__name__}",
+                        metadata={"ok": False, "source": "fara", "error": str(exc)},
+                    )
+                ],
+            )
+
+        content = str(proposal)
+        state.last_action_error = None
+        state.last_action_result = {"content": content, "model": "fara"}
+        return ModuleOutput(
+            next_module=None,
+            payload={
+                "latest_final_message": content,
+                "fara_proposal": proposal,
+            },
+            context_updates=[
+                ContextEntry(
+                    type=ContextEntryType.ACTION_RESULT,
+                    content=content,
+                    metadata={"ok": True, "source": "fara", "proposal_id": proposal["proposal_id"]},
+                )
+            ],
         )
-        return {"payload": {"proposed_action": action}, "next_module": "reflect"}
-
-
-class FaraReflect:
-    name = "reflect"
-
-    def __call__(self, state):
-        action = state.lookup("proposed_action")
-        decision = policy.check(action, visit_count=state.visit_counts.get("action", 0))
-        if decision.requires_approval:
-            return {"payload": {"approval_required": True}, "next_module": None}
-        controller.execute(decision.action)
-        return {"next_module": "action" if not controller.task_complete() else None}
 ```
 
-重要的是 `FaraReflect` 不是事後產生一段警告文字，而是在操作前阻擋不合規的座標、網域、輸入欄位或操作次數。以採購測試網站為例，模型提出 `click`「送出請款」後，政策回傳 `approval_required`，控制器沒有送出 HTTP 請求，且操作紀錄保留這次拒絕。這讓安全控制是流程的一部分，而不是依賴使用者記得遵守的約定。
+`FaraProposal` 是**本篇應用程式定義的正規化輸出**，不是宣稱為 Fara 的原生 client schema。runner 的工作是取得 Fara 所需的視覺上下文、設定超時與重試，並將供應商回傳資料轉成這六個欄位。`proposal_id` 用來追查單一提案，`kind`、`target`、`value` 與 `reason` 是應用程式檢視提案的最小欄位，`source_revision` 記錄產生提案的外部版本。實際 Fara client 的輸入與回傳格式應以 [Fara 文件](https://github.com/microsoft/fara) 為準，並隔離在 runner 實作內。
 
-## 從模型卡匯出可直接用在工作流程的 Fara 設定
+`next_module=None` 明確結束這次 Action。`payload` 讓呼叫端從 `result.entities["fara_proposal"]` 取得結構化提案；`last_action_result` 與 `context_updates` 則保留 SDK 標準的最終結果與可觀察紀錄。
 
-模型卡設定包含模型版本、A100 端點、Fara 模型、隔離測試環境與操作政策。應用程式只需要將 Action 和 Reflect 放進 `Workflow`：
+## 建立只執行 Fara Action 的 workflow
 
 ```python title="app.py"
+from agentic_sdk import Workflow
+
 workflow = Workflow(
-    workflow_name="受控電腦操作",
-    action=FaraComputerUseAction(),
-    reflect=FaraReflect(),
+    workflow_name="Fara 操作提案",
     entry_module="action",
+    action=FaraProposalAction(runner=fara_runner),
 )
+
+result = workflow.run("找出尚未核對的請款單，提出填入已核對金額的操作。")
+proposal = result.entities["fara_proposal"]
+print(result.final_message)
+print(proposal)
 ```
 
-這個組裝方式保留了 SDK 的標準控制流程：Action 提出下一步，Reflect 檢查並決定是否回到 Action。當需要加上登入、付款或刪除資料等高風險動作時，政策只要回傳人工確認即可中止自動迴圈。
+`proposal` 出現後不代表任何操作已發生。呼叫端要明確把它交給自己的檢視或核准流程；下面的最小例子只建立待審核紀錄，不呼叫瀏覽器或其他外部副作用。
 
-## 用操作記錄確認 Fara 是否部署成功
+```python title="review_proposal.py"
+review_record = {
+    "proposal_id": proposal["proposal_id"],
+    "status": "pending_review",
+    "proposal": proposal,
+}
+print(review_record)
+```
 
-我們不只確認任務能走到結尾，也針對最常造成錯誤自動化的情境建立測試紀錄。
+這段 workflow 驗證 Fara Action 是否符合 SDK 的模組契約。如何呈現、核准、拒絕或執行 `review_record`，是呼叫端的後續處理，不屬於這個 Action 模組。
 
-| 測試情境 | 預期行為 | 記錄的結果 |
+## 驗證 Action 輸出
+
+下表只驗證這個模組的輸入與輸出。
+
+| 測試情境 | 預期行為 | 需要保留的證據 |
 | --- | --- | --- |
-| 金額欄位改變位置 | 根據新畫面重新定位並輸入 | Reflect 比對欄位值與畫面變更後繼續 |
-| 點到可見但無關的按鈕 | 不把頁面切換誤判為成功 | 偵測不到預期內容時停止並附上截圖 |
-| 提出送出、刪除或付款操作 | 不執行，要求人工確認 | 控制器未呼叫外部動作，紀錄標示為 `approval_required` |
-| 反覆提出相同操作 | 終止迴圈而非持續嘗試 | 到達操作上限後回傳可重播的失敗紀錄 |
+| 提出填入金額操作 | 回傳一筆操作提案 | `result.entities["fara_proposal"]` |
+| Fara 無法產生提案 | 將 runner 例外轉為可識別的 Action 錯誤 | `last_action_error` 與 `ACTION_RESULT` error metadata |
+| Action 執行完成 | 不排程其他 SDK 模組 | `result.visit_counts` 與 `next_module=None` |
 
-每一步保存操作前後的畫面、模型回傳的動作、政策判斷和控制器結果。這讓我們在流程失敗時可以回答具體問題：是模型看錯畫面、政策阻擋了操作，還是網頁本身沒有如預期更新。它也讓測試結果能直接成為更新 Fara 模型卡時的回歸檢查，而不是一次性的展示。
+這些紀錄可用於區分 Fara 輸出差異與 SDK Action 模組契約的問題，也可作為 Fara 模型版本更新時的回歸檢查。
 
-## 讓工作流程在安全限制下操作電腦
+## 用 fake runner 驗證提案契約
 
-完成整合後，開發者可選擇 Fara 模型卡並在工作流程中加入受控的視覺操作。AI Hub 也能在模型卡中管理電腦操作需要的輸入、輸出與安全欄位，而不是把這些關鍵限制分散在各個應用程式。
+測試只替換 runner，不接觸瀏覽器或其他外部操作。這能驗證 Action 正確保留提案 schema 與 Action result，並證明這個模組本身不具備執行操作的能力。
+
+```python title="fara_action_test.py"
+from agentic_sdk import WorkflowState
+
+
+class FakeFaraRunner:
+    def propose(self, task: str) -> FaraProposal:
+        assert task == "找出尚未核對的請款單，提出填入已核對金額的操作。"
+        return {
+            "proposal_id": "proposal-001",
+            "kind": "type",
+            "target": "已核對金額欄位",
+            "value": "1200",
+            "reason": "請款單已標記為尚未核對",
+            "source_revision": "fara-1.5",
+        }
+
+
+state = WorkflowState(user_message="找出尚未核對的請款單，提出填入已核對金額的操作。")
+result = FaraProposalAction(FakeFaraRunner())(state)
+
+assert result["next_module"] is None
+assert result["payload"]["fara_proposal"]["proposal_id"] == "proposal-001"
+assert state.last_action_result == {"content": str(result["payload"]["fara_proposal"]), "model": "fara"}
+assert result["context_updates"][0].metadata["ok"] is True
+```
+
+## 將 Fara 限定在 Action 邊界
+
+這個模式讓開發者將 Fara 視覺提案掛入一個 SDK Action。SDK 的 `WorkflowState` 提供本輪輸入，`ModuleOutput` 提供固定的結果、狀態與紀錄格式；Fara 轉接器只負責產生提案。模型版本更新時，可分別檢查 Fara 提案內容與 Action 模組契約。
 
 ## 可直接帶走的做法
 
-- 每次只讓模型提出一個動作，將跨步驟規劃留在操作歷程，而不是一次執行一串指令。
-- 將允許動作、網域、欄位與最大步數寫成可版本化的政策，不放在提示文字裡。
-- 對每次操作保存提案、政策判斷、執行結果和前後畫面，讓失敗可重播。
-- 把有外部副作用的動作視為中止條件，由人員接手，而不是讓模型猜測是否可以繼續。
+- 以 `entry_module="action"` 驗證 Fara Action，不混入其他 workflow 模組。
+- 將 Fara client 差異封裝在 `FaraRunner`，讓 Action 只依賴一個提案介面。
+- 以 `payload` 保存結構化提案，以 `context_updates` 保留可觀察的 Action 結果。
+- 將 Fara 輸出轉成符合 Agentic SDK 規範的 Action 結果。
 
-視覺電腦操作的難處不只在於模型看不看得懂畫面，更在於每一次操作是否能被驗證、重播和中止。把模型輸出限制為單一步驟，再讓 Reflect 持有真正的執行權，能讓工作流程從展示性自動化走向可維運的工具操作。
+## 成果總結與展望
+
+完成這個整合後，使用者可以把自然語言任務轉成可檢視的 Fara 操作提案，並從同一個 Action 結果取得提案內容與產生紀錄。這讓畫面理解模型的輸出進入 SDK 固定的 `payload` 與 `ContextEntry` 介面；呼叫端可以依自己的流程接續處理提案，而不必解析特定 Fara client 的回傳格式。
+
+若要將此能力納入 Agentic SDK 原生支援，適合在 Action 家族提供可選的 `FaraProposalAction`，並以 `FaraRunner` 作為唯一外部依賴。原生模組應固定提案的 payload 欄位與 Action result metadata，但不承擔操作執行。這樣 Fara 的服務端點或 client API 改動可限制在 runner 實作，既有應用程式則仍以同一個 SDK Action 契約取得提案。
 
 ## 參考資料
 
 - [Fara GitHub 專案](https://github.com/microsoft/fara)
 - [Fara 論文](https://arxiv.org/abs/2606.20785)
 - [回覆與動作模組](../modules/action-modules.md)
-- [安全控制模組](../modules/reflect-modules.md)

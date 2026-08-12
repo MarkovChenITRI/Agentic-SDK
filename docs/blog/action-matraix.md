@@ -1,128 +1,159 @@
-# 用 MatrAIx 的角色設定產生不同風格的回覆
+# 用 MatrAIx Persona 1M 盤查 Action 回覆：不同 persona 下，條款仍要維持一致
 
-一般文字模型可以生成完整回覆，卻不會自然帶入不同使用者的觀點、偏好或表達方式。把角色設定直接混進提示文字看似簡單，但角色資料從哪裡來、是否能使用、是否影響事實陳述，以及相同條件能否重現，往往在第一個原型之後才浮現。
+客服使用者問：「這個方案能否在 14 天後退款？」已確認的條款是 7 天。不同背景的使用者可能偏好精簡、逐步解釋或正式的說明，但這些差異不能讓模型把 7 天講成「通常可在兩週內處理」。這不是角色不夠自然，而是回覆在不同 persona 情境下仍必須維持事實一致。
 
-我們在客服回覆流程遇到的第一個問題不是語氣不自然，而是角色設定壓過了資料來源。使用者詢問「這個方案能否在 14 天後退款？」知識庫中的條款明確寫著 7 天；某個偏向安撫的角色設定卻讓第一版回覆寫成「通常可在兩週內處理」。語氣聽起來友善，卻把產品條款改寫成不存在的承諾。
+MatrAIx 論文提出 Persona 8B 與約一百萬筆 quality-filtered persona coreset，使用 1,290 個類別維度描述模擬使用者，目的在於評估 AI 系統與數位產品。本文將 Persona 1M 用作**離線 Action 評估情境來源**：應用程式從已核准的 persona 維度建立測試案例，`GenerativeAction` 產生回覆，再比較不同 persona 情境下條款是否一致。本文不把資料集宣稱為可直接放進生產客服 `system_prompt` 的指示 API。
 
-我們將 MatrAIx Persona 1M 當成版本化的角色設定資料，而不是推論模型。部署在 A100 上的文字模型仍負責生成；Agentic SDK 的 Action 只從已核准的資料中選擇角色設定，再將它連同使用者問題與查到的資料放進提示內容。這個分工讓「使用哪個角色」成為可追查的設定，而不是散落在程式裡的一段文字。
+## 先看使用者感受到的差異
 
-## 先把角色設定和模型分開
-
-MatrAIx Persona 1M 是資料集，不是推論模型，也不是模型卡。文字模型卡描述部署的模型、端點與執行環境；角色資料則描述回覆需要採用的觀點、偏好與表達方式。兩者分開版本化，才能在更新資料時不誤以為模型行為已經改變。
-
-為了避免角色與事實互相覆蓋，我們將輸入分成四個層級。前面的層級可以約束後面的層級，但角色資料只能影響措辭和說明順序，不能改寫前面的內容。
-
-| 優先順序 | 來源 | 可影響的內容 |
+| 情境 | 只看單一客服問題 | 加入 Persona 1M 評估情境後 |
 | --- | --- | --- |
-| 1 | 系統安全規則 | 禁止內容、敏感資料與需要拒絕的要求 |
-| 2 | 已核准的產品條款與檢索證據 | 事實、日期、金額與資格條件 |
-| 3 | 使用者這一輪的問題 | 回覆焦點與需要澄清的資訊 |
-| 4 | MatrAIx 角色設定 | 語氣、解釋順序與互動偏好 |
+| 退款條款是 7 天 | 安撫語氣可能把事實講成「兩週內可處理」而未被發現 | 固定條款搭配多種 persona 評估情境，檢查每份 Action 回覆仍包含 7 天 |
+| 想覆蓋不同使用者背景 | 測試者靠直覺手寫少數提示 | 從已核准的 persona 維度產生可重跑的情境紀錄 |
+| Persona 資料更新 | 不容易判斷回覆差異來自模型或測試情境 | 可比對 persona 資料版本、選用維度、模型設定與 Action 回覆 |
+
+例如同一個已確認條款可得到兩種都正確的回覆：正式情境的期望是「此方案的退款期限為 7 天，超過期限無法受理。」；偏好逐步說明的情境則可接受「這個方案的退款期限是 7 天；若已接近期限，我可以協助你確認申請狀態。」改變的是如何說明，不能改變 7 天這個事實。
 
 ```text
-使用者問題 -> 選擇已核准的角色設定 -> Persona Action
-資料來源與檢索結果 ---------------------------> Persona Action
-Persona Action -> AI Hub 文字模型服務 -> 角色化回覆
-    -> Reflect 檢查安全與事實
+Persona 1M 已核准維度 -> 評估案例 -> GenerativeAction -> 回覆與評估紀錄
 ```
 
-## 用 MatrAIx 的角色設定（Persona）資料決定回覆方向
-
-Persona 1M 作為文字模型卡旁的版本化資料資產。部署資料保存資料集版本、授權條件、可用欄位清單、角色識別碼與資料來源分類。這些欄位讓同一個工作流程在不同環境中可以選到相同的角色設定，也讓審查者能知道回覆風格來自哪一版資料。
-
-敏感欄位和模仿真實人物的設定不得使用；篩選與選用規則是整合交付的一部分。
-
-## 讓加速文字模型依角色設定產生回覆
-
-部署在 A100 上的文字模型，以 `api_key`、`base_url` 與 `model` 提供回覆。角色設定只改變受控的提示內容，不改變模型權重，也不改寫從資料來源找到的事實。
-
-模型和角色資料的部署設定分別保存，並在執行時合併：
-
-```python title="matraix_deployment.py"
-deployment = {
-    "model": {"base_url": chat_url, "api_key": api_key, "model": chat_model},
-    "persona": {"revision": "persona-1m-2026-08", "allowlist": "support-v1"},
-}
+```mermaid
+flowchart LR
+    Dataset[Persona 1M 資料快照] --> Case[應用程式建立評估案例]
+    Policy[已確認的產品條款] --> Prompt[固定客服提示]
+    Case --> Prompt
+    Prompt --> Action[GenerativeAction]
+    Action --> Result[action result]
+    Case --> Audit[評估紀錄]
+    Result --> Audit
 ```
 
-這個邊界很重要。更換模型卡時，角色資料的選擇規則不會跟著改；更新角色資料時，也不會悄悄改動文字模型的部署版本。
+!!! note "本文的責任邊界"
 
-## 讓 Action 用角色設定引導模型回覆
+    Persona 1M 的下載、授權、欄位挑選與情境設計都在建立 Action 前完成。本文只處理 Action 回覆如何進入可重跑的 persona 評估；它不把 persona 記錄當作 production prompt，也不負責資料查找或回覆檢查模組。
 
-`MatrAIxPersonaAction` 會合併使用者任務、找到的資料與已核准的角色設定。系統安全規則與資料事實優先，角色設定只影響語氣與偏好。這個模組獨立實作，不依賴 `GenerativeAction` 的內部訊息組裝，因為角色資料的選擇與可追查性本身就是公開行為的一部分。
+## 將 Persona 1M 資料縮成可重跑的評估案例
 
-```python title="matraix_action.py"
-class MatrAIxPersonaAction:
-    name = "action"
+論文公開的是大量 persona 記錄與類別維度，而不是客服提示詞 API。應用程式應先依資料使用條件挑選少量、與產品測試相關的維度，並保存資料快照或版本識別。下列 `PersonaEvaluationCase` 是本篇應用程式的測試資料模型，不是假定的 MatrAIx 原生 schema。
 
-    def __init__(self, client, personas) -> None:
-        self.client = client
-        self.personas = personas
+```python title="persona_evaluation_case.py"
+from dataclasses import dataclass
 
-    def __call__(self, state):
-        persona = self.personas.select(
-            persona_id=state.lookup("persona_id"),
-            allowlist="support-v1",
-        )
-        response = self.client.complete(
-            system=build_system_prompt(persona),
-            user=state.latest_user_message(),
-            evidence=state.lookup("latest_retrieved_content"),
-        )
-        return {
-            "payload": {"persona_revision": persona.revision, "content": response.content},
-            "next_module": "reflect",
-        }
-```
 
-`build_system_prompt()` 只接收已篩選的欄位。敏感欄位、可能用於模仿真實人物的描述與未授權資料在進入模型之前就被排除，而不是等模型產生回覆後才嘗試清除。
+@dataclass(frozen=True)
+class PersonaEvaluationCase:
+    case_id: str
+    dataset_revision: str
+    selected_dimensions: dict[str, str]
+    user_question: str
+    required_fact: str
 
-對退款問題，Action 寫入模型的核心證據是「退款期限為 7 天」，角色資料只留下「先說明限制，再提供下一個可協助的步驟」。因此不論選到溫和、精簡或技術導向的角色，回覆都必須保留 7 天這個條件；改變的只能是它如何說明例外與後續處理方式。
 
-## 匯出可重現角色設定的部署設定
-
-部署設定包含文字模型卡版本、A100 端點、角色資料版本、欄位結構、可用欄位清單與選擇種子值，並直接附加到 `Workflow`：
-
-```python title="app.py"
-workflow = Workflow(
-    workflow_name="角色化客服回覆",
-    retrieve=knowledge_retrieve,
-    action=MatrAIxPersonaAction(client, personas),
-    reflect=persona_reflect,
+case = PersonaEvaluationCase(
+    case_id="refund-step-by-step-001",
+    dataset_revision="persona-1m-snapshot-2026-08",
+    # 這是應用程式從已核准 persona 維度映射出的分析標籤，
+    # 不是宣稱為 Persona 1M 的原生欄位名稱。
+    selected_dimensions={"response_style_group": "step_by_step"},
+    user_question="這個方案能否在 14 天後退款？",
+    required_fact="退款期限為 7 天",
 )
 ```
 
-選擇種子值和資料版本會與回覆記錄一起保存。這使得開發者可以回到某次回覆，重新取得相同角色設定、相同模型組態與相同檢索資料，檢查差異究竟出在哪一層。
+這個案例不將完整 persona 記錄送給模型。`selected_dimensions` 是應用程式正規化後的分析標籤，只用於分組與分析，例如找出「偏好逐步說明」的測試案例是否比其他案例更常遺漏條款；它不是 Persona 1M 原生 schema 的宣稱。模型收到的仍是固定客服規則與產品事實。
 
-## 用版本資料與回覆記錄確認角色設定是否生效
+## 用固定 Action 產生可比較的回覆
 
-我們使用同一組客服問題，分別套用不同的已核准角色設定。驗證時檢查授權測試資料、模型服務輸出、重複選擇的結果、特徵是否正確呈現或排除、事實是否維持一致，以及禁止欄位和不確定回答是否符合規則。
+以下 workflow 從 Action 開始，刻意只配置本篇的 Action 模組。固定提示要求回覆包含已確認條款；persona case 不改寫提示，只提供評估標籤與同一個使用者問題。
 
-| 測試情境 | 必須維持的事實 | 可改變的部分 | 檢查方式 |
-| --- | --- | --- | --- |
-| 退款期限 | 條款中的 7 天 | 安撫方式與下一步建議 | 比對回覆與檢索證據 |
-| 方案價格 | 已核准的價格表 | 解釋的詳略 | 比對回覆中的金額與版本 |
-| 禁止欄位 | 不得出現在提示或回覆 | 無 | 檢查 Action 輸入與回覆記錄 |
-| 相同角色與問題 | 選到相同資料版本 | 無 | 比對角色修訂版與選擇種子值 |
+```python title="app.py"
+import os
 
-最重要的兩個測試是：角色語氣變化時，產品條款與檢索到的事實不得改寫；指定被排除的欄位時，該欄位不得出現在模型提示內容或回覆記錄。前者確保角色不會取代知識，後者確保資料治理在模型呼叫之前就生效。
+from agentic_sdk import Workflow
+from agentic_sdk.modules import GenerativeAction
 
-## 讓同一個加速端點支援不同角色的回覆
 
-完成整合後，開發者可用同一個加速文字模型產生可重現的角色化回覆。AI Hub 管理角色資料資產，SDK 則透過 `PersonaProvider` 與部署設定載入工具，讓這些資料以一致方式進入不同工作流程。
+SUPPORT_POLICY_REVISION = "support-policy-2026-08"
+SUPPORT_POLICY = """
+你是客服人員。已確認的產品條款：退款期限為 7 天。
+只根據已確認條款與使用者提供的資訊回答；不確定時要明確說明限制。
+先直接回答問題，再提供一個明確的下一步。
+""".strip()
+
+workflow = Workflow(
+    workflow_name="Persona 評估客服回覆",
+    entry_module="action",
+    action=GenerativeAction(
+        api_key=os.environ["CHAT_API_KEY"],
+        base_url=os.environ["CHAT_BASE_URL"],
+        model=os.environ["CHAT_MODEL"],
+        system_prompt=SUPPORT_POLICY,
+    ),
+)
+
+result = workflow.run(case.user_question)
+assert case.required_fact in result.final_message
+```
+
+`result.final_message` 與 `result.entities["latest_final_message"]` 都是本輪 Action 的回覆。這個斷言不是完整語意評估，但能先抓出把 7 天遺漏或改寫成其他期限的明顯回歸。
+
+## 記錄 persona 分組與 Action 結果
+
+MatrAIx 的資料版本不屬於 `GenerativeAction` 的固定輸出，必須由應用程式在執行測試時保存。將 case 與同一次 Action 結果寫入同一筆紀錄，才能比較不同 persona 分組下的失敗率。
+
+```python title="persona_evaluation_record.py"
+evaluation_record = {
+    "case_id": case.case_id,
+    "dataset_revision": case.dataset_revision,
+    "selected_dimensions": case.selected_dimensions,
+    "support_policy_revision": SUPPORT_POLICY_REVISION,
+    "model": os.environ["CHAT_MODEL"],
+    "question": case.user_question,
+    "required_fact": case.required_fact,
+    "response": result.final_message,
+    "contains_required_fact": case.required_fact in result.final_message,
+}
+```
+
+這仍是**應用程式的評估紀錄責任**：Agentic SDK 不會自動把 Persona 1M 資料版本綁到 `WorkflowResult`。文章刻意把資料來源與 Action 的輸入輸出分開，避免誤導讀者以為 SDK 已經管理 MatrAIx 的下載、授權或 persona selection。
+
+## 驗證不同 persona 情境下的 Action 回覆
+
+| 測試情境 | 預期行為 | 需要保留的證據 |
+| --- | --- | --- |
+| 任一 persona case | 回覆包含「退款期限為 7 天」 | case ID、資料快照、Action 回覆與布林結果 |
+| 逐步說明與精簡偏好 | 回覆可以長短不同，條款不得變動 | 兩組 selected dimensions 與 Action 回覆 |
+| Persona 資料快照更新 | 可重新比較新舊資料下的失敗率 | dataset revision、case ID 與模型設定 |
+| Action 執行完成 | 回傳最終回覆，不排程其他 SDK 模組 | `result.final_message`、`result.visit_counts` 與 `next_module=None` |
+| 模型呼叫失敗 | 回傳或拋出可識別的 Action 錯誤 | Action 的錯誤結果與紀錄 |
+
+## 用固定案例驗證評估資料
+
+不需要呼叫模型即可先驗證案例本身。這個測試確保每個要送入 Action 的案例都有版本、問題與不可被改寫的必要條款。
+
+```python title="persona_evaluation_case_test.py"
+assert case.dataset_revision == "persona-1m-snapshot-2026-08"
+assert case.selected_dimensions["response_style_group"] == "step_by_step"
+assert case.user_question == "這個方案能否在 14 天後退款？"
+assert case.required_fact == "退款期限為 7 天"
+```
 
 ## 可直接帶走的做法
 
-- 把角色資料、模型卡與檢索證據視為不同資產，各自版本化並分開記錄。
-- 在提示內容中明確定義優先順序：安全規則與證據先於角色，角色只能控制表達。
-- 測試同一題在不同角色下的回覆，驗證語氣會變、事實不變。
-- 在模型呼叫前排除禁止欄位，並在操作紀錄中保留角色版本和證據版本。
+- 將 Persona 1M 視為多樣化模擬使用者的評估資料來源，不假定它提供可直接投入 production prompt 的 API。
+- 從已核准資料維度建立少量可重跑的 `PersonaEvaluationCase`，並保存資料快照識別。
+- 以固定產品條款執行 `GenerativeAction`，再比較 persona 分組下的回覆是否保留必要事實。
+- 把 persona 資料版本、選用維度、模型設定與 Action 結果放在同一筆評估紀錄。
 
-角色化不是替回覆加上一層文案，而是一個資料選擇與安全約束問題。當角色資料、模型卡、檢索證據和回覆記錄都有版本時，團隊才有能力在維持事實正確的前提下，持續調整不同使用者需要的表達方式。
+## 成果總結與展望
+
+完成這個整合後，產品團隊得到的功能是：能以更多樣的模擬使用者情境盤查同一個 Action，在不同說明偏好下仍不遺漏或改寫已確認條款。這不是讓 persona 資料直接控制生產回覆，而是讓模型回覆在面對不同使用者背景時有可重跑的品質證據。
+
+若要將此能力納入 Agentic SDK 原生支援，適合在 Action 家族旁提供可選的評估 helper：它接收 application-owned persona cases、執行固定問題集並產出可比較的評估紀錄。Persona 資料下載、授權與欄位選用仍應留在應用程式或額外整合套件，不新增 workflow 模組。
 
 ## 參考資料
 
 - [MatrAIx 論文](https://arxiv.org/abs/2608.04205)
 - [MatrAIx Persona 1M 資料集](https://huggingface.co/datasets/MatrAIx2026/MatrAIx_Persona_1M)
 - [回覆與動作模組](../modules/action-modules.md)
-- [安全控制模組](../modules/reflect-modules.md)

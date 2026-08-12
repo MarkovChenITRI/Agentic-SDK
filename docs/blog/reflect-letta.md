@@ -1,122 +1,259 @@
-# 用 Letta 將對話整理成可保存的長期記憶
+# 別把雨天備案存成偏好：用 Letta 沉澱真正長期有效的資訊
 
-長對話最容易先壞在看似不起眼的地方：使用者在第十輪提到的偏好，到了第五十輪仍然重要，但已不適合把整段對話原封不動塞進模型。模型讀得越多，花費與等待時間越難控制；模型讀得太少，又會忘記前面已經確認的事。
+旅遊規劃助手最難的地方不是記住更多對話，而是分辨哪些話值得被記住。使用者先確認「兩人同行，其中一人不能吃海鮮」「住宿靠近車站」，隔天又說「第二天改成下雨」。前兩項會影響之後每一次建議；最後一項只描述今天的情況。若系統一律保存，往後的晴天行程也可能被錯誤地排成室內活動。
 
-我們先在旅遊規劃助手上看見這個問題。使用者第一天確認「兩人同行、其中一人不能吃海鮮、住宿要靠近車站」，隔天只問：「第二天改成下雨，行程怎麼調整？」只靠最新一句話時，系統安排了海鮮午餐；每次附上完整對話時，答案雖正確，卻連無關的問候與已淘汰景點都送進模型。
+這篇文章以這個情境示範：回覆模組（Action）已完成一輪回答後，反思模組（Reflect）如何判定可長期沿用的資訊，再交給 Letta 的持久化 state 與 memory block 能力保存。讀完後，你會得到一個可替換的 `LettaReflect` 邊界，以及一份能說明「這次到底請求保存什麼、為什麼保存」的結果收據。
 
-我們把 Letta 接到 AI Hub 的文字與嵌入模型服務，讓它負責保存需要跨對話留下的內容，Agentic SDK 則負責決定這一輪要不要更新記憶、要找回哪一段內容，以及如何把找回結果帶回回覆流程。關鍵不是把 Letta 當成另一個模型，而是把它當成模型服務旁的長期記憶層。
+## 先看使用者感受到的差異
 
-## 從一段追問看見記憶問題
-
-我們將同一段對話拆成兩層。`InContextMemory` 保留目前回合需要的完整脈絡；Letta 只保存跨回合仍有效的偏好、確認過的決定和其來源摘要。回覆前，工作流程根據雨天行程這個問題找回三項限制；回覆完成後，Reflect 才判斷使用者是否又做了值得長期保存的新決定。
-
-這讓「記住」不再是一個模糊的副作用，而是一筆有理由的紀錄。下表呈現這個案例的保存邊界。
-
-| 對話內容 | 是否保存 | 原因 |
+| 情境 | 沒有沉澱規則時 | 加入 LettaReflect 後 |
 | --- | --- | --- |
-| 兩人同行、其中一人不能吃海鮮 | 保存 | 會影響多天的餐廳與行程選擇 |
-| 住宿靠近車站 | 保存 | 是已確認的行程約束 |
-| 今天先看哪個景點 | 不保存 | 只是當前回合的探索，不代表最後決定 |
-| 改成雨天備案 | 保存 | 改變已確認行程的後續規劃 |
+| 使用者確認不吃海鮮 | 偏好可能只留在逐漸被截斷的對話裡 | Reflect 將已確認限制交給 Letta 保存，後續流程可依收據追查 |
+| 使用者補充靠近車站 | 新限制容易和舊對話混在一起 | 保存結果包含候選識別與命名空間，可知道本輪新增了什麼 |
+| 當天改成下雨 | 雨天備案可能被誤當固定偏好 | Reflect 僅留下本輪反思，不建立長期保存候選 |
+
+本文只深入這條流程中由 Reflect 接手的一段：它接收完成的 Action 結果與當前對話，決定是否保存，並回傳統一結果。下一輪如何查回資料、如何排序候選，以及查回內容如何送入 Action，都是相鄰流程的責任，不會在這裡假裝已經完成。
 
 ```text
-使用者訊息 -> Agentic SDK Workflow -> Letta 找回相關記憶
-    -> AI Hub 文字模型服務 -> 產生回覆 -> Reflect 檢查
-    -> 需要保留：Letta 保存摘要
-    -> 不需要保留：結束本輪工作流程
+Action 結果 -> LettaReflect -> 應用程式 Letta adapter -> Letta memory block -> Reflect 結果
 ```
 
-## 用 Letta 將長期記憶整理成摘要並保存
-
-模型卡記錄文字或嵌入模型、執行環境與部署條件。Letta 使用這些模型服務管理核心記憶、長期記憶，以及找回過去對話的內容。這個分工讓工作流程只關心「需要什麼記憶」，不需要知道模型跑在哪張 GPU、向量儲存放在哪裡。
-
-每個部署組態都保存模型卡版本、模型名稱、執行環境、端點網址、Letta 版本、記憶儲存位置與憑證參照。這些欄位看起來像部署細節，卻是重現問題的必要條件：同一段對話得到不同結果時，我們能分辨是模型版本、嵌入版本，還是保存的記憶內容改變。
-
-## 讓記憶服務使用 OpenAI 相容的模型服務
-
-Agentic SDK 的模型節點以 `api_key`、`base_url` 與 `model` 連到 OpenAI 相容的模型服務。記憶服務與工作流程共用這組設定，因此應用程式不必為特定硬體或供應商另外撰寫連線邏輯。
-
-設定的重點是把端點集中在部署資料，而不是寫死在模組裡：
-
-```python title="letta_deployment.py"
-memory_deployment = {
-    "chat": {"base_url": chat_url, "api_key": api_key, "model": chat_model},
-    "embedding": {"base_url": embedding_url, "api_key": api_key, "model": embedding_model},
-    "memory_namespace": "travel-planner",
-}
+```mermaid
+flowchart LR
+    Action[完成的 Action 結果] --> Reflect[LettaReflect]
+    Transcript[本輪對話] --> Reflect
+    Reflect --> Adapter[LettaReflectAdapter]
+    Adapter --> Letta[Letta: 持久化 state 與 memory block]
+    Letta --> Receipt[應用程式保存收據]
+    Receipt --> Result[Reflect payload 與 reflection entry]
 ```
 
-當文字模型或嵌入模型升級時，只需要更新模型卡與這份部署設定。工作流程和業務程式維持同一個公開介面，這也是我們選擇 OpenAI 相容端點而非在每個模組接入特定供應商用戶端的原因。
+!!! note "本文的責任邊界"
 
-## 由 Reflect 決定何時寫入與找回記憶
+    本文只驗證 Reflect 對「是否保存」的判定與保存收據。下一輪如何查回資料、如何排序候選，以及查回內容如何送入 Action，分別屬於應用程式與其他模組的設計，並未在這個範例中實作。
 
-`LettaReflect` 與 `LettaPersistentMemory` 根據回覆結果、可用證據與寫入結果，決定是否整理摘要、保存內容、找回記憶或明確回報失敗。這個做法只依賴 SDK 的 `PersistentMemory`、`WorkflowState`、`ContextEntry` 與 `ModuleOutput` 公開介面，因此不需要改動 `Workflow` 的執行規則。
+## 從回覆中區分可沉澱資訊
 
-下面的骨架展示了 Reflect 的責任邊界。它不生成最終回覆，也不直接改寫模型內容；它只留下下一步所需的結構化結果，讓工作流程決定是否再次執行 Action。
+本案例以 Action 的候選回覆作為 Reflect 輸入。LettaReflect 依可追查的規則區分長期資訊與本輪暫時安排。
+
+| Action 結果中的資訊 | Reflect 判定 | 理由 |
+| --- | --- | --- |
+| 同行者不能吃海鮮 | 建立可保存候選 | 會影響後續餐廳與行程安排 |
+| 住宿靠近車站 | 建立可保存候選 | 是已確認的交通限制 |
+| 雨天改到室內景點 | 僅記錄本輪反思 | 依當日條件成立，不代表固定偏好 |
+| 尚待使用者確認的景點 | 不建立候選 | 尚未成為已確認資訊 |
+
+這張表是 LettaReflect 的資料判定規格。Action 只產生候選回覆；LettaReflect 才決定候選回覆中的資訊是否交給應用程式寫入 Letta memory block。
+
+## 先確認兩份會交接的契約
+
+這個案例的關鍵不是假設任意字典都能被保存，而是先說清楚 Action 與 Letta adapter 要提供什麼。SDK 內建的 `DirectAnswerAction`、`GenerativeAction` 與 `ToolCallAction` 都會把最終文字寫成 `state.last_action_result["content"]`；若你使用自訂 Action，也需要建立同一個欄位，Reflect 才有明確輸入。
+
+| 交接點 | 最小要求 | 缺少時的結果 |
+| --- | --- | --- |
+| Action -> LettaReflect | `last_action_result["content"]` 是非空字串 | Reflect 記錄 `reflect_verdict="fail"`；`durable_memory_status="skipped"` 只表示沒有嘗試保存，不表示 Reflect 沒有執行 |
+| LettaReflect -> adapter | Action 文字、對話內容、workflow 名稱與 session ID | adapter 依應用程式規則整理候選並寫入 Letta memory block |
+| adapter -> LettaReflect | verdict、原因、保存狀態、候選識別與記憶 block 參照 | Reflect 將應用程式收據轉為 SDK payload 與 reflection entry |
+
+Letta 官方文件說明 state、訊息與 memory blocks 會被持久化，且 memory block 可由開發者透過 API 編輯；它沒有定義本篇的候選萃取規則、收據格式或 embedding revision。`LettaReflectAdapter` 因此是你實作外部整合的位置，而不是 SDK 已經附帶的 Letta client。它需要由應用程式決定認證方式、memory block 參照、候選整理規則、超時與重試策略；本文只固定它交回 SDK 的收據格式。
+
+## 將 Letta 設為 Reflect 的轉接邊界
+
+Letta 轉接器負責兩件事：依應用程式規則從 Action 結果與本輪上下文整理可保存候選，再透過 Letta API 寫入或更新 memory block。第三件事是回傳**應用程式定義的**保存收據。SDK 端只依賴這個轉接契約，不假定 Letta client 的特定 API 名稱或 Letta 會自動萃取、嵌入內容。
+
+```python title="letta_reflect_contract.py"
+from dataclasses import dataclass
+from typing import Protocol
+
+
+@dataclass(frozen=True)
+class LettaReflectionReceipt:
+    verdict: str
+    reason: str
+    durable_memory_status: str
+    durable_memory_count: int
+    candidate_ids: tuple[str, ...]
+    memory_namespace: str
+    memory_block_id: str | None
+
+
+class LettaReflectAdapter(Protocol):
+    def reflect_and_persist(
+        self,
+        *,
+        action_result: str,
+        conversation_context: str,
+        workflow_name: str,
+        session_id: str,
+    ) -> LettaReflectionReceipt: ...
+```
+
+`LettaReflectionReceipt` 是本篇的 adapter 資料模型，不是 Letta API response。轉接器的實作應記錄 Letta client 或服務版本、memory block 參照與保存結果。`candidate_ids` 可對應本輪成功處理的候選內容；`memory_namespace` 與 `memory_block_id` 讓同一筆收據能追查到資料落點。這些資料將「本輪 Action 結果」連到「哪些候選被寫入 memory block」，用於追查後續行為差異。
+
+## 用 LettaReflect 回傳統一的 Reflect 結果
+
+`LettaReflect` 是此案例唯一替換的 SDK 模組。同一個 Reflect 結果同時表達 Action 結果是否可處理，以及長期資訊是否已成功沉澱。
 
 ```python title="letta_reflect.py"
+from agentic_sdk import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
+
+
 class LettaReflect:
     name = "reflect"
 
-    def __init__(self, memory) -> None:
-        self.memory = memory
+    def __init__(self, adapter: LettaReflectAdapter) -> None:
+        self.adapter = adapter
 
-    def __call__(self, state):
-        reply = state.lookup("latest_final_message") or ""
-        if not reply:
-            return {"next_module": None}
+    def __call__(self, state: WorkflowState) -> ModuleOutput:
+        action_result = state.last_action_result or {}
+        content = str(action_result.get("content", "")).strip()
+        if not content:
+            return ModuleOutput(
+                next_module=None,
+                payload={
+                    "reflect_verdict": "fail",
+                    "durable_memory_status": "skipped",
+                    "durable_memory_count": 0,
+                },
+                context_updates=[
+                    ContextEntry(
+                        type=ContextEntryType.REFLECTION,
+                        content="verdict=fail reason=missing action result",
+                        metadata={"strategy": "letta_reflect", "reason": "missing action result"},
+                    )
+                ],
+            )
 
-        summary = self.memory.summarize(state.latest_user_message(), reply)
-        if summary.should_save:
-            self.memory.save(namespace="travel-planner", content=summary.content)
-        return {"payload": {"memory_saved": summary.should_save}, "next_module": None}
+        conversation_context = state.memory.as_text_transcript() if state.memory is not None else state.user_message
+        receipt = self.adapter.reflect_and_persist(
+            action_result=content,
+            conversation_context=conversation_context,
+            workflow_name=state.workflow_name,
+            session_id=state.session_id,
+        )
+        return ModuleOutput(
+            next_module=None,
+            payload={
+                "reflect_verdict": receipt.verdict,
+                "durable_memory_status": receipt.durable_memory_status,
+                "durable_memory_count": receipt.durable_memory_count,
+                "durable_memory_candidate_ids": list(receipt.candidate_ids),
+                "durable_memory_namespace": receipt.memory_namespace,
+                "durable_memory_block_id": receipt.memory_block_id,
+            },
+            context_updates=[
+                ContextEntry(
+                    type=ContextEntryType.REFLECTION,
+                    content=f"verdict={receipt.verdict} reason={receipt.reason}",
+                    metadata={
+                        "strategy": "letta_reflect",
+                        "reason": receipt.reason,
+                        "durable_memory_status": receipt.durable_memory_status,
+                        "durable_memory_count": receipt.durable_memory_count,
+                        "candidate_ids": list(receipt.candidate_ids),
+                        "memory_namespace": receipt.memory_namespace,
+                        "memory_block_id": receipt.memory_block_id,
+                    },
+                )
+            ],
+        )
 ```
 
-實作時，找回內容會以 `ContextEntry` 放回本輪狀態，而不是直接覆蓋使用者訊息。這使得回覆、事件追蹤和除錯紀錄都能看見系統用了哪些記憶。Reflect 也會拒絕把只有推測、已被使用者否定，或沒有來源的內容寫進長期記憶，避免錯誤答案變成下一輪的前提。
+`next_module=None` 結束這次 Reflect。`reflect_verdict` 表達本輪結果是否可處理；`durable_memory_status` 與 `durable_memory_count` 只表達 Letta 保存作業的狀態。當 Action 結果不存在時，Reflect 已執行並留下失敗 entry，但保存作業以 `skipped` 表示未嘗試；Letta 服務無法保存時，轉接器則回傳 `failed` receipt。文件不將任一情況表示成查回資料失敗。
 
-## 匯出可直接用在工作流程的記憶設定
+## 用完成的 Action 結果驗證 Letta Reflect
 
-模型卡部署記錄會產生版本化設定，內容包含模型服務連線、Letta 連線與記憶命名空間。應用程式讀取設定後即可附加到 `Workflow`：
+Reflect 的輸入契約是已完成的 `last_action_result` 與目前對話。以下範例建立符合該契約的 `WorkflowState`，只驗證 LettaReflect 的輸入與輸出，不配置或實作 Action。
 
-```python title="app.py"
-workflow = Workflow(
+```python title="reflect_state_fixture.py"
+from agentic_sdk import InContextMemory, WorkflowState
+
+
+user_message = "第二天改成下雨，行程怎麼調整？"
+memory = InContextMemory()
+memory.append_message("user", user_message)
+
+state = WorkflowState(
+    user_message=user_message,
     workflow_name="旅遊規劃助手",
-    memory_store=letta_memory,
-    action=travel_action,
-    reflect=LettaReflect(letta_memory),
+    session_id="travel-session-001",
+    memory=memory,
 )
+state.last_action_result = {
+    "content": "雨天改到室內景點，午餐仍排除海鮮。",
+}
 ```
 
-這段組裝刻意很短。模型服務、記憶命名空間與憑證都由部署設定處理；應用程式只表達這條工作流程需要長期記憶和一個回覆模組。
+在完整工作流程中，SDK 會在 Action 完成後呼叫 Reflect；這是 LettaReflect 所依賴的既有輸入契約。下一節以這個 `state` 搭配 fake adapter 驗證 Reflect 輸出；應用程式可從 Reflect 的 payload 與 reflection entry 讀取本輪判定與保存狀態。
 
-## 確認長期記憶能正確寫入與找回
+## 用 fake adapter 驗證 Reflect 契約
 
-我們以三輪對話驗證這條流程。測試的通過條件不是模型能不能寫出一段流暢文字，而是下一輪是否找回恰當的限制，並留下可檢查的保存理由。
+測試不需要連到 Letta 服務。以固定 receipt 的 fake adapter 驗證 `LettaReflect` 是否交出正確輸入與可觀察結果，將外部服務測試留給 adapter 自己的整合測試。
 
-| 回合 | 使用者新增資訊 | Reflect 的紀錄 | 下一輪可找回的內容 |
-| --- | --- | --- | --- |
-| 1 | 兩人同行，不能吃海鮮 | 建立飲食與同行限制摘要 | 飲食限制、同行者數量 |
-| 2 | 住宿要靠近車站 | 新增住宿偏好，不覆寫前一筆 | 飲食限制、同行者數量、住宿偏好 |
-| 3 | 第二天改成下雨 | 找回前兩輪限制，保存雨天備案 | 三項限制與雨天備案 |
+```python title="reflect_contract_test.py"
+from dataclasses import dataclass
 
-另外也測試空結果、錯誤端點、錯誤憑證、使用者撤回偏好，以及跨對話重新建立。每次測試記錄模型卡版本、執行環境、命令、測試資料與追蹤資料。這些資料讓我們能把「模型回答不同」拆成可檢查的問題，而不是把所有差異都歸因於模型隨機性。
 
-## 隨模型部署一併提供長期記憶
+@dataclass
+class FakeLettaAdapter:
+    receipt: LettaReflectionReceipt
+    received_action_result: str | None = None
 
-完成整合後，開發者可在工作流程中使用能保留來源脈絡的長期記憶。這個案例也讓 AI Hub 的模型部署不只交付一個端點，而能一併提供該模型需要的記憶服務與版本化設定。
+    def reflect_and_persist(self, **kwargs: str) -> LettaReflectionReceipt:
+        self.received_action_result = kwargs["action_result"]
+        return self.receipt
+
+
+adapter = FakeLettaAdapter(
+    receipt=LettaReflectionReceipt(
+        verdict="pass",
+        reason="confirmed dietary restriction",
+        durable_memory_status="stored",
+        durable_memory_count=1,
+        candidate_ids=("memory-candidate-001",),
+        memory_namespace="travel-planner",
+        memory_block_id="block-travel-preferences",
+    )
+)
+result = LettaReflect(adapter)(state)
+
+assert adapter.received_action_result == "雨天改到室內景點，午餐仍排除海鮮。"
+assert result["payload"]["durable_memory_status"] == "stored"
+assert result["payload"]["durable_memory_candidate_ids"] == ["memory-candidate-001"]
+assert result["context_updates"][0].metadata["memory_block_id"] == "block-travel-preferences"
+```
+
+這是 `LettaReflect` 的模組測試，不是 Letta 服務整合測試。真正接上服務後，adapter 的整合測試應另外驗證命名空間、認證、超時，以及候選識別在你選用的 Letta 儲存策略中可被追查；查回策略仍是另一條流程的測試範圍。
+
+## 用收據驗證 memory block 寫入
+
+驗證條件以 Reflect 的輸入、收據與輸出為準，避免將「下次是否找回」混入本篇的責任範圍。
+
+| 情境 | LettaReflect 預期結果 | 需要保留的證據 |
+| --- | --- | --- |
+| 沒有可保存資訊 | `pass`、`skipped`、計數為 0 | reflection entry 與 receipt；不需要候選識別碼 |
+| 使用者確認飲食限制 | `pass`、`stored`、計數大於 0 | 候選內容、candidate ID、memory block 參照與保存收據 |
+| 使用者更新住宿偏好 | `pass`、`stored`，收據可追查取代關係 | 新舊候選識別、命名空間與保存收據 |
+| Letta 保存失敗 | `fail`、`failed`、計數為 0 | 轉接器錯誤原因與 reflection entry；不將失敗內容當成已保存 |
+| Action 沒有結果 | `fail`、`skipped`、計數為 0 | `missing action result` 的 reflection entry |
+
+測試應固定 Action 結果、對話上下文與 Letta 轉接器回傳值，再比對 Reflect 的 payload、reflection metadata 與轉接器接收的輸入。這讓候選判定、memory block 寫入與 SDK Reflect 輸出可分別驗證。
 
 ## 可直接帶走的做法
 
-- 將目前對話與長期記憶分開：前者保留完整脈絡，後者只留下會影響後續決策的內容。
-- 每筆保存內容都寫入原因、命名空間和來源回合，讓找回結果可追查。
-- 將「使用者明確確認」與「模型暫時推測」視為不同資料類型，後者不能直接保存。
-- 用多輪追問驗證找回內容，而不是只看單一回覆是否自然。
+- 由 Action 產生候選回覆，由 LettaReflect 判定其中哪些資訊可沉澱。
+- 以轉接器封裝 Letta memory block 的寫入與保存，不在 SDK 文件中假定特定 client 方法或未驗證的自動萃取能力。
+- 以單一 Reflect 結果回傳 verdict、保存狀態與保存數量。
+- 使用 reflection entry 與保存收據驗證結果，不將後續資料查回納入這個 Reflect 的責任。
 
-長期記憶不是把更多內容塞進內容長度限制，而是為每一筆可保留資訊建立清楚的保存理由、命名空間與找回路徑。把這個責任留給 Letta 和 Reflect，讓 Action 專注回答眼前問題，工作流程才能在對話變長後仍保持可理解與可維護。
+## 成果總結與展望
+
+完成這個整合後，使用者得到的功能是：系統能在每輪回覆完成後，將已確認且可長期沿用的資訊從暫時安排中區分出來，並取得可追查的 memory block 保存結果。使用者不需要把「是否保存」的判定散落在 Action 或呼叫端；應用程式可依 Reflect 的 verdict、保存狀態和收據處理本輪結果。
+
+若要將此能力納入 Agentic SDK 原生支援，適合以 Reflect 家族的可選整合提供 `LettaReflect`，並維持本篇的 `LettaReflectAdapter` 邊界：SDK 只要求候選判定、memory block 保存與收據的契約，Letta client、認證與命名空間設定由應用程式或額外整合套件提供。這能讓 SDK 保持對外部服務實作的獨立性，也讓未來替換持久化服務時不需要改動 Reflect 模組的輸入與輸出。
 
 ## 參考資料
 
 - [Letta 文件](https://docs.letta.com/)
 - [Letta GitHub 專案](https://github.com/letta-ai/letta)
-- [工作流程](../workflow/index.md)
-- [記憶類型](../workflow/memory-types.md)
+- [安全控制模組](../modules/reflect-modules.md)
