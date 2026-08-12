@@ -48,11 +48,11 @@ nav:
     - 讓 Agent 檢查回答有沒有依據: tutorials/search-documents-and-answer.md
     - 讓 Agent 判斷什麼時候要叫工具: tutorials/call-tools-from-a-workflow.md
     - 五大模組的共同寫法: tutorials/module-writing-basics.md
-  - Use Case 實施例:
-    - use-cases/index.md
-    - LaNew 售鞋顧問: use-cases/lanew-footwear-advisor.md
-    - BCI 射箭教練: use-cases/bci-archery-coach.md
-    - ICOPE 六力評估助手: use-cases/icope-six-capacity-assistant.md
+  - 技術 Blog:
+    - blog/index.md
+    - 用 Letta 將對話整理成可保存的長期記憶: blog/reflect-letta.md
+    - 用 Fara 看懂畫面並操作電腦: blog/action-fara.md
+    - 用 MatrAIx 的角色設定產生不同風格的回覆: blog/action-matraix.md
 
 markdown_extensions:
   - admonition

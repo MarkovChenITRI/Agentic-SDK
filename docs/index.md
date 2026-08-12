@@ -18,16 +18,16 @@
 
 說明 `Workflow` 如何用 `MemoryStore` 保存模組可讀的共同對話資料，並以 `InContextMemory` 與 `PersistentMemory` 提供不同的記憶方式。
 
-### 應用實例
+### 技術 Blog
 
-用三個具體場景說明如何把 `Workflow`、`Module Family` 與資料來源組合成可落地的 agent 實施例。
+用三篇設計文章說明 AI Hub 的模型卡與硬體服務，如何透過 Agentic SDK 變成長期記憶、電腦操作與角色化回覆。
 
 ## 主要入口
 
 - [工作流程](workflow/index.md)：先理解公開組裝入口、五大功能角色與資料如何沿流程傳遞。
 - [模組家族](modules/index.md)：查看目前文件涵蓋的模組總表，再分流到各功能頁查規格。
 - [記憶類型](workflow/memory-types.md)：查 `Workflow` 如何分工 `memory_type`、`MemoryStore`、`InContextMemory`、`PersistentMemory` 與 `WorkflowState`。
-- [Use Case 實施例](use-cases/index.md)：查看 LaNew 售鞋顧問、BCI 射箭教練與 ICOPE 六力評估助手三個實施例，理解場景拆法與模組組合。
+- [技術 Blog](blog/index.md)：查看 Letta、Fara 與 MatrAIx 的整合設計，理解模型卡、推論服務與工作流程之間的關係。
 
 ## 模組總表
 
