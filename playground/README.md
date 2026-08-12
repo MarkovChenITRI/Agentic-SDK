@@ -4,11 +4,17 @@ This package contains the Flask-based Playground Entry, Builder, and Runner expe
 
 ## Run Locally
 
+All local and deployed executions read model configuration from the Azure `agentic-sdk-models` Key Vault. Local runs fetch the access token through the Azure CLI, so before starting the Playground:
+
+1. Install the Azure CLI (`winget install -e --id Microsoft.AzureCLI`, or the MSI at https://aka.ms/installazurecliwindows).
+2. Run `az login --tenant <訂閱租戶 ID>` with an account that has read access to the `agentic-sdk-models` Key Vault, replacing `<訂閱租戶 ID>` with the tenant ID of the 訂閱 that owns this Key Vault. Pinning `--tenant` avoids `az login` silently landing on a different signed-in tenant that has no access to this vault and won't trigger the MFA challenge the correct tenant requires.
+3. If prompted for a subscription after signing in, any subscription under that tenant works — the Key Vault access token isn't scoped to a specific subscription.
+
+Then start the Playground:
+
 ```powershell
 uv run python -m flask --app playground.app run --debug --port 5050
 ```
-
-All local and deployed executions read model configuration from the Azure `agentic-sdk-models` Key Vault. Authenticate with Azure before starting the Playground.
 
 Then open:
 
