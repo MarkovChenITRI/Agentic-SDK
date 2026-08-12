@@ -50,9 +50,9 @@ nav:
     - 五大模組的共同寫法: tutorials/module-writing-basics.md
   - 技術 Blog:
     - blog/index.md
-    - 用 Letta 將對話整理成可保存的長期記憶: blog/reflect-letta.md
-    - 用 Fara 看懂畫面並操作電腦: blog/action-fara.md
-    - 用 MatrAIx 的角色設定產生不同風格的回覆: blog/action-matraix.md
+    - Reflect - Letta: blog/reflect-letta.md
+    - Action - Fara: blog/action-fara.md
+    - Action - MatrAIx: blog/action-matraix.md
 
 markdown_extensions:
   - admonition
