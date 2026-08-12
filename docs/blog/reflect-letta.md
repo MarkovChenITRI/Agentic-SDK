@@ -1,18 +1,18 @@
-# 別把雨天備案存成偏好：用 Letta 沉澱真正長期有效的資訊
+# 以 Letta 為工作流程建立長期記憶
 
-旅遊規劃助手最難的地方不是記住更多對話，而是分辨哪些話值得被記住。使用者先確認「兩人同行，其中一人不能吃海鮮」「住宿靠近車站」，隔天又說「第二天改成下雨」。前兩項會影響之後每一次建議；最後一項只描述今天的情況。若系統一律保存，往後的晴天行程也可能被錯誤地排成室內活動。
+多輪 AI 工作流程（AI Workflow）通常會保存目前工作階段的訊息，卻缺少一個可觀察的判斷點來區分長期事實與本輪狀態。已確認的使用限制、工作規則或持續偏好需要在後續工作階段繼續生效；一次性的例外、暫時條件與尚未確認的內容則只應留在當前脈絡。若所有內容都以相同方式保存，後續工作會無法辨識哪些資料仍然有效。
 
-這篇文章以這個情境示範：回覆模組（Action）已完成一輪回答後，反思模組（Reflect）如何判定可長期沿用的資訊，再交給 Letta 的持久化 state 與 memory block 能力保存。讀完後，你會得到一個可替換的 `LettaReflect` 邊界，以及一份能說明「這次到底請求保存什麼、為什麼保存」的結果收據。
+Letta 提供持久化 state、訊息與 memory block。本文將它接在 Agentic SDK 的反思模組（Reflect）後方：回覆模組（Action）完成輸出後，`LettaReflect` 依應用程式規則判定可長期沿用的候選，再由 Letta 轉接器（adapter）寫入或更新 memory block。這為工作流程加入可追查的長期資訊沉澱結果，而不改變 Action 產生回覆的責任。
 
-## 先看使用者感受到的差異
+## 先看工作流程新增的能力
 
-| 情境 | 沒有沉澱規則時 | 加入 LettaReflect 後 |
+| 工作流程輸入 | 既有流程缺少的能力 | 加入 LettaReflect 後的控制結果 |
 | --- | --- | --- |
-| 使用者確認不吃海鮮 | 偏好可能只留在逐漸被截斷的對話裡 | Reflect 將已確認限制交給 Letta 保存，後續流程可依收據追查 |
-| 使用者補充靠近車站 | 新限制容易和舊對話混在一起 | 保存結果包含候選識別與命名空間，可知道本輪新增了什麼 |
-| 當天改成下雨 | 雨天備案可能被誤當固定偏好 | Reflect 僅留下本輪反思，不建立長期保存候選 |
+| Action 已確認一項可重用限制 | 無法區分它與原始對話中的暫時敘述 | Reflect 建立可保存候選，收據記錄候選識別與 memory block 參照 |
+| Action 提供更新後的持續規則 | 無法追查本輪寫入或取代的資料 | 保存結果包含命名空間與候選識別，可由應用程式追查處理結果 |
+| Action 提供一次性例外或未確認內容 | 無法表達內容僅適用於本輪 | Reflect 留下本輪反思，不建立長期保存候選 |
 
-本文只深入這條流程中由 Reflect 接手的一段：它接收完成的 Action 結果與當前對話，決定是否保存，並回傳統一結果。下一輪如何查回資料、如何排序候選，以及查回內容如何送入 Action，都是相鄰流程的責任，不會在這裡假裝已經完成。
+本文只深入這條流程中由 Reflect 接手的一段：它接收完成的 Action 結果與當前對話，決定是否保存，並回傳統一結果。下一輪如何查回資料、如何排序候選，以及查回內容如何送入 Action，屬於相鄰流程的責任。
 
 ```text
 Action 結果 -> LettaReflect -> 應用程式 Letta adapter -> Letta memory block -> Reflect 結果
@@ -32,16 +32,16 @@ flowchart LR
 
     本文只驗證 Reflect 對「是否保存」的判定與保存收據。下一輪如何查回資料、如何排序候選，以及查回內容如何送入 Action，分別屬於應用程式與其他模組的設計，並未在這個範例中實作。
 
-## 從回覆中區分可沉澱資訊
+## 用抽象結果驗證沉澱規則
 
-本案例以 Action 的候選回覆作為 Reflect 輸入。LettaReflect 依可追查的規則區分長期資訊與本輪暫時安排。
+本文以完成的 Action 結果作為抽象案例。LettaReflect 依可追查的規則區分長期資訊與本輪暫時狀態。
 
 | Action 結果中的資訊 | Reflect 判定 | 理由 |
 | --- | --- | --- |
-| 同行者不能吃海鮮 | 建立可保存候選 | 會影響後續餐廳與行程安排 |
-| 住宿靠近車站 | 建立可保存候選 | 是已確認的交通限制 |
-| 雨天改到室內景點 | 僅記錄本輪反思 | 依當日條件成立，不代表固定偏好 |
-| 尚待使用者確認的景點 | 不建立候選 | 尚未成為已確認資訊 |
+| 已確認的持續限制 | 建立可保存候選 | 會影響後續工作階段的處理結果 |
+| 已確認的工作規則 | 建立可保存候選 | 是可重用的決策依據 |
+| 單次執行例外 | 僅記錄本輪反思 | 只在當前條件成立，不代表持續規則 |
+| 尚待確認的候選內容 | 不建立候選 | 尚未成為可長期沿用的資訊 |
 
 這張表是 LettaReflect 的資料判定規格。Action 只產生候選回覆；LettaReflect 才決定候選回覆中的資訊是否交給應用程式寫入 Letta memory block。
 
@@ -169,18 +169,18 @@ Reflect 的輸入契約是已完成的 `last_action_result` 與目前對話。�
 from agentic_sdk import InContextMemory, WorkflowState
 
 
-user_message = "第二天改成下雨，行程怎麼調整？"
+user_message = "將輸出格式改為摘要，這個規則後續也要沿用。"
 memory = InContextMemory()
 memory.append_message("user", user_message)
 
 state = WorkflowState(
     user_message=user_message,
-    workflow_name="旅遊規劃助手",
-    session_id="travel-session-001",
+    workflow_name="長期規則沉澱",
+    session_id="memory-session-001",
     memory=memory,
 )
 state.last_action_result = {
-    "content": "雨天改到室內景點，午餐仍排除海鮮。",
+    "content": "已確認後續輸出使用摘要格式；本輪例外是保留完整診斷資訊。",
 }
 ```
 
@@ -207,20 +207,20 @@ class FakeLettaAdapter:
 adapter = FakeLettaAdapter(
     receipt=LettaReflectionReceipt(
         verdict="pass",
-        reason="confirmed dietary restriction",
+        reason="confirmed reusable output rule",
         durable_memory_status="stored",
         durable_memory_count=1,
         candidate_ids=("memory-candidate-001",),
-        memory_namespace="travel-planner",
-        memory_block_id="block-travel-preferences",
+        memory_namespace="workflow-rules",
+        memory_block_id="block-output-rules",
     )
 )
 result = LettaReflect(adapter)(state)
 
-assert adapter.received_action_result == "雨天改到室內景點，午餐仍排除海鮮。"
+assert adapter.received_action_result == "已確認後續輸出使用摘要格式；本輪例外是保留完整診斷資訊。"
 assert result["payload"]["durable_memory_status"] == "stored"
 assert result["payload"]["durable_memory_candidate_ids"] == ["memory-candidate-001"]
-assert result["context_updates"][0].metadata["memory_block_id"] == "block-travel-preferences"
+assert result["context_updates"][0].metadata["memory_block_id"] == "block-output-rules"
 ```
 
 這是 `LettaReflect` 的模組測試，不是 Letta 服務整合測試。真正接上服務後，adapter 的整合測試應另外驗證命名空間、認證、超時，以及候選識別在你選用的 Letta 儲存策略中可被追查；查回策略仍是另一條流程的測試範圍。
@@ -232,8 +232,8 @@ assert result["context_updates"][0].metadata["memory_block_id"] == "block-travel
 | 情境 | LettaReflect 預期結果 | 需要保留的證據 |
 | --- | --- | --- |
 | 沒有可保存資訊 | `pass`、`skipped`、計數為 0 | reflection entry 與 receipt；不需要候選識別碼 |
-| 使用者確認飲食限制 | `pass`、`stored`、計數大於 0 | 候選內容、candidate ID、memory block 參照與保存收據 |
-| 使用者更新住宿偏好 | `pass`、`stored`，收據可追查取代關係 | 新舊候選識別、命名空間與保存收據 |
+| Action 確認持續限制 | `pass`、`stored`、計數大於 0 | 候選內容、candidate ID、memory block 參照與保存收據 |
+| Action 更新既有規則 | `pass`、`stored`，收據可追查取代關係 | 新舊候選識別、命名空間與保存收據 |
 | Letta 保存失敗 | `fail`、`failed`、計數為 0 | 轉接器錯誤原因與 reflection entry；不將失敗內容當成已保存 |
 | Action 沒有結果 | `fail`、`skipped`、計數為 0 | `missing action result` 的 reflection entry |
 

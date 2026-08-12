@@ -1,18 +1,18 @@
-# 用 MatrAIx Persona 1M 盤查 Action 回覆：不同 persona 下，條款仍要維持一致
+# 以 MatrAIx Persona 1M 盤查工作流程回覆的一致性
 
-客服使用者問：「這個方案能否在 14 天後退款？」已確認的條款是 7 天。不同背景的使用者可能偏好精簡、逐步解釋或正式的說明，但這些差異不能讓模型把 7 天講成「通常可在兩週內處理」。這不是角色不夠自然，而是回覆在不同 persona 情境下仍必須維持事實一致。
+一般 AI 工作流程（AI Workflow）的 Action 測試常以單一問題與單一預期回覆驗證功能。這種測試無法揭露同一個已確認事實在不同使用者脈絡下是否被遺漏、弱化或改寫。回覆可以依讀者需要調整說明深度與表達方式，但受控規則、產品事實與必要限制必須維持一致。
 
-MatrAIx 論文提出 Persona 8B 與約一百萬筆 quality-filtered persona coreset，使用 1,290 個類別維度描述模擬使用者，目的在於評估 AI 系統與數位產品。本文將 Persona 1M 用作**離線 Action 評估情境來源**：應用程式從已核准的 persona 維度建立測試案例，`GenerativeAction` 產生回覆，再比較不同 persona 情境下條款是否一致。本文不把資料集宣稱為可直接放進生產客服 `system_prompt` 的指示 API。
+MatrAIx 論文提出 Persona 8B 與約一百萬筆 quality-filtered persona coreset，使用 1,290 個類別維度描述模擬使用者，目的在於評估 AI 系統與數位產品。本文將 Persona 1M 用作**離線 Action 評估情境來源**：應用程式從已核准的 persona 維度建立測試案例，`GenerativeAction` 產生回覆，再比較不同 persona 情境下的必要事實是否一致。本文不將資料集視為可直接投入生產 `system_prompt` 的指示 API。
 
-## 先看使用者感受到的差異
+## 先看工作流程新增的能力
 
-| 情境 | 只看單一客服問題 | 加入 Persona 1M 評估情境後 |
+| 工作流程輸入 | 既有流程缺少的能力 | 加入 Persona 1M 評估情境後的控制結果 |
 | --- | --- | --- |
-| 退款條款是 7 天 | 安撫語氣可能把事實講成「兩週內可處理」而未被發現 | 固定條款搭配多種 persona 評估情境，檢查每份 Action 回覆仍包含 7 天 |
-| 想覆蓋不同使用者背景 | 測試者靠直覺手寫少數提示 | 從已核准的 persona 維度產生可重跑的情境紀錄 |
-| Persona 資料更新 | 不容易判斷回覆差異來自模型或測試情境 | 可比對 persona 資料版本、選用維度、模型設定與 Action 回覆 |
+| 已確認的固定事實 | 單一測試無法發現它在不同脈絡下被改寫 | 固定事實搭配多種 persona 情境，檢查每份 Action 回覆都保留必要內容 |
+| 多樣化模擬使用者脈絡 | 測試者只能依直覺手寫少數提示 | 由已核准的 persona 維度建立可重跑的情境紀錄 |
+| Persona 資料快照更新 | 無法分辨回覆差異來自模型或測試情境 | 比對 persona 資料版本、選用維度、模型設定與 Action 回覆 |
 
-例如同一個已確認條款可得到兩種都正確的回覆：正式情境的期望是「此方案的退款期限為 7 天，超過期限無法受理。」；偏好逐步說明的情境則可接受「這個方案的退款期限是 7 天；若已接近期限，我可以協助你確認申請狀態。」改變的是如何說明，不能改變 7 天這個事實。
+本文以一條固定規則作為抽象案例：精簡、逐步說明與正式表達等情境可以產生不同措辭，但每份回覆都必須保留相同的必要事實。
 
 ```text
 Persona 1M 已核准維度 -> 評估案例 -> GenerativeAction -> 回覆與評估紀錄
@@ -21,7 +21,7 @@ Persona 1M 已核准維度 -> 評估案例 -> GenerativeAction -> 回覆與評�
 ```mermaid
 flowchart LR
     Dataset[Persona 1M 資料快照] --> Case[應用程式建立評估案例]
-    Policy[已確認的產品條款] --> Prompt[固定客服提示]
+    Policy[已確認的固定規則] --> Prompt[固定 Action 提示]
     Case --> Prompt
     Prompt --> Action[GenerativeAction]
     Action --> Result[action result]
@@ -35,7 +35,7 @@ flowchart LR
 
 ## 將 Persona 1M 資料縮成可重跑的評估案例
 
-論文公開的是大量 persona 記錄與類別維度，而不是客服提示詞 API。應用程式應先依資料使用條件挑選少量、與產品測試相關的維度，並保存資料快照或版本識別。下列 `PersonaEvaluationCase` 是本篇應用程式的測試資料模型，不是假定的 MatrAIx 原生 schema。
+論文公開的是大量 persona 記錄與類別維度，而不是 Action 提示詞 API。應用程式應先依資料使用條件挑選少量、與工作流程測試相關的維度，並保存資料快照或版本識別。下列 `PersonaEvaluationCase` 是本篇應用程式的測試資料模型，不是假定的 MatrAIx 原生 schema。
 
 ```python title="persona_evaluation_case.py"
 from dataclasses import dataclass
@@ -51,17 +51,17 @@ class PersonaEvaluationCase:
 
 
 case = PersonaEvaluationCase(
-    case_id="refund-step-by-step-001",
+    case_id="fixed-fact-step-by-step-001",
     dataset_revision="persona-1m-snapshot-2026-08",
     # 這是應用程式從已核准 persona 維度映射出的分析標籤，
     # 不是宣稱為 Persona 1M 的原生欄位名稱。
     selected_dimensions={"response_style_group": "step_by_step"},
-    user_question="這個方案能否在 14 天後退款？",
-    required_fact="退款期限為 7 天",
+    user_question="這項固定規則在這個情況是否仍適用？",
+    required_fact="必要限制為 7 天",
 )
 ```
 
-這個案例不將完整 persona 記錄送給模型。`selected_dimensions` 是應用程式正規化後的分析標籤，只用於分組與分析，例如找出「偏好逐步說明」的測試案例是否比其他案例更常遺漏條款；它不是 Persona 1M 原生 schema 的宣稱。模型收到的仍是固定客服規則與產品事實。
+這個案例不將完整 persona 記錄送給模型。`selected_dimensions` 是應用程式正規化後的分析標籤，只用於分組與分析，例如找出「偏好逐步說明」的測試案例是否比其他案例更常遺漏必要事實；它不是 Persona 1M 原生 schema 的宣稱。模型收到的仍是固定工作規則與必要事實。
 
 ## 用固定 Action 產生可比較的回覆
 
@@ -74,21 +74,21 @@ from agentic_sdk import Workflow
 from agentic_sdk.modules import GenerativeAction
 
 
-SUPPORT_POLICY_REVISION = "support-policy-2026-08"
-SUPPORT_POLICY = """
-你是客服人員。已確認的產品條款：退款期限為 7 天。
-只根據已確認條款與使用者提供的資訊回答；不確定時要明確說明限制。
+ACTION_POLICY_REVISION = "action-policy-2026-08"
+ACTION_POLICY = """
+你是工作流程的回覆模組。已確認的固定規則：必要限制為 7 天。
+只根據已確認規則與使用者提供的資訊回答；不確定時要明確說明限制。
 先直接回答問題，再提供一個明確的下一步。
 """.strip()
 
 workflow = Workflow(
-    workflow_name="Persona 評估客服回覆",
+    workflow_name="Persona 評估 Action 回覆",
     entry_module="action",
     action=GenerativeAction(
         api_key=os.environ["CHAT_API_KEY"],
         base_url=os.environ["CHAT_BASE_URL"],
         model=os.environ["CHAT_MODEL"],
-        system_prompt=SUPPORT_POLICY,
+        system_prompt=ACTION_POLICY,
     ),
 )
 
@@ -96,7 +96,7 @@ result = workflow.run(case.user_question)
 assert case.required_fact in result.final_message
 ```
 
-`result.final_message` 與 `result.entities["latest_final_message"]` 都是本輪 Action 的回覆。這個斷言不是完整語意評估，但能先抓出把 7 天遺漏或改寫成其他期限的明顯回歸。
+`result.final_message` 與 `result.entities["latest_final_message"]` 都是本輪 Action 的回覆。這個斷言不是完整語意評估，但能先抓出把必要限制遺漏或改寫成其他期限的明顯回歸。
 
 ## 記錄 persona 分組與 Action 結果
 
@@ -107,7 +107,7 @@ evaluation_record = {
     "case_id": case.case_id,
     "dataset_revision": case.dataset_revision,
     "selected_dimensions": case.selected_dimensions,
-    "support_policy_revision": SUPPORT_POLICY_REVISION,
+    "action_policy_revision": ACTION_POLICY_REVISION,
     "model": os.environ["CHAT_MODEL"],
     "question": case.user_question,
     "required_fact": case.required_fact,
@@ -122,8 +122,8 @@ evaluation_record = {
 
 | 測試情境 | 預期行為 | 需要保留的證據 |
 | --- | --- | --- |
-| 任一 persona case | 回覆包含「退款期限為 7 天」 | case ID、資料快照、Action 回覆與布林結果 |
-| 逐步說明與精簡偏好 | 回覆可以長短不同，條款不得變動 | 兩組 selected dimensions 與 Action 回覆 |
+| 任一 persona case | 回覆包含「必要限制為 7 天」 | case ID、資料快照、Action 回覆與布林結果 |
+| 逐步說明與精簡偏好 | 回覆可以長短不同，必要事實不得變動 | 兩組 selected dimensions 與 Action 回覆 |
 | Persona 資料快照更新 | 可重新比較新舊資料下的失敗率 | dataset revision、case ID 與模型設定 |
 | Action 執行完成 | 回傳最終回覆，不排程其他 SDK 模組 | `result.final_message`、`result.visit_counts` 與 `next_module=None` |
 | 模型呼叫失敗 | 回傳或拋出可識別的 Action 錯誤 | Action 的錯誤結果與紀錄 |
@@ -135,8 +135,8 @@ evaluation_record = {
 ```python title="persona_evaluation_case_test.py"
 assert case.dataset_revision == "persona-1m-snapshot-2026-08"
 assert case.selected_dimensions["response_style_group"] == "step_by_step"
-assert case.user_question == "這個方案能否在 14 天後退款？"
-assert case.required_fact == "退款期限為 7 天"
+assert case.user_question == "這項固定規則在這個情況是否仍適用？"
+assert case.required_fact == "必要限制為 7 天"
 ```
 
 ## 可直接帶走的做法

@@ -6,9 +6,9 @@ AI Hub 將模型、執行環境與硬體條件整理成模型卡，並將部署�
 
 ## 文章
 
-- [別把雨天備案存成偏好：用 Letta 沉澱真正長期有效的資訊](reflect-letta.md)：由 Reflect 從完成的 Action 結果中判定可沉澱資訊，再交由應用程式 adapter 寫入 Letta memory block。
-- [模型說「送出請款」時，系統該怎麼做：用 Fara 產生可檢視操作提案](action-fara.md)：由 Action 將使用者任務轉成可檢視的 Fara 操作提案。
-- [用 MatrAIx Persona 1M 盤查 Action 回覆：不同 persona 下，條款仍要維持一致](action-matraix.md)：以 Persona 1M 的已核准維度建立評估情境，盤查同一個 Action 是否維持已確認條款。
+- [以 Letta 為工作流程建立長期記憶](reflect-letta.md)：由 Reflect 從完成的 Action 結果中判定可長期沿用的資訊，再交由應用程式 adapter 寫入 Letta memory block。
+- [以 Fara 為工作流程建立可檢視的畫面操作提案](action-fara.md)：由 Action 將畫面與使用者任務轉成可檢視的 Fara 操作提案。
+- [以 MatrAIx Persona 1M 盤查工作流程回覆的一致性](action-matraix.md)：以 Persona 1M 的已核准維度建立評估情境，盤查同一個 Action 是否維持必要事實。
 
 ## 選擇整合方式
 

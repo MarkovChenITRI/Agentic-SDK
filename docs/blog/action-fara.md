@@ -1,18 +1,18 @@
-# 模型說「送出請款」時，系統該怎麼做：用 Fara 產生可檢視操作提案
+# 以 Fara 為工作流程建立可檢視的畫面操作提案
 
-Fara1.5 是以螢幕截圖與對話歷程進行 observe-think-act 的電腦使用模型；它會產生滑鼠、鍵盤或其他操作。這不表示每一個建議都可以直接執行。在採購表單中，使用者要的是「找出尚未核對的請款單，提出填入已核對金額的操作」。模型可能正確找到金額欄位，也可能接著提出「送出請款」。如果應用程式把兩種輸出都當成可直接執行的命令，錯誤就從模型判斷變成真實外部副作用。
+整合視覺電腦操作（Computer Use）模型的 AI 工作流程（AI Workflow）需要將模型建議與外部操作分成可觀察的兩個階段。一般 Action 可以回傳文字或結構化資料，卻沒有固定方式表達一項畫面操作的目標、輸入值、理由與來源版本，使呼叫端難以檢視模型建議並套用自己的授權流程。
 
-這篇把 Fara 的輸出放進 Agentic SDK 的回覆與動作（Action）模組，但只讓它產生**可檢視的操作提案**。讀完後，你會得到一筆包含目標、輸入值、理由與來源版本的結構化結果；你的應用程式可顯示、記錄、核准或拒絕它，卻不會因為這個 Action 而自動控制瀏覽器。
+Fara1.5 以螢幕截圖與對話歷程進行 observe-think-act，能提出滑鼠、鍵盤及其他操作。本文將這項能力加到 Agentic SDK 的回覆與動作模組（Action），但 Action 只產生**可檢視的操作提案**。應用程式可顯示、記錄、核准或拒絕提案，再依自己的流程決定是否執行外部操作。
 
-## 先看使用者與應用程式的差異
+## 先看工作流程新增的能力
 
-| 情境 | 把模型輸出當命令 | 以 FaraProposalAction 接入後 |
+| 工作流程輸入 | 既有流程缺少的能力 | 加入 FaraProposalAction 後的控制結果 |
 | --- | --- | --- |
-| 找到已核對金額欄位 | 呼叫端必須猜測輸出代表什麼 | 收到含 `kind`、`target`、`value` 與 `reason` 的提案 |
-| 模型提出「送出請款」 | 提案可能直接造成送出 | 應用程式只看到一筆可檢視資料，可依自己的授權流程停止處理 |
-| Fara 服務失敗 | 錯誤格式依 client 而異 | Action 留下統一的錯誤 entry 與 `last_action_error` |
+| 目前畫面與使用者任務 | 呼叫端需要自行解讀非固定格式的模型建議 | Action 回傳含 `kind`、`target`、`value` 與 `reason` 的結構化提案 |
+| 模型提出 click、type、scroll 或 key 操作 | 建議與執行決策之間沒有可稽核的資料邊界 | 應用程式取得待檢視提案，可依自身授權流程決定後續處理 |
+| Fara 服務呼叫失敗 | 外部 client 的錯誤格式無法由 workflow 統一觀察 | Action 留下固定的錯誤 entry 與 `last_action_error` |
 
-Fara 的視覺輸入、對話歷程、client 呼叫與模型部署細節都封裝在 runner；本文聚焦它與 SDK 的交界。Fara 官方也將 Fara1.5 定位為研究預覽，建議在隔離環境中監看執行並避開敏感資料或高風險領域；本篇的 proposal 模式正是把模型建議與應用程式的執行決定分開。
+Fara 的視覺輸入、對話歷程、client 呼叫與模型部署細節都封裝在 runner；本文聚焦它與 SDK 的交界。Fara 官方將 Fara1.5 定位為研究預覽，建議在隔離環境中監看執行並避開敏感資料或高風險領域。本文的 proposal 模式建立模型建議與應用程式執行決定之間的資料邊界。
 
 ```text
 使用者任務 -> FaraProposalAction -> action result
@@ -108,12 +108,12 @@ class FaraProposalAction:
 from agentic_sdk import Workflow
 
 workflow = Workflow(
-    workflow_name="Fara 操作提案",
+    workflow_name="畫面操作提案",
     entry_module="action",
     action=FaraProposalAction(runner=fara_runner),
 )
 
-result = workflow.run("找出尚未核對的請款單，提出填入已核對金額的操作。")
+result = workflow.run("在目前畫面中提出填入已確認值的操作。")
 proposal = result.entities["fara_proposal"]
 print(result.final_message)
 print(proposal)
@@ -138,7 +138,7 @@ print(review_record)
 
 | 測試情境 | 預期行為 | 需要保留的證據 |
 | --- | --- | --- |
-| 提出填入金額操作 | 回傳一筆操作提案 | `result.entities["fara_proposal"]` |
+| 提出填入值操作 | 回傳一筆操作提案 | `result.entities["fara_proposal"]` |
 | Fara 無法產生提案 | 將 runner 例外轉為可識別的 Action 錯誤 | `last_action_error` 與 `ACTION_RESULT` error metadata |
 | Action 執行完成 | 不排程其他 SDK 模組 | `result.visit_counts` 與 `next_module=None` |
 
@@ -154,18 +154,18 @@ from agentic_sdk import WorkflowState
 
 class FakeFaraRunner:
     def propose(self, task: str) -> FaraProposal:
-        assert task == "找出尚未核對的請款單，提出填入已核對金額的操作。"
+        assert task == "在目前畫面中提出填入已確認值的操作。"
         return {
             "proposal_id": "proposal-001",
             "kind": "type",
-            "target": "已核對金額欄位",
-            "value": "1200",
-            "reason": "請款單已標記為尚未核對",
+            "target": "目標輸入欄位",
+            "value": "confirmed-value",
+            "reason": "畫面狀態顯示此欄位需要填入已確認值",
             "source_revision": "fara-1.5",
         }
 
 
-state = WorkflowState(user_message="找出尚未核對的請款單，提出填入已核對金額的操作。")
+state = WorkflowState(user_message="在目前畫面中提出填入已確認值的操作。")
 result = FaraProposalAction(FakeFaraRunner())(state)
 
 assert result["next_module"] is None
