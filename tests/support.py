@@ -164,3 +164,25 @@ class StaticVisionQueryBuilder:
 
     def __call__(self, text: str, attachments: list[Attachment]) -> str:
         return self.rewritten_query if attachments else text
+
+
+def build_source(*steps: tuple[str, object]) -> str:
+    """Compile the Python source a Builder session exports after these answers.
+
+    Each step is a ``(step_key, choice)`` pair, applied to the default spec in
+    order, the same way the Builder applies a user's answers. With no steps this
+    is the source for an untouched Builder session.
+
+    Note that an untouched spec retrieves through ``PassThroughRetrieve``, while
+    the compiled-source construction path this replaces defaulted to
+    ``KeywordRetrieve()``. The two disagree; reconciling them is tracked
+    separately.
+    """
+    # Imported inside the function so SDK-only tests importing this module do
+    # not pull the playground package, and Flask with it, into their process.
+    from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec
+
+    spec = default_spec()
+    for step_key, choice in steps:
+        spec = apply_builder_step(spec, step_key, choice)
+    return compile_python_source(spec)

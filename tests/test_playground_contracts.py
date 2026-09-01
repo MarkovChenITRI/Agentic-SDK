@@ -22,7 +22,8 @@ from playground.services import semantic_ingestion
 from playground.services import source_builder
 from playground.services.runner_conversation import RunnerConversationState
 from playground.services.aihub_bridge import store_loaded_agent
-from playground.services.source_builder import BuilderSourceConfig, build_default_python_source, build_python_source_from_builder_choice, config_from_source
+from playground.services.source_builder import BuilderSourceConfig, config_from_source
+from support import build_source
 from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec
 from playground.services.workflow_reachability import reachable_workflow_roles
 
@@ -247,7 +248,7 @@ def test_semantic_retrieve_falls_back_to_pypdf_for_pdf(tmp_path, monkeypatch):
 
 
 def test_runner_execution_memory_keeps_current_image_attachment_transient():
-    source = build_default_python_source()
+    source = build_source()
     conversation = RunnerConversationState.for_workflow(source).append_user("請解讀足測報告")
     attachment = Attachment(
         kind="image",
@@ -405,14 +406,12 @@ def test_tool_call_without_text_uses_user_facing_confirmation_message():
 
 
 def test_builder_choices_map_to_runtime_modules():
-    source = build_default_python_source()
-
     for choice, expected_module in {
         "pass_through": "PassThroughPerceive",
         "text": "TextPerceive",
         "text_image": "TextImagePerceive",
     }.items():
-        config = config_from_source(build_python_source_from_builder_choice("input_type", choice, source))
+        config = config_from_source(build_source(("input_type", choice)))
         assert config.perceive_module == expected_module
         assert "perceive" in reachable_workflow_roles(config)
 
@@ -421,12 +420,12 @@ def test_builder_choices_map_to_runtime_modules():
         "keyword": "KeywordRetrieve",
         "semantic": "SemanticRetrieve",
     }.items():
-        config = config_from_source(build_python_source_from_builder_choice("retrieve_policy", choice, source))
+        config = config_from_source(build_source(("retrieve_policy", choice)))
         assert config.retrieve_module == expected_module
         assert "retrieve" in reachable_workflow_roles(config)
 
-    free_text = config_from_source(build_python_source_from_builder_choice("output_format", "free_text", source))
-    interactive = config_from_source(build_python_source_from_builder_choice("output_format", "interactive", source))
+    free_text = config_from_source(build_source(("output_format", "free_text")))
+    interactive = config_from_source(build_source(("output_format", "interactive")))
 
     assert free_text.action_module == "GenerativeAction"
     assert interactive.action_module == "ToolCallAction"
@@ -443,14 +442,16 @@ def test_key_vault_model_endpoint_requires_explicit_deployment_selection():
     assert params["api_key"]
     assert params["base_url"].startswith("https://")
     assert params["model"]
-    assert model_endpoints.normalize_endpoint_selections(build_default_python_source(), {}) == {}
+    assert model_endpoints.normalize_endpoint_selections(build_source(), {}) == {}
 
 
 def test_deployment_options_follow_reachable_modules_and_require_selection():
-    source = build_python_source_from_builder_choice("input_type", "text", None)
-    source = build_python_source_from_builder_choice("retrieve_policy", "semantic", source)
-    source = build_python_source_from_builder_choice("output_format", "free_text", source)
-    source = build_python_source_from_builder_choice("failure_policy", "retry", source)
+    source = build_source(
+        ("input_type", "text"),
+        ("retrieve_policy", "semantic"),
+        ("output_format", "free_text"),
+        ("failure_policy", "retry"),
+    )
 
     state = model_endpoints.endpoint_state(source, {})
 
@@ -471,8 +472,10 @@ def test_deployment_options_follow_reachable_modules_and_require_selection():
 
 
 def test_builder_review_requires_each_reachable_deployment_option():
-    source = build_python_source_from_builder_choice("input_type", "text", None)
-    source = build_python_source_from_builder_choice("output_format", "free_text", source)
+    source = build_source(
+        ("input_type", "text"),
+        ("output_format", "free_text"),
+    )
     endpoint_state = model_endpoints.endpoint_state(source, {})
     form_state = {"choices": {"input_type": "整理文字內容", "output_format": "純文字回覆"}, "values": {}}
 
@@ -507,18 +510,19 @@ def test_partial_key_vault_endpoint_family_is_rejected():
 
 
 def test_interactive_action_contract_roundtrips_to_boolean_tool_schema():
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "response_instruction": "先說明建議，再詢問是否提交。",
-            "api_contracts": "",
-            "interaction_trigger": "使用者需要確認下一步時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/submit",
-            "component_fields": "是否提交 = 使用者是否確認提交（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "response_instruction": "先說明建議，再詢問是否提交。",
+                "api_contracts": "",
+                "interaction_trigger": "使用者需要確認下一步時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/submit",
+                "component_fields": "是否提交 = 使用者是否確認提交（資料類型：是/否)",
+            },
+        ),
     )
 
     config = config_from_source(source)
@@ -661,7 +665,7 @@ def test_runner_execute_routes_forward_attachment_payloads(monkeypatch):
 
     with app.test_client() as client:
         with client.session_transaction() as session:
-            session["python_source"] = build_default_python_source()
+            session["python_source"] = build_source()
         response = client.post(
             "/playground/run/execute",
             json={
@@ -710,7 +714,7 @@ def test_runner_conversation_state_restores_ordered_turns_across_source_changes(
 
 
 def test_runner_conversation_memory_exposes_prior_retrieval_evidence_to_modules():
-    source = build_default_python_source()
+    source = build_source()
     state = RunnerConversationState.from_dict(
         {
             **RunnerConversationState.for_workflow(source).as_dict(),
@@ -726,7 +730,7 @@ def test_runner_conversation_memory_exposes_prior_retrieval_evidence_to_modules(
 
 def test_runner_execution_injects_conversation_memory_into_workflow(monkeypatch):
     captured = {}
-    source = build_default_python_source()
+    source = build_source()
     state = RunnerConversationState.from_dict(
         {
             **RunnerConversationState.for_workflow(source).as_dict(),
@@ -757,7 +761,7 @@ def test_runner_execution_injects_conversation_memory_into_workflow(monkeypatch)
 
 
 def test_tool_continuation_extends_the_same_conversation_memory():
-    source = build_default_python_source()
+    source = build_source()
     conversation = RunnerConversationState.from_dict(
         {
             **RunnerConversationState.for_workflow(source).as_dict(),
@@ -803,7 +807,7 @@ def test_tool_continuation_extends_the_same_conversation_memory():
 
 
 def test_tool_submission_update_keeps_selection_and_api_outcome_internal():
-    source = build_default_python_source()
+    source = build_source()
     conversation = RunnerConversationState.for_workflow(source)
 
     update = runner_service._conversation_update(
@@ -831,7 +835,7 @@ def test_tool_submission_update_keeps_selection_and_api_outcome_internal():
 def test_runner_conversation_commit_persists_one_expected_revision(monkeypatch):
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_default_python_source()
+    source = build_source()
 
     with app.test_client() as client:
         with client.session_transaction() as current_session:
@@ -877,7 +881,7 @@ def test_runner_conversation_commit_persists_one_expected_revision(monkeypatch):
 def test_runner_persists_normal_user_turn_before_execution(monkeypatch):
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_default_python_source()
+    source = build_source()
     captured = {}
 
     def fake_execute(_source, **kwargs):
@@ -905,7 +909,7 @@ def test_runner_persists_normal_user_turn_before_execution(monkeypatch):
 def test_runner_page_initializes_conversation_state_for_first_turn():
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_default_python_source()
+    source = build_source()
 
     with app.test_client() as client:
         with client.session_transaction() as current_session:
@@ -930,7 +934,7 @@ def test_atomic_runner_metadata_update_compiles_the_current_v2_spec():
     with app.test_client() as client:
         with client.session_transaction() as session:
             session["workflow_spec"] = spec
-            session["python_source"] = build_default_python_source()
+            session["python_source"] = build_source()
 
         response = client.post(
             "/playground/run/metadata",
@@ -1098,7 +1102,7 @@ def test_nonsemantic_initialization_does_not_require_knowledge_sources():
 def test_runner_edit_settings_navigation_preserves_current_draft():
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_python_source_from_builder_choice("input_type", "text_image", build_default_python_source())
+    source = build_source(("input_type", "text_image"))
 
     with app.test_client() as client:
         with client.session_transaction() as session:
@@ -1125,7 +1129,7 @@ def test_aihub_readonly_deep_link_without_loaded_source_does_not_dead_end(monkey
             "loaded": True,
             "agent_id": agent_id,
             "agent_name": "Shared Agent",
-            "python_source": build_python_source_from_builder_choice("input_type", "text", build_default_python_source()),
+            "python_source": build_source(("input_type", "text")),
         }
 
     monkeypatch.setattr("playground.routes.entry.load_public_config", fake_load_public_config)
@@ -1148,7 +1152,7 @@ def test_anonymous_start_clears_prior_loaded_agent_state():
         with client.session_transaction() as session:
             session["mode"] = "aihub_editable"
             session["agent_id"] = "old-agent"
-            session["python_source"] = build_python_source_from_builder_choice("input_type", "text_image", build_default_python_source())
+            session["python_source"] = build_source(("input_type", "text_image"))
             session["builder_upload_id"] = "old-upload"
 
         response = client.post("/playground/start/anonymous")
@@ -1181,7 +1185,7 @@ def test_runner_without_source_redirects_to_builder_without_dead_end():
 def test_source_preview_api_preserves_current_draft_without_legacy_page():
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_python_source_from_builder_choice("input_type", "text", build_default_python_source())
+    source = build_source(("input_type", "text"))
 
     with app.test_client() as client:
         with client.session_transaction() as session:
@@ -1210,7 +1214,7 @@ def test_v2_source_preview_preserves_renamed_workflow():
     with app.test_client() as client:
         with client.session_transaction() as session:
             session["workflow_spec"] = spec
-            session["python_source"] = build_default_python_source()
+            session["python_source"] = build_source()
 
         response = client.get("/playground/source/preview")
         with client.session_transaction() as session:
@@ -1231,7 +1235,7 @@ def test_loading_v2_agent_compiles_canonical_execution_source():
             {
                 "agent_id": "agent-1",
                 "agent_name": "Stored Agent",
-                "python_source": build_default_python_source(),
+                "python_source": build_source(),
                 "endpoint_bindings": {"action": "gpt-54"},
                 "workflow_spec": spec,
                 "runner_presentation": {},
@@ -1245,7 +1249,7 @@ def test_loading_v2_agent_compiles_canonical_execution_source():
 def test_runner_starter_questions_use_session_metadata_not_python_source():
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_python_source_from_builder_choice("memory_type", {"starter_questions": "如何上架？"}, build_default_python_source())
+    source = build_source(("memory_type", {"starter_questions": "如何上架？"}))
 
     with app.test_client() as client:
         with client.session_transaction() as session:
@@ -1291,7 +1295,7 @@ def test_streaming_execute_route_forwards_attachment_payloads(monkeypatch):
 
     with app.test_client() as client:
         with client.session_transaction() as session:
-            session["python_source"] = build_default_python_source()
+            session["python_source"] = build_source()
         response = client.post(
             "/playground/run/execute/stream",
             json={
@@ -1358,7 +1362,7 @@ def test_streaming_execute_route_forwards_finish_fields_as_ndjson_process_events
 
     with app.test_client() as client:
         with client.session_transaction() as session:
-            session["python_source"] = build_default_python_source()
+            session["python_source"] = build_source()
         response = client.post(
             "/playground/run/execute/stream",
             json={"message": "測試輸入"},
@@ -1474,7 +1478,7 @@ def test_runner_uses_module_specific_process_completion_summaries():
 
 
 def test_runner_process_event_rejects_legacy_stage_event_without_schema():
-    config = config_from_source(build_default_python_source())
+    config = config_from_source(build_source())
 
     try:
         runner_service._process_event_for_workflow_event(
@@ -1494,7 +1498,7 @@ def test_runner_process_event_rejects_legacy_stage_event_without_schema():
 
 
 def test_runner_process_event_rejects_legacy_stage_alias_without_module():
-    config = config_from_source(build_default_python_source())
+    config = config_from_source(build_source())
     schema = default_events_schema()["perceive"]
 
     try:
@@ -1516,16 +1520,17 @@ def test_runner_process_event_rejects_legacy_stage_alias_without_module():
 
 
 def test_tool_call_panel_does_not_fallback_for_information_intent(monkeypatch):
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否通知門市人員帶實體鞋墊說明 = 只有顧客明確同意後才填 true；尚未回答時保持未知（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否通知門市人員帶實體鞋墊說明 = 只有顧客明確同意後才填 true；尚未回答時保持未知（資料類型：是/否)",
+            },
+        ),
     )
 
     class FakeWorkflow:
@@ -1543,16 +1548,17 @@ def test_tool_call_panel_does_not_fallback_for_information_intent(monkeypatch):
 
 
 def test_tool_call_panel_does_not_fallback_for_optional_followup_question(monkeypatch):
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認下一步時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認下一步時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
+            },
+        ),
     )
 
     class FakeWorkflow:
@@ -1571,16 +1577,17 @@ def test_tool_call_panel_does_not_fallback_for_optional_followup_question(monkey
 
 
 def test_tool_call_panel_does_not_fallback_for_health_or_safety_concern(monkeypatch):
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認下一步時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認下一步時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
+            },
+        ),
     )
 
     class FakeWorkflow:
@@ -1601,16 +1608,17 @@ def test_tool_call_panel_does_not_fallback_for_health_or_safety_concern(monkeypa
 
 
 def test_tool_call_panel_falls_back_for_reservation_confirmation(monkeypatch):
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認下一步時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認下一步時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
+            },
+        ),
     )
 
     class FakeWorkflow:
@@ -1630,16 +1638,17 @@ def test_tool_call_panel_falls_back_for_reservation_confirmation(monkeypatch):
 
 
 def test_tool_call_panel_allows_data_limitations_after_recommendation(monkeypatch):
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認下一步時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認下一步時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
+            },
+        ),
     )
 
     class FakeWorkflow:
@@ -1659,16 +1668,17 @@ def test_tool_call_panel_allows_data_limitations_after_recommendation(monkeypatc
 
 
 def test_tool_call_panel_falls_back_for_decision_intent_without_model_tool_call(monkeypatch):
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認下一步時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認下一步時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
+            },
+        ),
     )
 
     class FakeWorkflow:
@@ -1689,16 +1699,17 @@ def test_tool_call_panel_falls_back_for_decision_intent_without_model_tool_call(
 
 
 def test_tool_call_panel_falls_back_for_natural_next_step_question(monkeypatch):
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認下一步時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認下一步時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
+            },
+        ),
     )
 
     class FakeWorkflow:
@@ -1718,19 +1729,20 @@ def test_tool_call_panel_falls_back_for_natural_next_step_question(monkeypatch):
 
 
 def test_catalog_identifier_without_retrieved_evidence_stops_for_human_confirmation(monkeypatch):
-    source = build_python_source_from_builder_choice("retrieve_policy", "semantic", None)
-    source = build_python_source_from_builder_choice("output_format", "interactive", source)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認下一步時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("retrieve_policy", "semantic"),
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認下一步時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
+            },
+        ),
+        ("failure_policy", "handoff"),
     )
-    source = build_python_source_from_builder_choice("failure_policy", "handoff", source)
 
     class FakeWorkflow:
         def run(self, *_args, **_kwargs):
@@ -1759,16 +1771,17 @@ def test_catalog_identifier_without_retrieved_evidence_stops_for_human_confirmat
 
 
 def test_tool_call_panel_uses_final_confirmation_line_for_long_recommendation(monkeypatch):
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認下一步時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認下一步時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
+            },
+        ),
     )
 
     class FakeWorkflow:
@@ -1787,16 +1800,17 @@ def test_tool_call_panel_uses_final_confirmation_line_for_long_recommendation(mo
 
 
 def test_tool_call_panel_does_not_fallback_when_recommendation_needs_more_input(monkeypatch):
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認下一步時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認下一步時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)",
+            },
+        ),
     )
 
     class FakeWorkflow:
@@ -1813,16 +1827,17 @@ def test_tool_call_panel_does_not_fallback_when_recommendation_needs_more_input(
 
 
 def test_tool_call_panel_uses_schema_for_user_facing_confirmation(monkeypatch):
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否通知門市人員帶實體鞋墊說明 = 只有顧客明確同意後才填 true；尚未回答時保持未知（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否通知門市人員帶實體鞋墊說明 = 只有顧客明確同意後才填 true；尚未回答時保持未知（資料類型：是/否)",
+            },
+        ),
     )
 
     class FakeWorkflow:
@@ -1871,16 +1886,17 @@ def test_runner_tool_panel_renderer_omits_empty_field_hints():
 
 
 def test_interactive_optional_field_is_not_required_in_tool_schema():
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "interaction_trigger": "需要使用者確認時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)\n顧客補充需求 = 顧客可補充的需求；可留空。",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "interaction_trigger": "需要使用者確認時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否確認 = 使用者是否確認（資料類型：是/否)\n顧客補充需求 = 顧客可補充的需求；可留空。",
+            },
+        ),
     )
 
     parameters = config_from_source(source).action_tools[0]["function"]["parameters"]

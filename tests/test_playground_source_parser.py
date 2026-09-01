@@ -1,10 +1,11 @@
 import pytest
 
 from agentic_sdk.core.events import default_events_schema
-from playground.services.source_builder import build_default_python_source, build_python_source_from_builder_choice, config_from_source, get_builder_form_state, get_workflow_summary
+from playground.services.source_builder import build_python_source_from_builder_choice, config_from_source, get_builder_form_state, get_workflow_summary
 from playground.services.source_parser import parse_supported_source
 from playground.services.runner_service import _process_event_for_workflow_event, execute_python_source
 from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec
+from support import build_source
 
 
 def _sample_workflow_source(workflow_name: str, profile_hint: str | None = None) -> str:
@@ -19,9 +20,9 @@ def _sample_workflow_source(workflow_name: str, profile_hint: str | None = None)
 
 
 def test_parse_supported_default_source_name():
-    parsed = parse_supported_source(build_default_python_source())
-    config = config_from_source(build_default_python_source())
-    source = build_default_python_source()
+    parsed = parse_supported_source(build_source())
+    config = config_from_source(build_source())
+    source = build_source()
 
     assert parsed.workflow_name == "default"
     assert parsed.supported_subset is True
@@ -68,7 +69,7 @@ workflow = Workflow(
 
 
 def test_runner_process_event_uses_workflow_stage_label():
-    config = config_from_source(build_default_python_source())
+    config = config_from_source(build_source())
     schema = default_events_schema()["retrieve"]
 
     event = _process_event_for_workflow_event(
@@ -156,16 +157,17 @@ workflow = Workflow()
 
 
 def test_retrieve_builder_ignores_legacy_semantic_weight_fields():
-    source = build_python_source_from_builder_choice("retrieve_policy", "semantic", None)
-    source = build_python_source_from_builder_choice(
-        "retrieve",
-        {
-            "top_k": "7",
-            "similarity_weight": "0.6",
-            "recency_weight": "0.2",
-            "importance_weight": "0.2",
-        },
-        source,
+    source = build_source(
+        ("retrieve_policy", "semantic"),
+        (
+            "retrieve",
+            {
+                "top_k": "7",
+                "similarity_weight": "0.6",
+                "recency_weight": "0.2",
+                "importance_weight": "0.2",
+            },
+        ),
     )
 
     assert "SemanticRetrieve(" in source
@@ -176,7 +178,7 @@ def test_retrieve_builder_ignores_legacy_semantic_weight_fields():
 
 
 def test_starter_questions_do_not_emit_runner_config_in_python_source():
-    source = build_python_source_from_builder_choice("memory_type", {"starter_questions": "如何上架？"}, None)
+    source = build_source(("memory_type", {"starter_questions": "如何上架？"}))
 
     assert "RUNNER_CONFIG" not in source
     assert "starter_questions" not in source
@@ -184,8 +186,7 @@ def test_starter_questions_do_not_emit_runner_config_in_python_source():
 
 
 def test_generated_model_placeholders_are_role_neutral():
-    source = build_python_source_from_builder_choice("retrieve_policy", "semantic", None)
-    source = build_python_source_from_builder_choice("output_format", "free_text", source)
+    source = build_source(("retrieve_policy", "semantic"), ("output_format", "free_text"))
 
     assert 'api_key="<API_KEY>"' in source
     assert 'base_url="<BASE_URL>"' in source
@@ -198,7 +199,7 @@ def test_generated_model_placeholders_are_role_neutral():
 
 
 def test_generated_text_image_source_omits_unselected_importance_preset():
-    source = build_python_source_from_builder_choice("input_type", "text_image", None)
+    source = build_source(("input_type", "text_image"))
 
     assert "TextImagePerceive(" in source
     assert "importance=" not in source
@@ -206,8 +207,8 @@ def test_generated_text_image_source_omits_unselected_importance_preset():
 
 
 def test_generated_retrieve_source_omits_empty_default_parameters():
-    keyword_source = build_python_source_from_builder_choice("retrieve_policy", "keyword", None)
-    semantic_source = build_python_source_from_builder_choice("retrieve_policy", "semantic", None)
+    keyword_source = build_source(("retrieve_policy", "keyword"))
+    semantic_source = build_source(("retrieve_policy", "semantic"))
 
     assert "KeywordRetrieve()" in keyword_source
     assert "items=[]" not in keyword_source
@@ -217,11 +218,9 @@ def test_generated_retrieve_source_omits_empty_default_parameters():
 
 
 def test_generated_semantic_source_preserves_original_pptx_filename():
-    source = build_python_source_from_builder_choice("retrieve_policy", "semantic", None)
-    source = build_python_source_from_builder_choice(
-        "retrieve",
-        {"semantic_support_files": "AI-Hub.pptx"},
-        source,
+    source = build_source(
+        ("retrieve_policy", "semantic"),
+        ("retrieve", {"semantic_support_files": "AI-Hub.pptx"}),
     )
 
     assert '"./AI-Hub.pptx"' in source
@@ -229,7 +228,7 @@ def test_generated_semantic_source_preserves_original_pptx_filename():
 
 
 def test_generated_reflect_source_omits_default_retry_policy_but_roundtrips():
-    source = build_python_source_from_builder_choice("failure_policy", "retry", None)
+    source = build_source(("failure_policy", "retry"))
 
     assert "ResponseCheckReflect(" in source
     assert 'on_failure="retry_plan"' not in source
@@ -237,8 +236,10 @@ def test_generated_reflect_source_omits_default_retry_policy_but_roundtrips():
 
 
 def test_generated_plan_source_keeps_user_configured_retrieve_description():
-    source = build_python_source_from_builder_choice("retrieve_policy", "semantic", None)
-    source = build_python_source_from_builder_choice("retrieve", {"semantic_search_goal": "查找產品規格與限制"}, source)
+    source = build_source(
+        ("retrieve_policy", "semantic"),
+        ("retrieve", {"semantic_search_goal": "查找產品規格與限制"}),
+    )
 
     assert "retrieve_description=" in source
     assert "查找產品規格與限制" in source
@@ -260,6 +261,11 @@ workflow = Workflow(
 
 
 def test_custom_action_builder_emits_module_standard_action():
+    # Deliberately still on the compiled-source construction path. Custom actions
+    # are reachable only from hand-written source: no Builder step produces them,
+    # the v2 spec's allowed action modules exclude them, and spec_to_config
+    # hardcodes every custom_* field off. This test and the machinery it covers
+    # are removed together when the compiled-source read path goes.
     source = _sample_workflow_source("固定格式 Agent", "Custom Action")
     source = build_python_source_from_builder_choice(
         "action",
@@ -290,10 +296,9 @@ def test_custom_action_builder_emits_module_standard_action():
 
 
 def test_keyword_retrieve_builder_emits_only_keyword_items_without_retrieve_fallback():
-    source = build_python_source_from_builder_choice(
-        "retrieve",
-        {"keyword_pairs": "保固 = 提供保固期限與申請方式", "fallback": "沒有支援資料。"},
-        None,
+    source = build_source(
+        ("retrieve_policy", "keyword"),
+        ("retrieve", {"keyword_pairs": "保固 = 提供保固期限與申請方式", "fallback": "沒有支援資料。"}),
     )
     retrieve_block = source.split("retrieve=KeywordRetrieve(", 1)[1].split("\n    ),", 1)[0]
 
@@ -303,28 +308,28 @@ def test_keyword_retrieve_builder_emits_only_keyword_items_without_retrieve_fall
 
 
 def test_builder_form_state_roundtrips_generated_text_parameters():
-    source = build_python_source_from_builder_choice("memory_type", {"starter_questions": "如何上架？"}, None)
-    source = build_python_source_from_builder_choice("input_type", "text_image", source)
-    source = build_python_source_from_builder_choice(
-        "perceive",
-        {
-            "welcome_message": "請先辨識使用者要上架的模型與限制。",
-            "image_instruction": "請特別判讀圖片中的欄位、流程、限制與警示訊息。",
-            "intent_pairs": "目標 = 使用者想完成的上架結果",
-        },
-        source,
+    source = build_source(
+        ("memory_type", {"starter_questions": "如何上架？"}),
+        ("input_type", "text_image"),
+        (
+            "perceive",
+            {
+                "welcome_message": "請先辨識使用者要上架的模型與限制。",
+                "image_instruction": "請特別判讀圖片中的欄位、流程、限制與警示訊息。",
+                "intent_pairs": "目標 = 使用者想完成的上架結果",
+            },
+        ),
+        ("retrieve_policy", "semantic"),
+        (
+            "retrieve",
+            {
+                "semantic_support_files": "AI Hub 上架教學.pptx",
+                "semantic_search_goal": "查找 AI Hub 上架流程、限制與部署步驟",
+            },
+        ),
+        ("output_format", "free_text"),
+        ("action", {"response_instruction": "請用 FAE 口吻分步說明。"}),
     )
-    source = build_python_source_from_builder_choice("retrieve_policy", "semantic", source)
-    source = build_python_source_from_builder_choice(
-        "retrieve",
-        {
-            "semantic_support_files": "AI Hub 上架教學.pptx",
-            "semantic_search_goal": "查找 AI Hub 上架流程、限制與部署步驟",
-        },
-        source,
-    )
-    source = build_python_source_from_builder_choice("output_format", "free_text", source)
-    source = build_python_source_from_builder_choice("action", {"response_instruction": "請用 FAE 口吻分步說明。"}, source)
 
     state = get_builder_form_state(source)
 
@@ -339,18 +344,19 @@ def test_builder_form_state_roundtrips_generated_text_parameters():
 
 
 def test_interactive_action_adds_generic_intent_gate_without_polluting_form_state():
-    source = build_python_source_from_builder_choice("output_format", "interactive", None)
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "response_instruction": "請依使用者情境回覆，必要時才請使用者確認下一步。",
-            "api_contracts": "",
-            "interaction_trigger": "使用者需要確認下一步時呼叫。",
-            "api_method": "POST",
-            "api_url": "https://example.com/confirm",
-            "component_fields": "是否確認 = 使用者是否確認下一步（資料類型：是/否)",
-        },
-        source,
+    source = build_source(
+        ("output_format", "interactive"),
+        (
+            "action",
+            {
+                "response_instruction": "請依使用者情境回覆，必要時才請使用者確認下一步。",
+                "api_contracts": "",
+                "interaction_trigger": "使用者需要確認下一步時呼叫。",
+                "api_method": "POST",
+                "api_url": "https://example.com/confirm",
+                "component_fields": "是否確認 = 使用者是否確認下一步（資料類型：是/否)",
+            },
+        ),
     )
 
     assert "先在內部判斷使用者這一輪的意圖類型" in source
