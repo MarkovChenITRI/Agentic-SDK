@@ -20,14 +20,24 @@ SDK 以 `MemoryStore` 統一管理對話記憶；`InContextMemory` 與 `Persiste
 
 ## 安裝
 
-需要 Python 3.10 以上、3.13 以下；本 repo 的開發環境建議使用 Python 3.12。
+需要 Python 3.11 以上、3.13 以下；本 repo 的開發環境建議使用 Python 3.12。
+
+指定版本標籤安裝，取得該版本固定的行為：
 
 ```bash
-python -m pip install "git+https://github.com/R300-AI/Agentic-SDK.git"
+python -m pip install "git+https://github.com/R300-AI/Agentic-SDK.git@v0.1.0"
 python -c "import agentic_sdk; print('Agentic SDK import ok')"
 ```
 
-從 GitHub 安裝時，pip 使用 `git+https://...` 格式；也可使用命名形式：`python -m pip install "agentic-sdk @ git+https://github.com/R300-AI/Agentic-SDK.git"`。
+不指定標籤則安裝 `main` 分支的最新內容：
+
+```bash
+python -m pip install "git+https://github.com/R300-AI/Agentic-SDK.git"
+```
+
+`main` 隨時可能包含改變既有行為的變更。已經寫好的程式在下次重新安裝之後，可能得到不同的結果而不會出現錯誤訊息。要停留在特定行為上，請指定標籤。
+
+從 GitHub 安裝時，pip 使用 `git+https://...` 格式；也可使用命名形式：`python -m pip install "agentic-sdk @ git+https://github.com/R300-AI/Agentic-SDK.git@v0.1.0"`。
 
 ## 快速開始
 

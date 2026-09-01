@@ -4,11 +4,11 @@
 
 **Blocked by:** 無，可立即開始
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 安裝指令改為指定標籤的形式，並保留不指定標籤的形式作為對照
-- [ ] 說明不指定標籤會取得 main 分支的最新內容，因此不受版本保護
-- [ ] README 敘述的 Python 版本下限與 `pyproject.toml` 的 `requires-python` 一致
+- [x] 安裝指令改為指定標籤的形式，並保留不指定標籤的形式作為對照
+- [x] 說明不指定標籤會取得 main 分支的最新內容，因此不受版本保護
+- [x] README 敘述的 Python 版本下限與 `pyproject.toml` 的 `requires-python` 一致
 
 ## Comments
 
