@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from playground.services.key_vault_config import key_vault_settings
-from playground.services.source_builder import BuilderSourceConfig, config_from_source
+from playground.services.source_builder import BuilderSourceConfig
+from playground.services.workflow_spec import spec_to_config
 from playground.services.workflow_reachability import reachable_openai_roles, reachable_workflow_roles
 
 
@@ -46,13 +47,13 @@ def endpoint_options() -> list[dict[str, str]]:
     return [asdict(endpoint) for endpoint in _model_endpoints()]
 
 
-def openai_requirements_from_source(python_source: str | None) -> list[dict[str, str]]:
-    return [asdict(requirement) for requirement in _openai_requirements(config_from_source(python_source))]
+def openai_requirements_from_spec(spec: dict) -> list[dict[str, str]]:
+    return [asdict(requirement) for requirement in _openai_requirements(spec_to_config(spec))]
 
 
-def endpoint_state(python_source: str | None, selections: dict[str, str] | None) -> dict[str, object]:
-    requirements = _deployment_requirements(config_from_source(python_source))
-    normalized = normalize_endpoint_selections(python_source, selections)
+def endpoint_state(spec: dict, selections: dict[str, str] | None) -> dict[str, object]:
+    requirements = _deployment_requirements(spec_to_config(spec))
+    normalized = normalize_endpoint_selections(spec, selections)
     selected_endpoints = {
         requirement.role: _endpoint_for_role(requirement.role, normalized)
         for requirement in requirements
@@ -95,8 +96,8 @@ def endpoint_state(python_source: str | None, selections: dict[str, str] | None)
     }
 
 
-def normalize_endpoint_selections(python_source: str | None, selections: dict[str, str] | None) -> dict[str, str]:
-    requirements = _deployment_requirements(config_from_source(python_source))
+def normalize_endpoint_selections(spec: dict, selections: dict[str, str] | None) -> dict[str, str]:
+    requirements = _deployment_requirements(spec_to_config(spec))
     if not requirements:
         return {}
 

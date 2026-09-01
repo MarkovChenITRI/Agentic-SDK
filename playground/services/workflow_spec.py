@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from typing import Any
 
 from playground.services.source_builder import (
@@ -20,6 +21,9 @@ from playground.services.source_builder import (
     _option_items_from_pairs,
     _string_items_from_lines,
     _retrieve_items_from_payload,
+    _retrieve_description,
+    _DEFAULT_RETRIEVE_DESCRIPTION,
+    _DEFAULT_SEMANTIC_RETRIEVE_DESCRIPTION,
     _pairs_text_from_retrieve_items,
     _pairs_text_from_options,
     _lines_text_from_items,
@@ -486,7 +490,7 @@ def spec_to_config(spec: dict[str, Any]) -> BuilderSourceConfig:
     reflect_module = reflect.get("module") or None
     plan_strategy = plan_params.get("strategy") or None
 
-    return BuilderSourceConfig(
+    config = BuilderSourceConfig(
         workflow_name=str(spec.get("workflow_name") or _DEFAULT_WORKFLOW_NAME),
         profile_hint=None,
         task_goal=str(spec.get("description") or "") or None,
@@ -528,6 +532,16 @@ def spec_to_config(spec: dict[str, Any]) -> BuilderSourceConfig:
         max_revisit=int(gates.get("max_revisit") or 5),
         timeout_sec=float(gates.get("timeout_sec") or 300.0),
     )
+    if config.retrieve_description:
+        return config
+    # The compiled source wrote a derived description into the plan module, but
+    # only when it differed from the two defaults. Mirror that exactly: a default
+    # description must stay None, because NextStepPlan reads its presence as
+    # "this agent has a retrieve source" and changes its routing on that.
+    derived = _retrieve_description(config)
+    if derived in {_DEFAULT_RETRIEVE_DESCRIPTION, _DEFAULT_SEMANTIC_RETRIEVE_DESCRIPTION}:
+        return config
+    return replace(config, retrieve_description=derived)
 
 
 def _perceive_module_to_input_kind(module: str) -> str:

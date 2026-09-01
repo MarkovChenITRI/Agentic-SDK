@@ -580,11 +580,11 @@ workflow = Workflow(
         },
     )
 
-    def fake_execute_python_source(python_source, **kwargs):
+    def fake_run_agent(python_source, **kwargs):
         captured.update(kwargs)
         return {"status": "ok", "final_message": "ok", "result": {}, "debug_messages": [], "process_events": []}
 
-    monkeypatch.setattr(runner_routes, "execute_python_source", fake_execute_python_source)
+    monkeypatch.setattr(runner_routes, "run_agent", fake_run_agent)
     app = create_app()
     app.config.update(TESTING=True, SECRET_KEY="test-secret")
 
@@ -598,8 +598,8 @@ workflow = Workflow(
         execute_response = client.post("/playground/run/execute", base_url="https://playground.example", json={"message": "policy?"})
 
     assert execute_response.status_code == 200
-    semantic_sources = [Path(item).as_posix() for item in captured["semantic_sources"]]
-    semantic_saved_path = Path(captured["semantic_saved_path"]).as_posix()
+    semantic_sources = [Path(item).as_posix() for item in captured["semantic_runtime"].sources]
+    semantic_saved_path = Path(captured["semantic_runtime"].saved_path).as_posix()
     assert semantic_sources[0].endswith("semantic-runtime/restored-upload/source-files")
     assert semantic_saved_path.endswith("semantic-runtime/restored-upload")
 

@@ -10,10 +10,11 @@ from playground.services.aihub_client import credentials_for_ticket, issue_crede
 from playground.services.deep_link import apply_aihub_deep_link
 from playground.services.mode_context import get_mode_context
 from playground.services.runner_conversation import RunnerConversationState
-from playground.services.runner_service import execute_python_source, get_runner_demo_result, get_scene_profile, stream_python_source_execution, stream_python_source_initialization
+from playground.services.runner_service import SemanticRuntime, get_default_scene_profile, get_runner_demo_result, run_agent, stream_agent_initialization, stream_agent_run
 from playground.services.semantic_runtime import runtime_root, source_files_dir
-from playground.services.source_builder import _DEFAULT_RUNNER_DESCRIPTION, build_python_source_from_builder_choice, config_from_source, get_workflow_summary
-from playground.services.workflow_spec import apply_builder_step, compile_python_source
+from playground.services.session_spec import current_spec, store_spec
+from playground.services.source_builder import _DEFAULT_RUNNER_DESCRIPTION, get_workflow_summary
+from playground.services.workflow_spec import apply_builder_step, compile_python_source, spec_to_config
 
 
 runner_bp = Blueprint("runner", __name__, url_prefix="/playground/run")
@@ -35,10 +36,10 @@ def runner():
 
     _ensure_runner_conversation_state(python_source)
     mode_context = get_mode_context()
-    scene_profile = get_scene_profile(python_source)
+    scene_profile = get_default_scene_profile()
     demo_result = get_runner_demo_result(scene_profile)
-    workflow_summary = get_workflow_summary(python_source)
-    config = config_from_source(python_source)
+    workflow_summary = get_workflow_summary(current_spec())
+    config = spec_to_config(current_spec())
     spec = session.get("workflow_spec")
     runner_presentation = session.get("runner_presentation")
     starter_questions = _starter_questions_from_runner_state(config, runner_presentation)
@@ -90,16 +91,15 @@ def execute_runner():
 
     payload = request.get_json(silent=True) or {}
     endpoint_selections = _runner_endpoint_selections()
-    semantic_sources, semantic_saved_path = _semantic_runtime_paths()
+    semantic_runtime = _semantic_runtime()
     conversation_state = _append_normal_user_turn(python_source, payload)
-    execution = execute_python_source(
-        python_source,
+    execution = run_agent(
+        current_spec(),
         message=str(payload.get("message", "")),
         conversation_state=conversation_state,
         attachments=payload.get("attachments") or [],
         endpoint_selections=endpoint_selections,
-        semantic_sources=semantic_sources,
-        semantic_saved_path=semantic_saved_path,
+        semantic_runtime=semantic_runtime,
         tool_call_submission=payload.get("tool_call_submission") if isinstance(payload.get("tool_call_submission"), dict) else None,
     )
     response_payload = _public_execution_payload(execution)
@@ -116,18 +116,18 @@ def execute_runner_stream():
 
     payload = request.get_json(silent=True) or {}
     endpoint_selections = _runner_endpoint_selections()
-    semantic_sources, semantic_saved_path = _semantic_runtime_paths()
+    semantic_runtime = _semantic_runtime()
+    spec = current_spec()
     conversation_state = _append_normal_user_turn(python_source, payload)
 
     def generate():
-        for item in stream_python_source_execution(
-            python_source,
+        for item in stream_agent_run(
+            spec,
             message=str(payload.get("message", "")),
             conversation_state=conversation_state,
             attachments=payload.get("attachments") or [],
             endpoint_selections=endpoint_selections,
-            semantic_sources=semantic_sources,
-            semantic_saved_path=semantic_saved_path,
+            semantic_runtime=semantic_runtime,
             tool_call_submission=payload.get("tool_call_submission") if isinstance(payload.get("tool_call_submission"), dict) else None,
         ):
             if item.get("type") == "final":
@@ -151,7 +151,7 @@ def commit_runner_conversation():
     payload = request.get_json(silent=True) or {}
     update = payload.get("conversation_update")
     current = _runner_conversation_state(python_source)
-    candidate = RunnerConversationState.from_dict(update, python_source=python_source)
+    candidate = RunnerConversationState.from_dict(update)
     if candidate.as_dict() == current.as_dict():
         return jsonify({"committed": True, "conversation": current.as_dict()})
     if candidate.conversation_id != current.conversation_id or candidate.revision != current.revision + 1:
@@ -175,14 +175,14 @@ def initialize_runner_stream():
         return jsonify({"error": "No Python source is available for initialization."}), 400
 
     endpoint_selections = _runner_endpoint_selections()
-    semantic_sources, semantic_saved_path = _semantic_runtime_paths()
+    semantic_runtime = _semantic_runtime()
+    spec = current_spec()
 
     def generate():
-        for item in stream_python_source_initialization(
-            python_source,
+        for item in stream_agent_initialization(
+            spec,
             endpoint_selections=endpoint_selections,
-            semantic_sources=semantic_sources,
-            semantic_saved_path=semantic_saved_path,
+            semantic_runtime=semantic_runtime,
         ):
             yield json.dumps(item, ensure_ascii=False) + "\n"
 
@@ -198,17 +198,12 @@ def update_runner_name():
         return jsonify({"updated": False, "error": "This runner is read-only."}), 403
 
     payload = request.get_json(silent=True) or {}
-    spec = session.get("workflow_spec")
-    if isinstance(spec, dict) and spec.get("version") == "2":
-        spec = apply_builder_step(spec, "name", str(payload.get("name", "")))
-        session["workflow_spec"] = spec
-        python_source = compile_python_source(spec)
-    else:
-        python_source = build_python_source_from_builder_choice("name", str(payload.get("name", "")), python_source)
-    session["python_source"] = python_source
+    spec = apply_builder_step(current_spec(), "name", str(payload.get("name", "")))
+    store_spec(spec)
+    session["python_source"] = compile_python_source(spec)
     session["builder_has_user_config"] = True
-    _store_builder_name(get_workflow_summary(python_source).name)
-    workflow_summary = get_workflow_summary(python_source)
+    workflow_summary = get_workflow_summary(spec)
+    _store_builder_name(workflow_summary.name)
     return jsonify(
         {
             "updated": True,
@@ -232,19 +227,14 @@ def update_runner_description():
         return jsonify({"updated": False, "error": "This runner is read-only."}), 403
 
     payload = request.get_json(silent=True) or {}
-    spec = session.get("workflow_spec")
-    if isinstance(spec, dict) and spec.get("version") == "2":
-        spec = apply_builder_step(spec, "description", str(payload.get("description", "")))
-        session["workflow_spec"] = spec
-        python_source = compile_python_source(spec)
-    else:
-        python_source = build_python_source_from_builder_choice("description", str(payload.get("description", "")), python_source)
-    session["python_source"] = python_source
+    spec = apply_builder_step(current_spec(), "description", str(payload.get("description", "")))
+    store_spec(spec)
+    session["python_source"] = compile_python_source(spec)
     session["builder_has_user_config"] = True
     return jsonify(
         {
             "updated": True,
-            "description": (str(spec.get("description") or "") if isinstance(spec, dict) and spec.get("version") == "2" else config_from_source(python_source).task_goal or ""),
+            "description": str(spec.get("description") or ""),
         }
     )
 
@@ -258,19 +248,13 @@ def update_runner_metadata():
         return jsonify({"updated": False, "error": "This runner is read-only."}), 403
 
     payload = request.get_json(silent=True) or {}
-    spec = session.get("workflow_spec")
-    if isinstance(spec, dict) and spec.get("version") == "2":
-        spec = apply_builder_step(spec, "name", str(payload.get("name", "")))
-        spec = apply_builder_step(spec, "description", str(payload.get("description", "")))
-        session["workflow_spec"] = spec
-        python_source = compile_python_source(spec)
-    else:
-        python_source = build_python_source_from_builder_choice("name", str(payload.get("name", "")), python_source)
-        python_source = build_python_source_from_builder_choice("description", str(payload.get("description", "")), python_source)
-    session["python_source"] = python_source
+    spec = apply_builder_step(current_spec(), "name", str(payload.get("name", "")))
+    spec = apply_builder_step(spec, "description", str(payload.get("description", "")))
+    store_spec(spec)
+    session["python_source"] = compile_python_source(spec)
     session["builder_has_user_config"] = True
-    _store_builder_name(get_workflow_summary(python_source).name)
-    workflow_summary = get_workflow_summary(python_source)
+    workflow_summary = get_workflow_summary(spec)
+    _store_builder_name(workflow_summary.name)
     return jsonify(
         {
             "updated": True,
@@ -281,7 +265,7 @@ def update_runner_metadata():
                 "output_contract": workflow_summary.output_contract,
                 "readiness": workflow_summary.readiness,
             },
-            "description": (str(spec.get("description") or "") if isinstance(spec, dict) and spec.get("version") == "2" else config_from_source(python_source).task_goal or ""),
+            "description": str(spec.get("description") or ""),
         }
     )
 
@@ -306,13 +290,11 @@ def _public_execution_payload(execution: dict[str, object]) -> dict[str, object]
     }
 
 
-def _semantic_runtime_paths() -> tuple[list[str] | None, str | None]:
+def _semantic_runtime() -> SemanticRuntime | None:
     upload_id = session.get("builder_upload_id")
     if not isinstance(upload_id, str) or not upload_id.strip():
-        return None, None
-    source_path = source_files_dir(upload_id)
-    saved_path = runtime_root(upload_id)
-    return [str(source_path)], str(saved_path)
+        return None
+    return SemanticRuntime(sources=(str(source_files_dir(upload_id)),), saved_path=str(runtime_root(upload_id)))
 
 
 def _runner_endpoint_selections() -> dict[str, str]:
@@ -321,7 +303,7 @@ def _runner_endpoint_selections() -> dict[str, str]:
 
 
 def _runner_conversation_state(python_source: str) -> RunnerConversationState:
-    return RunnerConversationState.from_dict(session.get(_CONVERSATION_SESSION_KEY), python_source=python_source)
+    return RunnerConversationState.from_dict(session.get(_CONVERSATION_SESSION_KEY))
 
 
 def _ensure_runner_conversation_state(python_source: str) -> RunnerConversationState:
@@ -346,7 +328,7 @@ def _append_normal_user_turn(python_source: str, payload: dict[str, object]) -> 
 
 @runner_bp.get("/profile")
 def runner_profile():
-    scene_profile = get_scene_profile(session.get("python_source"))
+    scene_profile = get_default_scene_profile()
     return jsonify(asdict(scene_profile))
 
 

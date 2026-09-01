@@ -23,8 +23,8 @@ from playground.services import source_builder
 from playground.services.runner_conversation import RunnerConversationState
 from playground.services.aihub_bridge import store_loaded_agent
 from playground.services.source_builder import BuilderSourceConfig, config_from_source
-from support import build_source
-from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec
+from support import build_source, build_spec
+from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec, spec_to_config
 from playground.services.workflow_reachability import reachable_workflow_roles
 
 
@@ -249,7 +249,7 @@ def test_semantic_retrieve_falls_back_to_pypdf_for_pdf(tmp_path, monkeypatch):
 
 def test_runner_execution_memory_keeps_current_image_attachment_transient():
     source = build_source()
-    conversation = RunnerConversationState.for_workflow(source).append_user("請解讀足測報告")
+    conversation = RunnerConversationState.start().append_user("請解讀足測報告")
     attachment = Attachment(
         kind="image",
         name="foot-report.png",
@@ -442,18 +442,18 @@ def test_key_vault_model_endpoint_requires_explicit_deployment_selection():
     assert params["api_key"]
     assert params["base_url"].startswith("https://")
     assert params["model"]
-    assert model_endpoints.normalize_endpoint_selections(build_source(), {}) == {}
+    assert model_endpoints.normalize_endpoint_selections(build_spec(), {}) == {}
 
 
 def test_deployment_options_follow_reachable_modules_and_require_selection():
-    source = build_source(
+    spec = build_spec(
         ("input_type", "text"),
         ("retrieve_policy", "semantic"),
         ("output_format", "free_text"),
         ("failure_policy", "retry"),
     )
 
-    state = model_endpoints.endpoint_state(source, {})
+    state = model_endpoints.endpoint_state(spec, {})
 
     assert [requirement["role"] for requirement in state["requirements"]] == ["perceive", "retrieve", "action"]
     assert state["selections"] == {"perceive": "", "retrieve": "", "action": ""}
@@ -466,17 +466,17 @@ def test_deployment_options_follow_reachable_modules_and_require_selection():
     spec["retrieve"]["module"] = "SemanticRetrieve"
     spec["action"]["module"] = "GenerativeAction"
     spec["reflect"]["module"] = "ResponseCheckReflect"
-    response_check_state = model_endpoints.endpoint_state(compile_python_source(spec), {})
+    response_check_state = model_endpoints.endpoint_state(spec, {})
 
     assert [requirement["role"] for requirement in response_check_state["requirements"]] == ["perceive", "retrieve", "action", "reflect"]
 
 
 def test_builder_review_requires_each_reachable_deployment_option():
-    source = build_source(
+    spec = build_spec(
         ("input_type", "text"),
         ("output_format", "free_text"),
     )
-    endpoint_state = model_endpoints.endpoint_state(source, {})
+    endpoint_state = model_endpoints.endpoint_state(spec, {})
     form_state = {"choices": {"input_type": "整理文字內容", "output_format": "純文字回覆"}, "values": {}}
 
     errors = builder_routes._endpoint_requirements_by_step(endpoint_state)
@@ -635,9 +635,9 @@ def test_runner_execution_stream_emits_one_final_event(monkeypatch):
             process_observer({"stage": "action", "status": "completed"})
         return {"status": "completed", "final_message": "單一最終回覆"}
 
-    monkeypatch.setattr(runner_service, "execute_python_source", fake_execute)
+    monkeypatch.setattr(runner_service, "run_agent", fake_execute)
 
-    events = list(runner_service.stream_python_source_execution("workflow = Workflow()", message="測試"))
+    events = list(runner_service.stream_agent_run("workflow = Workflow()", message="測試"))
 
     assert [event["type"] for event in events].count("final") == 1
     assert events[-1] == {"type": "final", "execution": {"status": "completed", "final_message": "單一最終回覆"}}
@@ -648,7 +648,7 @@ def test_runner_execute_routes_forward_attachment_payloads(monkeypatch):
     app.config.update(TESTING=True)
     captured = {}
 
-    def fake_execute_python_source(_python_source, **kwargs):
+    def fake_run_agent(_python_source, **kwargs):
         captured.update(kwargs)
         return {
             "status": "completed",
@@ -661,7 +661,7 @@ def test_runner_execute_routes_forward_attachment_payloads(monkeypatch):
             "scene_profile": {},
         }
 
-    monkeypatch.setattr(runner_routes, "execute_python_source", fake_execute_python_source)
+    monkeypatch.setattr(runner_routes, "run_agent", fake_run_agent)
 
     with app.test_client() as client:
         with client.session_transaction() as session:
@@ -693,7 +693,7 @@ def test_runner_execute_routes_forward_attachment_payloads(monkeypatch):
 
 
 def test_runner_conversation_state_restores_ordered_turns_across_source_changes():
-    first = RunnerConversationState.for_workflow("workflow = 'first'")
+    first = RunnerConversationState.start()
     restored = RunnerConversationState.from_dict(
         {
             **first.as_dict(),
@@ -702,14 +702,13 @@ def test_runner_conversation_state_restores_ordered_turns_across_source_changes(
                 {"role": "assistant", "content": "推薦科技鞋墊 加強型，SKU 7037439。"},
             ],
         },
-        python_source="workflow = 'first'",
     )
 
     memory = restored.memory(workflow_name="LaNew")
 
     assert [turn.role for turn in memory.turns] == ["user", "assistant"]
     assert memory.turns[-1].content == "推薦科技鞋墊 加強型，SKU 7037439。"
-    changed = RunnerConversationState.from_dict(restored.as_dict(), python_source="workflow = 'changed'")
+    changed = RunnerConversationState.from_dict(restored.as_dict())
     assert [turn.content for turn in changed.turns] == ["我有高足弓", "推薦科技鞋墊 加強型，SKU 7037439。"]
 
 
@@ -717,10 +716,9 @@ def test_runner_conversation_memory_exposes_prior_retrieval_evidence_to_modules(
     source = build_source()
     state = RunnerConversationState.from_dict(
         {
-            **RunnerConversationState.for_workflow(source).as_dict(),
+            **RunnerConversationState.start().as_dict(),
             "retrieval_evidence": "高足弓適用：科技鞋墊 加強型，SKU 7037439。",
         },
-        python_source=source,
     )
 
     memory = state.memory(workflow_name="LaNew")
@@ -730,16 +728,15 @@ def test_runner_conversation_memory_exposes_prior_retrieval_evidence_to_modules(
 
 def test_runner_execution_injects_conversation_memory_into_workflow(monkeypatch):
     captured = {}
-    source = build_source()
+    source = build_spec()
     state = RunnerConversationState.from_dict(
         {
-            **RunnerConversationState.for_workflow(source).as_dict(),
+            **RunnerConversationState.start().as_dict(),
             "turns": [
                 {"role": "user", "content": "我有高足弓"},
                 {"role": "assistant", "content": "推薦科技鞋墊 加強型，SKU 7037439。"},
             ],
         },
-        python_source=source,
     ).append_user("台北信義區")
 
     class FakeWorkflow:
@@ -750,9 +747,9 @@ def test_runner_execution_injects_conversation_memory_into_workflow(monkeypatch)
             memory.append_message("assistant", "已保留高足弓推薦。")
             return WorkflowResult(workflow_id="workflow", final_message="已保留高足弓推薦。", memory=memory)
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    execution = runner_service.execute_python_source(source, message="台北信義區", conversation_state=state)
+    execution = runner_service.run_agent(source, message="台北信義區", conversation_state=state)
 
     assert captured["session_id"] == state.conversation_id
     assert captured["user_message"] is None
@@ -764,14 +761,13 @@ def test_tool_continuation_extends_the_same_conversation_memory():
     source = build_source()
     conversation = RunnerConversationState.from_dict(
         {
-            **RunnerConversationState.for_workflow(source).as_dict(),
+            **RunnerConversationState.start().as_dict(),
             "retrieval_evidence": "科技鞋墊 加強型，SKU 7037439。",
             "turns": [
                 {"role": "user", "content": "高足弓適合哪款？"},
                 {"role": "assistant", "content": "推薦科技鞋墊 加強型。"},
             ],
         },
-        python_source=source,
     )
     captured = {}
     process_events = []
@@ -808,7 +804,7 @@ def test_tool_continuation_extends_the_same_conversation_memory():
 
 def test_tool_submission_update_keeps_selection_and_api_outcome_internal():
     source = build_source()
-    conversation = RunnerConversationState.for_workflow(source)
+    conversation = RunnerConversationState.start()
 
     update = runner_service._conversation_update(
         conversation,
@@ -840,7 +836,7 @@ def test_runner_conversation_commit_persists_one_expected_revision(monkeypatch):
     with app.test_client() as client:
         with client.session_transaction() as current_session:
             current_session["python_source"] = source
-            initial = RunnerConversationState.for_workflow(source)
+            initial = RunnerConversationState.start()
             current_session["runner_conversation"] = initial.as_dict()
 
         update = {
@@ -888,12 +884,12 @@ def test_runner_persists_normal_user_turn_before_execution(monkeypatch):
         captured["conversation"] = kwargs["conversation_state"]
         return {"status": "ok", "final_message": "已處理", "result": {}, "conversation_update": None}
 
-    monkeypatch.setattr(runner_routes, "execute_python_source", fake_execute)
+    monkeypatch.setattr(runner_routes, "run_agent", fake_execute)
 
     with app.test_client() as client:
         with client.session_transaction() as current_session:
             current_session["python_source"] = source
-            current_session["runner_conversation"] = RunnerConversationState.for_workflow(source).as_dict()
+            current_session["runner_conversation"] = RunnerConversationState.start().as_dict()
 
         response = client.post("/playground/run/execute", json={"message": "我有高足弓"})
 
@@ -921,7 +917,6 @@ def test_runner_page_initializes_conversation_state_for_first_turn():
             stored = current_session["runner_conversation"]
 
     assert response.status_code == 200
-    assert stored["workflow_fingerprint"] == RunnerConversationState.for_workflow(source).workflow_fingerprint
     assert stored["revision"] == 0
     assert stored["turns"] == []
 
@@ -963,7 +958,7 @@ def test_semantic_builder_upload_unblocks_review_and_reaches_runner(monkeypatch)
         lambda _python_source, _endpoint_selections: {"requirements": [], "configured_roles": {}},
     )
 
-    def fake_execute_python_source(_python_source, **kwargs):
+    def fake_run_agent(_python_source, **kwargs):
         captured.update(kwargs)
         return {
             "status": "completed",
@@ -976,7 +971,7 @@ def test_semantic_builder_upload_unblocks_review_and_reaches_runner(monkeypatch)
             "scene_profile": {},
         }
 
-    monkeypatch.setattr(runner_routes, "execute_python_source", fake_execute_python_source)
+    monkeypatch.setattr(runner_routes, "run_agent", fake_run_agent)
 
     with app.test_client() as client:
         semantic_response = client.post("/playground/builder/state", json={"step": "retrieve_policy", "choice": "semantic"})
@@ -1000,8 +995,8 @@ def test_semantic_builder_upload_unblocks_review_and_reaches_runner(monkeypatch)
     assert upload_payload["semantic_support_files"] == ["products.md"]
     assert uploaded_review["completed"] is True
     assert run_response.status_code == 200
-    assert captured["semantic_sources"] and captured["semantic_sources"][0].endswith("source-files")
-    assert captured["semantic_saved_path"]
+    assert captured["semantic_runtime"].sources and captured["semantic_runtime"].sources[0].endswith("source-files")
+    assert captured["semantic_runtime"].saved_path
 
 
 def test_semantic_builder_upload_rejects_archives_before_saving():
@@ -1072,7 +1067,7 @@ def test_semantic_initialization_checks_knowledge_requirement_and_restored_sourc
     source_dir.mkdir()
     source_dir.joinpath("catalog.md").write_text("catalog content", encoding="utf-8")
 
-    steps = runner_service._initialization_steps(config, {}, {"retrieve"}, [str(source_dir)], str(tmp_path), None)
+    steps = runner_service._initialization_steps(config, {}, {"retrieve"}, [str(source_dir)], str(tmp_path))
     initializers = {role: initializer for role, _label, initializer in steps}
 
     assert [role for role, _label, _initializer in steps[:3]] == ["knowledge_requirement", "knowledge_resources", "retrieve"]
@@ -1081,9 +1076,9 @@ def test_semantic_initialization_checks_knowledge_requirement_and_restored_sourc
 
 
 def test_semantic_initialization_blocks_when_configured_knowledge_is_unavailable():
-    source = compile_python_source(apply_builder_step(default_spec(), "retrieve_policy", "semantic"))
+    spec = apply_builder_step(default_spec(), "retrieve_policy", "semantic")
 
-    events = list(runner_service.stream_python_source_initialization(source))
+    events = list(runner_service.stream_agent_initialization(spec))
 
     assert events[-1]["type"] == "final"
     assert events[-1]["ready"] is False
@@ -1093,7 +1088,7 @@ def test_semantic_initialization_blocks_when_configured_knowledge_is_unavailable
 
 def test_nonsemantic_initialization_does_not_require_knowledge_sources():
     config = BuilderSourceConfig(workflow_name="no knowledge")
-    steps = runner_service._initialization_steps(config, {}, set(), None, None, None)
+    steps = runner_service._initialization_steps(config, {}, set(), None, None)
 
     assert [role for role, _label, _initializer in steps] == ["knowledge_requirement"]
     assert steps[0][2]() is None
@@ -1275,7 +1270,7 @@ def test_streaming_execute_route_forwards_attachment_payloads(monkeypatch):
     app.config.update(TESTING=True)
     captured = {}
 
-    def fake_stream_python_source_execution(_python_source, **kwargs):
+    def fake_stream_agent_run(_python_source, **kwargs):
         captured.update(kwargs)
         yield {
             "type": "final",
@@ -1291,7 +1286,7 @@ def test_streaming_execute_route_forwards_attachment_payloads(monkeypatch):
             },
         }
 
-    monkeypatch.setattr(runner_routes, "stream_python_source_execution", fake_stream_python_source_execution)
+    monkeypatch.setattr(runner_routes, "stream_agent_run", fake_stream_agent_run)
 
     with app.test_client() as client:
         with client.session_transaction() as session:
@@ -1358,7 +1353,7 @@ def test_streaming_execute_route_forwards_finish_fields_as_ndjson_process_events
                 visit_counts={"perceive": 1, "plan": 1, "action": 1},
             )
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
     with app.test_client() as client:
         with client.session_transaction() as session:
@@ -1520,7 +1515,7 @@ def test_runner_process_event_rejects_legacy_stage_alias_without_module():
 
 
 def test_tool_call_panel_does_not_fallback_for_information_intent(monkeypatch):
-    source = build_source(
+    source = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -1537,9 +1532,9 @@ def test_tool_call_panel_does_not_fallback_for_information_intent(monkeypatch):
         def run(self, *_args, **_kwargs):
             return WorkflowResult(workflow_id="workflow-1", final_message="目前結果顯示資料仍需補充。", entities={})
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    result = runner_service.execute_python_source(source, message="請分析目前結果")
+    result = runner_service.run_agent(source, message="請分析目前結果")
 
     assert result["status"] == "completed"
     assert result["tool_calls"] == []
@@ -1548,7 +1543,7 @@ def test_tool_call_panel_does_not_fallback_for_information_intent(monkeypatch):
 
 
 def test_tool_call_panel_does_not_fallback_for_optional_followup_question(monkeypatch):
-    source = build_source(
+    source = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -1569,15 +1564,15 @@ def test_tool_call_panel_does_not_fallback_for_optional_followup_question(monkey
                 entities={},
             )
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    result = runner_service.execute_python_source(source, message="這份報告代表我的腳有什麼問題嗎？")
+    result = runner_service.run_agent(source, message="這份報告代表我的腳有什麼問題嗎？")
 
     assert result["tool_call_panels"] == []
 
 
 def test_tool_call_panel_does_not_fallback_for_health_or_safety_concern(monkeypatch):
-    source = build_source(
+    source = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -1598,9 +1593,9 @@ def test_tool_call_panel_does_not_fallback_for_health_or_safety_concern(monkeypa
                 entities={},
             )
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    result = runner_service.execute_python_source(source, message="我足底很痛，走路會刺痛。")
+    result = runner_service.run_agent(source, message="我足底很痛，走路會刺痛。")
 
     assert result["tool_calls"] == []
     assert result["tool_call_panels"] == []
@@ -1608,7 +1603,7 @@ def test_tool_call_panel_does_not_fallback_for_health_or_safety_concern(monkeypa
 
 
 def test_tool_call_panel_falls_back_for_reservation_confirmation(monkeypatch):
-    source = build_source(
+    source = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -1629,16 +1624,16 @@ def test_tool_call_panel_falls_back_for_reservation_confirmation(monkeypatch):
                 entities={},
             )
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    result = runner_service.execute_python_source(source, message="好，那就幫我保留你推薦的那款。")
+    result = runner_service.run_agent(source, message="好，那就幫我保留你推薦的那款。")
 
     assert len(result["tool_call_panels"]) == 1
     assert result["tool_call_panels"][0]["title"] == "下一步確認"
 
 
 def test_tool_call_panel_allows_data_limitations_after_recommendation(monkeypatch):
-    source = build_source(
+    source = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -1659,16 +1654,16 @@ def test_tool_call_panel_allows_data_limitations_after_recommendation(monkeypatc
                 entities={},
             )
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    result = runner_service.execute_python_source(source, message="請直接幫我推薦一款合適的鞋墊。")
+    result = runner_service.run_agent(source, message="請直接幫我推薦一款合適的鞋墊。")
 
     assert len(result["tool_call_panels"]) == 1
     assert result["tool_call_panels"][0]["title"] == "下一步確認"
 
 
 def test_tool_call_panel_falls_back_for_decision_intent_without_model_tool_call(monkeypatch):
-    source = build_source(
+    source = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -1685,9 +1680,9 @@ def test_tool_call_panel_falls_back_for_decision_intent_without_model_tool_call(
         def run(self, *_args, **_kwargs):
             return WorkflowResult(workflow_id="workflow-1", final_message="我建議採用第一個方案。是否要進入下一步？", entities={})
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    result = runner_service.execute_python_source(source, message="請推薦下一步")
+    result = runner_service.run_agent(source, message="請推薦下一步")
 
     assert result["status"] == "completed"
     assert result["tool_calls"] == []
@@ -1699,7 +1694,7 @@ def test_tool_call_panel_falls_back_for_decision_intent_without_model_tool_call(
 
 
 def test_tool_call_panel_falls_back_for_natural_next_step_question(monkeypatch):
-    source = build_source(
+    source = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -1720,16 +1715,16 @@ def test_tool_call_panel_falls_back_for_natural_next_step_question(monkeypatch):
                 entities={},
             )
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    result = runner_service.execute_python_source(source, message="請推薦適合久站通勤的產品，並確認下一步。")
+    result = runner_service.run_agent(source, message="請推薦適合久站通勤的產品，並確認下一步。")
 
     assert len(result["tool_call_panels"]) == 1
     assert result["tool_call_panels"][0]["title"] == "下一步確認"
 
 
 def test_catalog_identifier_without_retrieved_evidence_stops_for_human_confirmation(monkeypatch):
-    source = build_source(
+    source = build_spec(
         ("retrieve_policy", "semantic"),
         ("output_format", "interactive"),
         (
@@ -1759,9 +1754,9 @@ def test_catalog_identifier_without_retrieved_evidence_stops_for_human_confirmat
                 entities={},
             )
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    result = runner_service.execute_python_source(source, message="請推薦產品編號 X-UNKNOWN-999，並進行下一步。")
+    result = runner_service.run_agent(source, message="請推薦產品編號 X-UNKNOWN-999，並進行下一步。")
 
     assert result["status"] == "aborted"
     assert result["tool_calls"] == []
@@ -1771,7 +1766,7 @@ def test_catalog_identifier_without_retrieved_evidence_stops_for_human_confirmat
 
 
 def test_tool_call_panel_uses_final_confirmation_line_for_long_recommendation(monkeypatch):
-    source = build_source(
+    source = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -1792,15 +1787,15 @@ def test_tool_call_panel_uses_final_confirmation_line_for_long_recommendation(mo
                 entities={},
             )
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    result = runner_service.execute_python_source(source, message="請推薦下一步")
+    result = runner_service.run_agent(source, message="請推薦下一步")
 
     assert result["tool_call_panels"][0]["title"] == "下一步確認"
 
 
 def test_tool_call_panel_does_not_fallback_when_recommendation_needs_more_input(monkeypatch):
-    source = build_source(
+    source = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -1817,9 +1812,9 @@ def test_tool_call_panel_does_not_fallback_when_recommendation_needs_more_input(
         def run(self, *_args, **_kwargs):
             return WorkflowResult(workflow_id="workflow-1", final_message="請提供更多資料後，我才能推薦合適方案。", entities={})
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    result = runner_service.execute_python_source(source, message="請推薦下一步")
+    result = runner_service.run_agent(source, message="請推薦下一步")
 
     assert result["status"] == "completed"
     assert result["tool_calls"] == []
@@ -1827,7 +1822,7 @@ def test_tool_call_panel_does_not_fallback_when_recommendation_needs_more_input(
 
 
 def test_tool_call_panel_uses_schema_for_user_facing_confirmation(monkeypatch):
-    source = build_source(
+    source = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -1856,9 +1851,9 @@ def test_tool_call_panel_uses_schema_for_user_facing_confirmation(monkeypatch):
                 },
             )
 
-    monkeypatch.setattr(runner_service, "_workflow_from_source", lambda *_args, **_kwargs: FakeWorkflow())
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *_args, **_kwargs: FakeWorkflow())
 
-    result = runner_service.execute_python_source(source, message="請推薦鞋墊")
+    result = runner_service.run_agent(source, message="請推薦鞋墊")
 
     assert result["status"] == "completed"
     assert result["panel_decision"] == "tool_call"
@@ -1886,7 +1881,7 @@ def test_runner_tool_panel_renderer_omits_empty_field_hints():
 
 
 def test_interactive_optional_field_is_not_required_in_tool_schema():
-    source = build_source(
+    spec = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -1899,7 +1894,7 @@ def test_interactive_optional_field_is_not_required_in_tool_schema():
         ),
     )
 
-    parameters = config_from_source(source).action_tools[0]["function"]["parameters"]
+    parameters = spec_to_config(spec).action_tools[0]["function"]["parameters"]
 
     assert parameters["required"] == ["是否確認", "__playground_review", "__playground_options"]
 
@@ -1951,3 +1946,82 @@ def test_runner_tool_panel_renderer_renders_read_only_review_before_fields():
     assert 'const review = document.createElement("p");' in renderer_source
     assert 'review.textContent = text;' in renderer_source
     assert 'tool-call-review-label' not in renderer_source
+
+
+def test_runner_metadata_routes_answer_for_a_session_that_only_has_python_source():
+    app = create_app()
+
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["python_source"] = build_source()
+            session["mode"] = "anonymous"
+
+        name = client.post("/playground/run/name", json={"name": "改名後的 Agent"})
+        description = client.post("/playground/run/description", json={"description": "新的用途說明。"})
+        metadata = client.post(
+            "/playground/run/metadata",
+            json={"name": "再改一次", "description": "再寫一次說明。"},
+        )
+
+    assert name.status_code == 200
+    assert name.get_json()["workflow_summary"]["name"] == "改名後的 Agent"
+    assert description.status_code == 200
+    assert description.get_json()["description"] == "新的用途說明。"
+    assert metadata.status_code == 200
+    assert metadata.get_json()["workflow_summary"]["name"] == "再改一次"
+    assert metadata.get_json()["description"] == "再寫一次說明。"
+
+
+# The three settings the spec path newly honours. Each is a value the Builder
+# collected and the compiled source silently dropped, so the runtime used a
+# module default instead. Wiring the remaining four is a separate ticket.
+_SETTINGS_THE_SPEC_PATH_NOW_HONOURS = {"perceive_importance", "retrieve_fallback", "retrieve_top_k"}
+
+
+def test_spec_path_and_compiled_source_path_agree_except_on_dropped_settings():
+    from dataclasses import fields
+
+    sequences = {
+        "text_image with perceive parameters": (
+            ("input_type", "text_image"),
+            ("perceive", {"welcome_message": "歡迎", "importance": "4.0"}),
+        ),
+        "keyword with items and fallback": (
+            ("retrieve_policy", "keyword"),
+            ("retrieve", {"keyword_pairs": "保固 = 說明", "fallback": "沒有資料。"}),
+        ),
+        "semantic with a search goal": (
+            ("retrieve_policy", "semantic"),
+            ("retrieve", {"top_k": "9", "semantic_search_goal": "查規格"}),
+        ),
+        "semantic with no parameters": (("retrieve_policy", "semantic"),),
+        "keyword with no parameters": (("retrieve_policy", "keyword"),),
+        "interactive action": (
+            ("output_format", "interactive"),
+            (
+                "action",
+                {
+                    "response_instruction": "請確認",
+                    "api_method": "POST",
+                    "api_url": "https://example.com/confirm",
+                    "component_fields": "是否確認 = 說明（資料類型：是/否)",
+                },
+            ),
+        ),
+        "text with retry": (
+            ("input_type", "text"),
+            ("output_format", "free_text"),
+            ("failure_policy", "retry"),
+        ),
+    }
+
+    for name, steps in sequences.items():
+        spec = build_spec(*steps)
+        from_source = config_from_source(compile_python_source(spec))
+        from_spec = spec_to_config(spec)
+        differing = {
+            field.name
+            for field in fields(from_source)
+            if getattr(from_source, field.name) != getattr(from_spec, field.name)
+        }
+        assert differing <= _SETTINGS_THE_SPEC_PATH_NOW_HONOURS, f"{name}: {differing}"

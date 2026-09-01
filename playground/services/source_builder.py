@@ -1601,39 +1601,21 @@ def _normalize_string_items(value: object) -> list[str]:
     return [item for item in (str(entry).strip() for entry in value) if item]
 
 
-def get_workflow_summary(python_source: str) -> WorkflowSummary:
-    parsed = parse_supported_source(python_source)
-    name = parsed.workflow_name
-    if parsed.profile_hint == "Recommendation":
-        template = "建議卡"
-        output_contract = "輸出規格：建議卡"
-    elif parsed.profile_hint == "Summary":
-        template = "摘要審閱"
-        output_contract = "輸出規格：摘要卡"
-    elif parsed.profile_hint == "Structured Form":
-        template = "表單收件"
-        output_contract = "輸出規格：摘要卡"
-    elif parsed.profile_hint == "Structured Result":
-        template = "結構化結果"
-        output_contract = "輸出規格：結果卡"
-    elif parsed.profile_hint == "OpenAI Client":
-        template = "模型回覆"
-        output_contract = "輸出規格：答案卡"
-    elif parsed.profile_hint == "Custom Action":
-        template = "自訂處理"
-        output_contract = "輸出規格：自訂結果"
-    else:
-        template = "回覆助理"
-        output_contract = "輸出規格：回覆內容"
+def get_workflow_summary(spec: dict) -> WorkflowSummary:
+    """Summarise an agent spec for the Builder and Runner headers.
 
+    The template variants this used to select came from a profile-hint comment
+    in the compiled source. A spec carries no hint, so every agent reports the
+    one template.
+    """
     return WorkflowSummary(
-        name=name,
+        name=str(spec.get("workflow_name") or "default"),
         input_contract="輸入規格：使用者內容",
-        output_contract=output_contract,
-        template=template,
-        readiness="可開始使用" if parsed.supported_subset else "可預覽",
+        output_contract="輸出規格：回覆內容",
+        template="回覆助理",
+        readiness="可開始使用",
         can_run=True,
-        can_roundtrip=parsed.supported_subset,
+        can_roundtrip=True,
     )
 
 

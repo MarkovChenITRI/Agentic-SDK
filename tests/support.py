@@ -186,3 +186,18 @@ def build_source(*steps: tuple[str, object]) -> str:
     for step_key, choice in steps:
         spec = apply_builder_step(spec, step_key, choice)
     return compile_python_source(spec)
+
+
+def build_spec(*steps: tuple[str, object]) -> dict:
+    """Build the agent spec a Builder session holds after these answers.
+
+    Each step is a ``(step_key, choice)`` pair, applied to the default spec in
+    order. Use this wherever a test drives the execution tier, and
+    :func:`build_source` where a test asserts on the exported Python text.
+    """
+    from playground.services.workflow_spec import apply_builder_step, default_spec
+
+    spec = default_spec()
+    for step_key, choice in steps:
+        spec = apply_builder_step(spec, step_key, choice)
+    return spec

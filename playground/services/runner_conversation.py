@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -27,26 +26,23 @@ class RunnerConversationTurn:
 @dataclass(frozen=True)
 class RunnerConversationState:
     conversation_id: str
-    workflow_fingerprint: str
     revision: int = 0
     turns: tuple[RunnerConversationTurn, ...] = ()
     retrieval_evidence: str = ""
     state_version: int = _STATE_VERSION
 
     @classmethod
-    def for_workflow(cls, python_source: str) -> "RunnerConversationState":
-        return cls(conversation_id=uuid.uuid4().hex, workflow_fingerprint=workflow_fingerprint(python_source))
+    def start(cls) -> "RunnerConversationState":
+        return cls(conversation_id=uuid.uuid4().hex)
 
     @classmethod
-    def from_dict(cls, value: object, *, python_source: str) -> "RunnerConversationState":
-        fingerprint = workflow_fingerprint(python_source)
+    def from_dict(cls, value: object) -> "RunnerConversationState":
         if not isinstance(value, dict):
-            return cls.for_workflow(python_source)
+            return cls.start()
         raw_turns = value.get("turns") if isinstance(value.get("turns"), list) else []
         turns = tuple(_turn_from_dict(turn) for turn in raw_turns if _turn_from_dict(turn) is not None)
         return cls(
             conversation_id=str(value.get("conversation_id") or uuid.uuid4().hex),
-            workflow_fingerprint=fingerprint,
             revision=max(0, int(value.get("revision") or 0)),
             turns=turns,
             retrieval_evidence=_bounded_text(value.get("retrieval_evidence"), _MAX_EVIDENCE_CHARS),
@@ -56,7 +52,6 @@ class RunnerConversationState:
         return {
             "state_version": self.state_version,
             "conversation_id": self.conversation_id,
-            "workflow_fingerprint": self.workflow_fingerprint,
             "revision": self.revision,
             "turns": [turn.as_dict() for turn in self.turns],
             "retrieval_evidence": self.retrieval_evidence,
@@ -85,7 +80,6 @@ class RunnerConversationState:
         state = self._append_turn("assistant", content, metadata=metadata)
         return RunnerConversationState(
             conversation_id=state.conversation_id,
-            workflow_fingerprint=state.workflow_fingerprint,
             revision=state.revision,
             turns=state.turns,
             retrieval_evidence=_bounded_text(retrieval_evidence, _MAX_EVIDENCE_CHARS) if retrieval_evidence else self.retrieval_evidence,
@@ -110,7 +104,6 @@ class RunnerConversationState:
             return self
         return RunnerConversationState(
             conversation_id=self.conversation_id,
-            workflow_fingerprint=self.workflow_fingerprint,
             revision=self.revision + 1,
             turns=(*self.turns, *bounded_turns),
             retrieval_evidence=_bounded_text(retrieval_evidence, _MAX_EVIDENCE_CHARS) if retrieval_evidence else self.retrieval_evidence,
@@ -128,7 +121,6 @@ class RunnerConversationState:
             return self
         return RunnerConversationState(
             conversation_id=self.conversation_id,
-            workflow_fingerprint=self.workflow_fingerprint,
             revision=self.revision + 1,
             turns=(*self.turns, RunnerConversationTurn(role=role, content=bounded_content, metadata=_safe_metadata(metadata))),
             retrieval_evidence=self.retrieval_evidence,
@@ -136,10 +128,6 @@ class RunnerConversationState:
 
     def update_from_result(self, result: WorkflowResult) -> "RunnerConversationState":
         return self.append_assistant(result.final_message, retrieval_evidence=_retrieval_evidence(result))
-
-
-def workflow_fingerprint(python_source: str) -> str:
-    return hashlib.sha256(str(python_source).encode("utf-8")).hexdigest()
 
 
 def _turn_from_dict(value: object) -> RunnerConversationTurn | None:

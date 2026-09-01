@@ -4,7 +4,7 @@ import ast
 import json
 import re
 from collections.abc import Callable, Iterator
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from queue import Queue
 from threading import Thread
@@ -19,41 +19,40 @@ from agentic_sdk.core.events import WORKFLOW_MODULE_NAMES, default_event_label
 from playground.models import RunnerSceneProfile
 from playground.services.model_endpoints import MissingEndpointCredentials, endpoint_params_for_role
 from playground.services.runner_conversation import RunnerConversationState, RunnerConversationTurn
-from playground.services.source_builder import BuilderSourceConfig, config_from_source
-from playground.services.source_parser import parse_supported_source
+from playground.services.source_builder import BuilderSourceConfig
 from playground.services.workflow_reachability import reachable_workflow_roles
+from playground.services.workflow_spec import spec_to_config
 
 
 _PLAYGROUND_REVIEW_FIELD = "__playground_review"
 _PLAYGROUND_OPTIONS_FIELD = "__playground_options"
 
 
-def get_scene_profile(python_source: str | None) -> RunnerSceneProfile:
-    source = python_source or ""
-    parsed = parse_supported_source(source)
-    if parsed.profile_hint in {"Recommendation", "Summary"}:
-        return RunnerSceneProfile(
-            layout_variant="result_first",
-            primary_input_kind="brief",
-            primary_result_kind="recommendation_card",
-            task_archetype="recommendation",
-            enabled_slots=["result_summary", "evidence", "next_steps"],
-            layout_fit={"chat_first": "supported", "form_first": "fallback", "result_first": "preferred"},
-        )
-    if parsed.profile_hint in {"Structured Form", "Structured Result"}:
-        return RunnerSceneProfile(
-            layout_variant="form_first",
-            primary_input_kind="structured",
-            primary_result_kind="summary_card",
-            task_archetype="form_evaluation",
-            enabled_slots=["structured_input", "result_summary", "evidence"],
-            layout_fit={"chat_first": "fallback", "form_first": "preferred", "result_first": "supported"},
-        )
-    return RunnerSceneProfile()
+@dataclass(frozen=True)
+class SemanticRuntime:
+    """Where a semantic-retrieve agent keeps its source files and vector index.
+
+    All of it derives from one Builder upload id, so it travels as one value
+    rather than as four separate path arguments.
+    """
+
+    sources: tuple[str, ...] = ()
+    saved_path: str | None = None
+
+    @property
+    def source_list(self) -> list[str] | None:
+        return [str(source) for source in self.sources] or None
 
 
 def get_default_scene_profile() -> RunnerSceneProfile:
-    return get_scene_profile(None)
+    """Return the Runner's only scene profile.
+
+    The variants this used to select came from a profile-hint comment recovered
+    from the compiled source. A v2 spec carries no such hint, so every agent
+    already resolved to this profile before the execution tier stopped reading
+    the compiled text.
+    """
+    return RunnerSceneProfile()
 
 
 def get_runner_demo_result(scene_profile: RunnerSceneProfile) -> dict[str, object]:
@@ -66,30 +65,25 @@ def get_runner_demo_result(scene_profile: RunnerSceneProfile) -> dict[str, objec
     }
 
 
-def execute_python_source(
-    python_source: str,
+def run_agent(
+    spec: dict[str, Any],
     *,
     message: str = "",
     conversation_state: RunnerConversationState | None = None,
     attachments: list[dict] | None = None,
     endpoint_selections: dict[str, str] | None = None,
-    semantic_sources: list[str] | None = None,
-    semantic_saved_path: str | None = None,
-    semantic_source_path: str | None = None,
-    semantic_index_path: str | None = None,
+    semantic_runtime: SemanticRuntime | None = None,
     tool_call_submission: dict[str, object] | None = None,
     process_observer: Callable[[dict[str, object]], None] | None = None,
 ) -> dict[str, object]:
-    scene_profile = get_scene_profile(python_source)
-    parsed_source = parse_supported_source(python_source)
-    execution_workflow_name = parsed_source.workflow_name if parsed_source.supported_subset else "playground_preview"
+    scene_profile = get_default_scene_profile()
+    execution_workflow_name = str(spec.get("workflow_name") or "default")
     source_execution = {
         "workflow_name": execution_workflow_name,
-        "profile_hint": parsed_source.profile_hint,
-        "supported_subset": parsed_source.supported_subset,
+        "profile_hint": None,
+        "supported_subset": True,
     }
-    config = config_from_source(python_source)
-    resolved_semantic_sources = _semantic_sources(semantic_sources, semantic_source_path)
+    config = spec_to_config(spec)
     tool_submission_context = _tool_submission_context(config, tool_call_submission)
     user_message = _message_with_tool_submission(message.strip(), tool_submission_context)
     streamed_process_events: list[dict[str, object]] = []
@@ -129,13 +123,10 @@ def execute_python_source(
         }
 
     try:
-        workflow = _workflow_from_source(
-            python_source,
-            execution_workflow_name,
+        workflow = build_workflow(
+            spec,
             endpoint_selections or {},
-            semantic_sources=resolved_semantic_sources,
-            semantic_saved_path=semantic_saved_path,
-            semantic_index_path=semantic_index_path,
+            semantic_runtime=semantic_runtime,
         )
         if tool_submission_context is not None:
             workflow_result = _run_tool_submission_continuation(
@@ -191,7 +182,7 @@ def execute_python_source(
 
     final_message = workflow_result.final_message or get_runner_demo_result(scene_profile)["message"]
     if final_message == "No matching entries.":
-        final_message = _source_fallback_text(python_source) or "目前沒有找到符合的參考資料。"
+        final_message = _spec_fallback_text(spec) or "目前沒有找到符合的參考資料。"
     handoff_reason = _human_handoff_reason(config, workflow_result.entries, user_message)
     safety_concern = _has_health_or_safety_concern(user_message, final_message)
     tool_calls = [] if handoff_reason or safety_concern else workflow_result.entities.get("latest_tool_calls", [])
@@ -260,17 +251,14 @@ def _conversation_memory_for_execution(
     return memory
 
 
-def stream_python_source_execution(
-    python_source: str,
+def stream_agent_run(
+    spec: dict[str, Any],
     *,
     message: str = "",
     conversation_state: RunnerConversationState | None = None,
     attachments: list[dict] | None = None,
     endpoint_selections: dict[str, str] | None = None,
-    semantic_sources: list[str] | None = None,
-    semantic_saved_path: str | None = None,
-    semantic_source_path: str | None = None,
-    semantic_index_path: str | None = None,
+    semantic_runtime: SemanticRuntime | None = None,
     tool_call_submission: dict[str, object] | None = None,
 ) -> Iterator[dict[str, object]]:
     queue: Queue[dict[str, object] | None] = Queue()
@@ -280,16 +268,13 @@ def stream_python_source_execution(
 
     def worker() -> None:
         try:
-            execution = execute_python_source(
-                python_source,
+            execution = run_agent(
+                spec,
                 message=message,
                 conversation_state=conversation_state,
                 attachments=attachments,
                 endpoint_selections=endpoint_selections,
-                semantic_sources=semantic_sources,
-                semantic_saved_path=semantic_saved_path,
-                semantic_source_path=semantic_source_path,
-                semantic_index_path=semantic_index_path,
+                semantic_runtime=semantic_runtime,
                 tool_call_submission=tool_call_submission,
                 process_observer=publish_process_event,
             )
@@ -305,8 +290,8 @@ def stream_python_source_execution(
                         "error": str(exc),
                         "debug_messages": ["執行：串流流程失敗。"],
                         "process_events": [_process_event("workflow", "執行流程", "流程執行時發生問題，無法繼續輸出。")],
-                        "result": get_runner_demo_result(get_scene_profile(python_source)),
-                        "scene_profile": asdict(get_scene_profile(python_source)),
+                        "result": get_runner_demo_result(get_default_scene_profile()),
+                        "scene_profile": asdict(get_default_scene_profile()),
                     },
                 }
             )
@@ -321,24 +306,21 @@ def stream_python_source_execution(
         yield item
 
 
-def stream_python_source_initialization(
-    python_source: str,
+def stream_agent_initialization(
+    spec: dict[str, Any],
     *,
     endpoint_selections: dict[str, str] | None = None,
-    semantic_sources: list[str] | None = None,
-    semantic_saved_path: str | None = None,
-    semantic_source_path: str | None = None,
-    semantic_index_path: str | None = None,
+    semantic_runtime: SemanticRuntime | None = None,
 ) -> Iterator[dict[str, object]]:
-    config = config_from_source(python_source)
+    config = spec_to_config(spec)
+    runtime = semantic_runtime or SemanticRuntime()
     reachable_roles = reachable_workflow_roles(config)
     steps = _initialization_steps(
         config,
         endpoint_selections or {},
         reachable_roles,
-        _semantic_sources(semantic_sources, semantic_source_path),
-        semantic_saved_path,
-        semantic_index_path,
+        runtime.source_list,
+        runtime.saved_path,
     )
     total = len(steps)
     yield {"type": "progress", "completed": 0, "total": total, "message": "正在準備 Agent 初始化..."}
@@ -366,15 +348,13 @@ def stream_python_source_initialization(
 
 
 def prepare_semantic_runtime(
-    python_source: str,
+    spec: dict[str, Any],
     *,
     endpoint_selections: dict[str, str] | None = None,
-    semantic_sources: list[str] | None = None,
-    semantic_saved_path: str | None = None,
-    semantic_source_path: str | None = None,
-    semantic_index_path: str | None = None,
+    semantic_runtime: SemanticRuntime | None = None,
 ) -> dict[str, object]:
-    config = config_from_source(python_source)
+    config = spec_to_config(spec)
+    runtime = semantic_runtime or SemanticRuntime()
     if config.retrieve_module != "SemanticRetrieve":
         return {"prepared": False, "reason": "not_semantic_retrieve"}
     reachable_roles = reachable_workflow_roles(config)
@@ -384,9 +364,8 @@ def prepare_semantic_runtime(
         config,
         endpoint_selections or {},
         reachable_roles,
-        _semantic_sources(semantic_sources, semantic_source_path),
-        semantic_saved_path,
-        semantic_index_path,
+        runtime.source_list,
+        runtime.saved_path,
     )
     _warm_semantic_retrieve(module)
     return {"prepared": True}
@@ -1118,34 +1097,29 @@ def _to_attachment(raw: dict) -> Attachment:
     )
 
 
-def _semantic_sources(sources: list[str] | None, source_path: str | None) -> list[str] | None:
-    if sources:
-        return [str(source).strip() for source in sources if str(source).strip()]
-    if source_path and source_path.strip():
-        return [source_path.strip()]
-    return None
-
-
-def _workflow_from_source(
-    python_source: str,
-    workflow_name: str,
+def build_workflow(
+    spec: dict[str, Any],
     endpoint_selections: dict[str, str],
     *,
-    semantic_sources: list[str] | None = None,
-    semantic_saved_path: str | None = None,
-    semantic_index_path: str | None = None,
+    semantic_runtime: SemanticRuntime | None = None,
 ) -> Workflow:
-    config = config_from_source(python_source)
+    """Build the Workflow an agent spec describes, ready to run.
+
+    This is the seam tests assert against: give it a spec and the deployment it
+    runs under, and every module the spec selects is already wired.
+    """
+    config = spec_to_config(spec)
+    runtime = semantic_runtime or SemanticRuntime()
     reachable_roles = reachable_workflow_roles(config)
     memory = InContextMemory()
     return Workflow(
-        workflow_name=workflow_name,
+        workflow_name=str(spec.get("workflow_name") or "default"),
         description=config.task_goal or None,
         memory_type=memory,
         events_schema=config.events_schema,
         perceive=_perceive_from_config(config, endpoint_selections, reachable_roles),
         plan=_plan_from_config(config, endpoint_selections, reachable_roles),
-        retrieve=_retrieve_from_config(config, endpoint_selections, reachable_roles, semantic_sources, semantic_saved_path, semantic_index_path),
+        retrieve=_retrieve_from_config(config, endpoint_selections, reachable_roles, runtime.source_list, runtime.saved_path),
         action=_action_from_config(config, endpoint_selections, reachable_roles),
         reflect=_reflect_from_config(config, endpoint_selections, reachable_roles),
     )
@@ -1157,7 +1131,6 @@ def _initialization_steps(
     reachable_roles: set[str],
     semantic_sources: list[str] | None,
     semantic_saved_path: str | None,
-    semantic_index_path: str | None,
 ):
     semantic_retrieve_required = "retrieve" in reachable_roles and config.retrieve_module == "SemanticRetrieve"
     steps = [
@@ -1181,7 +1154,7 @@ def _initialization_steps(
         steps.append(("plan", "流程判斷器", lambda: _plan_from_config(config, endpoint_selections, reachable_roles)))
     if "retrieve" in reachable_roles:
         retrieve_label = "知識庫索引" if semantic_retrieve_required else _retrieve_process_title(config)
-        steps.append(("retrieve", retrieve_label, lambda: _retrieve_from_config(config, endpoint_selections, reachable_roles, semantic_sources, semantic_saved_path, semantic_index_path)))
+        steps.append(("retrieve", retrieve_label, lambda: _retrieve_from_config(config, endpoint_selections, reachable_roles, semantic_sources, semantic_saved_path)))
     if "action" in reachable_roles:
         steps.append(("action", _action_process_name(config), lambda: _action_from_config(config, endpoint_selections, reachable_roles)))
     if "reflect" in reachable_roles and config.reflect_module:
@@ -1259,7 +1232,6 @@ def _retrieve_from_config(
     reachable_roles: set[str],
     semantic_sources: list[str] | None = None,
     semantic_saved_path: str | None = None,
-    semantic_index_path: str | None = None,
 ):
     from agentic_sdk.modules.retrieve import KeywordRetrieve, PassThroughRetrieve, SemanticRetrieve
 
@@ -1271,7 +1243,6 @@ def _retrieve_from_config(
             top_k=config.retrieve_top_k,
             sources=semantic_sources or ["./tmp/source-files"],
             saved_path=semantic_saved_path or "./tmp",
-            index_path=semantic_index_path,
             **retrieve_params,
         )
     if config.retrieve_module == "PassThroughRetrieve":
@@ -1312,21 +1283,17 @@ def _reflect_from_config(config: BuilderSourceConfig, endpoint_selections: dict[
     return None
 
 
-def _source_fallback_text(python_source: str) -> str | None:
-    try:
-        tree = ast.parse(python_source)
-    except SyntaxError:
-        return None
+def _spec_fallback_text(spec: dict[str, Any]) -> str | None:
+    """Return the fallback text the spec configures, action before retrieve.
 
-    for preferred_call in ("DirectAnswerAction", "KeywordRetrieve", "SemanticRetrieve"):
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or _call_name(node.func) != preferred_call:
-                continue
-            for keyword in node.keywords:
-                if keyword.arg == "fallback" and isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str):
-                    fallback = keyword.value.value.strip()
-                    if fallback:
-                        return fallback
+    Mirrors the order the compiled-source reader used: DirectAnswerAction first,
+    then the retrieve modules.
+    """
+    for section in ("action", "retrieve"):
+        params = (spec.get(section) or {}).get("params") or {}
+        fallback = str(params.get("fallback") or "").strip()
+        if fallback:
+            return fallback
     return None
 
 
@@ -1607,11 +1574,3 @@ def _tool_call_field_type(schema_type: object, value: object) -> str:
     if isinstance(value, int | float):
         return "number"
     return "string"
-
-
-def _call_name(func: ast.expr) -> str:
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return ""

@@ -3,20 +3,9 @@ import pytest
 from agentic_sdk.core.events import default_events_schema
 from playground.services.source_builder import build_python_source_from_builder_choice, config_from_source, get_builder_form_state, get_workflow_summary
 from playground.services.source_parser import parse_supported_source
-from playground.services.runner_service import _process_event_for_workflow_event, execute_python_source
+from playground.services.runner_service import _process_event_for_workflow_event, run_agent
 from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec
-from support import build_source
-
-
-def _sample_workflow_source(workflow_name: str, profile_hint: str | None = None) -> str:
-    hint_line = f"# Playground profile hint: {profile_hint}\n" if profile_hint else ""
-    return (
-        "from agentic_sdk import Workflow\n\n"
-        f"{hint_line}"
-        "workflow = Workflow(\n"
-        f"    workflow_name={workflow_name!r},\n"
-        ")\n"
-    )
+from support import build_source, build_spec
 
 
 def test_parse_supported_default_source_name():
@@ -93,67 +82,18 @@ def test_runner_process_event_uses_workflow_stage_label():
     assert event["tracked_fields"] == []
 
 
-def test_execute_python_source_streams_configured_stage_label():
-    source = """from agentic_sdk import Workflow
-from agentic_sdk.modules import DirectAnswerAction, KeywordRetrieve, PassThroughPerceive
-
-workflow = Workflow(
-    workflow_name="Stage Agent",
-    events_schema={"retrieve": {"label": "正在查詢產品資料"}},
-    perceive=PassThroughPerceive(),
-    retrieve=KeywordRetrieve(items=[{"keywords": ["sdk"], "content": "SDK 支援階段提示。"}]),
-    action=DirectAnswerAction(),
-)
-"""
+def test_run_agent_streams_configured_stage_label():
+    spec = build_spec(("retrieve_policy", "keyword"))
+    spec["workflow_name"] = "Stage Agent"
+    spec["events"] = {"retrieve": {"label": "正在查詢產品資料"}}
+    spec["retrieve"]["params"]["items"] = [{"keywords": ["sdk"], "content": "SDK 支援階段提示。"}]
+    # No plan module, so the agent needs no model endpoint to reach retrieve.
+    spec["plan"] = default_spec()["plan"]
     events = []
 
-    execute_python_source(source, message="sdk", process_observer=events.append)
+    run_agent(spec, message="sdk", process_observer=events.append)
 
     assert any(event["role"] == "retrieve" and event["title"] == "正在查詢產品資料" for event in events)
-
-
-def test_parse_generated_profile_hint_for_summary():
-    python_source = _sample_workflow_source("default", "Summary")
-    parsed = parse_supported_source(python_source)
-    summary = get_workflow_summary(python_source)
-
-    assert parsed.profile_hint == "Summary"
-    assert summary.name == "default"
-    assert summary.can_roundtrip is True
-
-
-def test_parse_structured_action_profile_hint():
-    python_source = _sample_workflow_source("default", "Structured Result")
-    parsed = parse_supported_source(python_source)
-    summary = get_workflow_summary(python_source)
-
-    assert parsed.profile_hint == "Structured Result"
-    assert summary.template == "結構化結果"
-
-
-def test_parse_profile_hint_templates():
-    openai_source = _sample_workflow_source("default", "OpenAI Client")
-    custom_source = _sample_workflow_source("default", "Custom Action")
-
-    assert parse_supported_source(openai_source).workflow_name == "default"
-    assert get_workflow_summary(openai_source).template == "模型回覆"
-    assert parse_supported_source(custom_source).workflow_name == "default"
-    assert get_workflow_summary(custom_source).template == "自訂處理"
-
-
-def test_execute_marks_unsupported_source_without_running_arbitrary_code():
-    python_source = """from agentic_sdk import Workflow
-
-exec("raise RuntimeError('should not run')")
-workflow = Workflow()
-"""
-
-    result = execute_python_source(python_source, message="hello")
-
-    assert result["status"] == "completed"
-    assert result["source_execution"]["supported_subset"] is False
-    assert result["source_execution"]["workflow_name"] == "playground_preview"
-    assert result["result"]["evidence"] == ["來源：目前輸入內容。", "外部資料：尚未加入。"]
 
 
 def test_retrieve_builder_ignores_legacy_semantic_weight_fields():
@@ -258,41 +198,6 @@ workflow = Workflow(
     config = config_from_source(source)
 
     assert config.starter_questions == ("如何上架？",)
-
-
-def test_custom_action_builder_emits_module_standard_action():
-    # Deliberately still on the compiled-source construction path. Custom actions
-    # are reachable only from hand-written source: no Builder step produces them,
-    # the v2 spec's allowed action modules exclude them, and spec_to_config
-    # hardcodes every custom_* field off. This test and the machinery it covers
-    # are removed together when the compiled-source read path goes.
-    source = _sample_workflow_source("固定格式 Agent", "Custom Action")
-    source = build_python_source_from_builder_choice(
-        "action",
-        {
-            "class_name": "SupportRule",
-            "memory_key": "latest_retrieved_content",
-            "fallback": "沒有可用資料。",
-            "prefix": "處理結果：",
-            "rule_title": "規則",
-            "rule_instruction": "只回覆已知資料。",
-        },
-        source,
-    )
-
-    assert "from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState" in source
-    assert "class SupportRule:" in source
-    assert 'name = "action"' in source
-    assert "def __call__(self, state: WorkflowState) -> ModuleOutput:" in source
-    assert "state.lookup(\"latest_retrieved_content\")" in source
-    assert 'payload={"latest_final_message": content}' in source
-    assert "ContextEntry(" in source
-
-    result = execute_python_source(source, message="請處理", process_observer=lambda _event: None)
-
-    assert result["status"] == "completed"
-    assert result["final_message"].startswith("處理結果：")
-    assert result["result"]["message"] == result["final_message"]
 
 
 def test_keyword_retrieve_builder_emits_only_keyword_items_without_retrieve_fallback():
