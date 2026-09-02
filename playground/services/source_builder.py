@@ -12,17 +12,17 @@ from playground.models import BuilderChoice, BuilderStep, WorkflowSummary
 from playground.services.workflow_reachability import reachable_workflow_roles
 
 
-_DEFAULT_WORKFLOW_NAME = "default"
-_GENERATED_WORKFLOW_NAMES = {_DEFAULT_WORKFLOW_NAME}
+DEFAULT_WORKFLOW_NAME = "default"
+GENERATED_WORKFLOW_NAMES = {DEFAULT_WORKFLOW_NAME}
 
-_ALLOWED_DIRECT_RESULT_KEYS = {
+ALLOWED_DIRECT_RESULT_KEYS = {
     "latest_retrieved_content",
     "retrieved_snippet",
     "perceived_input",
     "query",
     "latest_final_message",
 }
-_ALLOWED_ENTRY_MODULES = {"perceive", "plan", "retrieve", "action"}
+ALLOWED_ENTRY_MODULES = {"perceive", "plan", "retrieve", "action"}
 _OUTPUT_FORMAT_PROMPTS = {
     "free_text": "請依使用者需求自然回覆；語氣、角色與回覆方式以使用者設定的回覆風格與規範為準。",
     "interactive": "請同時支援純文字回覆與 OpenAI tool calling。一般問題可自然回答；當需要使用者選擇或填寫資料時，請呼叫最符合的工具，不要把 component/api JSON 當成一般文字輸出。",
@@ -32,20 +32,20 @@ _OUTPUT_FORMAT_PROMPTS = {
     "json": "請輸出 JSON；欄位固定、值簡潔，不要加入 JSON 以外的文字。",
     "custom_schema": "請依指定格式輸出；欄位缺資料時使用空字串或明確標註未知。",
 }
-_INTERACTIVE_TOOL_POLICY = """互動元件使用原則：
+INTERACTIVE_TOOL_POLICY = """互動元件使用原則：
 以下是內部決策規則，不要向使用者描述判斷、工具或元件流程。先在內部判斷使用者這一輪的意圖類型，而不是因為已配置互動元件就要求使用者選擇。
 當使用者只是詢問資訊、要求分析、要求解釋、比較原因、了解現況或追問依據時，只用自然語言回答，不要提出確認問題。
 只有當使用者明確進入決策、確認、提交、申請、送出表單、安排後續流程或選擇下一步，且該需求符合工具描述時，才提出互動確認。
 互動確認只能收集該工具 schema 中定義的欄位；不可自行要求、暗示或臆測未配置的業務欄位。若 required 欄位尚未齊全，只簡潔要求缺少的 schema 欄位；全部齊全後才呼叫工具。
 需要互動確認時，對使用者直接輸出建議、必要依據、限制與下一步，最後用自然語言提出清楚的確認問題；Playground 會依配置顯示互動元件並收集使用者選擇。
 不要把 API URL、component schema、欄位 JSON 或內部工具設定當成使用者可見文字輸出。"""
-_FREE_TEXT_OUTPUT_CHOICES = {"free_text", "natural", "bullets"}
-_INTERACTIVE_OUTPUT_CHOICES = {"interactive", "table", "json", "custom_schema"}
-_TOOL_CALL_OUTPUT_CHOICES = {"interactive"}
-_STRUCTURED_OUTPUT_CHOICES = {"table", "json", "custom_schema"}
-_DEFAULT_RETRIEVE_DESCRIPTION = "依使用者設定的關鍵字參考資料判斷是否需要查詢。"
-_DEFAULT_SEMANTIC_RETRIEVE_DESCRIPTION = "依上傳的參考文件查找與問題最相關的內容。"
-_DEFAULT_RUNNER_DESCRIPTION = "可填寫這個 Agent 的用途、適用情境或回覆目標。"
+FREE_TEXT_OUTPUT_CHOICES = {"free_text", "natural", "bullets"}
+INTERACTIVE_OUTPUT_CHOICES = {"interactive", "table", "json", "custom_schema"}
+TOOL_CALL_OUTPUT_CHOICES = {"interactive"}
+STRUCTURED_OUTPUT_CHOICES = {"table", "json", "custom_schema"}
+DEFAULT_RETRIEVE_DESCRIPTION = "依使用者設定的關鍵字參考資料判斷是否需要查詢。"
+DEFAULT_SEMANTIC_RETRIEVE_DESCRIPTION = "依上傳的參考文件查找與問題最相關的內容。"
+DEFAULT_RUNNER_DESCRIPTION = "可填寫這個 Agent 的用途、適用情境或回覆目標。"
 _PLAYGROUND_REVIEW_FIELD = "__playground_review"
 _PLAYGROUND_OPTIONS_FIELD = "__playground_options"
 _MODULE_IMPORT_ORDER = (
@@ -181,7 +181,7 @@ def get_builder_steps() -> list[BuilderStep]:
     ]
 
 
-def _pairs_text_from_options(options: tuple[dict[str, object], ...]) -> str:
+def pairs_text_from_options(options: tuple[dict[str, object], ...]) -> str:
     return "\n".join(
         f"{str(option.get('label', '')).strip()} = {str(option.get('intent', '')).strip()}"
         for option in options
@@ -189,11 +189,11 @@ def _pairs_text_from_options(options: tuple[dict[str, object], ...]) -> str:
     )
 
 
-def _lines_text_from_items(items: tuple[str, ...]) -> str:
+def lines_text_from_items(items: tuple[str, ...]) -> str:
     return "\n".join(item for item in items if item)
 
 
-def _pairs_text_from_retrieve_items(items: tuple[dict[str, object], ...]) -> str:
+def pairs_text_from_retrieve_items(items: tuple[dict[str, object], ...]) -> str:
     lines = []
     for item in items:
         keywords = item.get("keywords")
@@ -206,11 +206,11 @@ def _pairs_text_from_retrieve_items(items: tuple[dict[str, object], ...]) -> str
     return "\n".join(lines)
 
 
-def _response_instruction_from_prompt(prompt: str | None) -> str | None:
+def response_instruction_from_prompt(prompt: str | None) -> str | None:
     return _user_authored_action_prompt(prompt)
 
 
-def _api_contracts_json_from_tools(tools: tuple[dict[str, object], ...]) -> str | None:
+def api_contracts_json_from_tools(tools: tuple[dict[str, object], ...]) -> str | None:
     contracts = _api_contracts_from_tools(tools)
     if not contracts:
         return None
@@ -262,28 +262,28 @@ def _component_fields_text_from_parameters(parameters: object) -> str:
             continue
         if not isinstance(field, dict):
             continue
-        label = _clean_short_text(str(name), "")
-        description = _clean_prompt(str(field.get("description") or "")) or label
+        label = clean_short_text(str(name), "")
+        description = clean_prompt(str(field.get("description") or "")) or label
         json_type = type_labels.get(str(field.get("type") or "string").lower(), "文字")
         if label and description:
             lines.append(f"{label} = {description}（資料類型：{json_type}）")
     return "\n".join(lines)
 
 
-def _string_items_from_lines(value: str) -> list[str]:
+def string_items_from_lines(value: str) -> list[str]:
     return [item for item in (line.strip() for line in value.splitlines()) if item]
 
 
-def _clean_workflow_name(workflow_name: str) -> str:
+def clean_workflow_name(workflow_name: str) -> str:
     return " ".join(workflow_name.split()).strip()[:64]
 
 
-def _clean_prompt(prompt: str) -> str | None:
+def clean_prompt(prompt: str) -> str | None:
     cleaned = "\n".join(line.rstrip() for line in prompt.strip().splitlines()).strip()
     return cleaned[:500] or None
 
 
-def _clean_short_text(value: str, fallback: str) -> str:
+def clean_short_text(value: str, fallback: str) -> str:
     cleaned = " ".join(value.split()).strip()
     return cleaned[:160] or fallback
 
@@ -303,25 +303,25 @@ def _clean_python_identifier(value: str, fallback: str) -> str:
     return cleaned[:80]
 
 
-def _clean_allowed_value(value: str, allowed_values: set[str], fallback: str) -> str:
+def clean_allowed_value(value: str, allowed_values: set[str], fallback: str) -> str:
     cleaned = value.strip()
     return cleaned if cleaned in allowed_values else fallback
 
 
-def _action_prompt_from_payload(payload: dict[str, Any], current_prompt: str | None) -> str | None:
+def action_prompt_from_payload(payload: dict[str, Any], current_prompt: str | None) -> str | None:
     if "response_instruction" in payload:
-        return _clean_prompt(str(payload.get("response_instruction", "")))
+        return clean_prompt(str(payload.get("response_instruction", "")))
     return _user_authored_action_prompt(current_prompt)
 
 
-def _payload_has_interactive_contract(payload: dict[str, Any]) -> bool:
+def payload_has_interactive_contract(payload: dict[str, Any]) -> bool:
     return bool({"interaction_trigger", "api_method", "api_url", "component_fields", "api_contracts"} & set(payload))
 
 
-def _fixed_format_action_prompt_from_payload(payload: dict[str, Any], current_prompt: str | None) -> str | None:
+def fixed_format_action_prompt_from_payload(payload: dict[str, Any], current_prompt: str | None) -> str | None:
     if not ({"rule_title", "rule_pairs"} & set(payload)):
         return current_prompt
-    title = _clean_short_text(str(payload.get("rule_title", "")), "")
+    title = clean_short_text(str(payload.get("rule_title", "")), "")
     rules = _rule_instruction_from_pairs(str(payload.get("rule_pairs", "")))
     if not title and not rules:
         return current_prompt
@@ -333,13 +333,13 @@ def _fixed_format_action_prompt_from_payload(payload: dict[str, Any], current_pr
     return "\n".join(parts)
 
 
-def _retrieve_items_from_payload(payload: dict[str, Any]) -> tuple[dict[str, object], ...]:
+def retrieve_items_from_payload(payload: dict[str, Any]) -> tuple[dict[str, object], ...]:
     pair_items = _retrieve_pair_items_from_text(str(payload.get("keyword_pairs", "")))
     if pair_items:
         return tuple(pair_items)
 
     keywords = _split_keywords(str(payload.get("keywords", "")))
-    content = _clean_prompt(str(payload.get("content", "")))
+    content = clean_prompt(str(payload.get("content", "")))
     if not keywords or not content:
         return ()
     return ({"keywords": keywords, "content": content},)
@@ -353,7 +353,7 @@ def _retrieve_pair_items_from_text(raw_pairs: str) -> list[dict[str, object]]:
             continue
         key, value = parsed
         keywords = _split_keywords(key)
-        content = _clean_prompt(value)
+        content = clean_prompt(value)
         if keywords and content:
             items.append({"keywords": keywords, "content": content})
     return items[:20]
@@ -366,14 +366,14 @@ def _config_items_from_pairs(raw_pairs: str) -> list[dict[str, str]]:
         if parsed is None:
             continue
         key, value = parsed
-        config_key = _clean_short_text(key, "")
-        config_value = _clean_short_text(value, "")
+        config_key = clean_short_text(key, "")
+        config_value = clean_short_text(value, "")
         if config_key and config_value:
             items.append({"key": config_key, "value": config_value})
     return items[:20]
 
 
-def _option_items_from_pairs(raw_pairs: str) -> list[dict[str, object]]:
+def option_items_from_pairs(raw_pairs: str) -> list[dict[str, object]]:
     options: list[dict[str, object]] = []
     for item in _config_items_from_pairs(raw_pairs):
         options.append({"label": item["key"], "intent": item["value"]})
@@ -397,14 +397,14 @@ def _rule_instruction_from_pairs(raw_pairs: str) -> str | None:
         if parsed is None:
             continue
         key, value = parsed
-        rule_key = _clean_short_text(key, "")
-        rule_value = _clean_prompt(value)
+        rule_key = clean_short_text(key, "")
+        rule_value = clean_prompt(value)
         if rule_key and rule_value:
             rules.append(f"{rule_key}：{rule_value}")
     return "\n".join(rules[:20]) or None
 
 
-def _tools_from_action_payload(payload: dict[str, Any]) -> tuple[dict[str, object], ...]:
+def tools_from_action_payload(payload: dict[str, Any]) -> tuple[dict[str, object], ...]:
     tools = []
     for index, contract in enumerate(_interactive_api_contracts(payload), start=1):
         fields = _tool_parameters_from_pairs(str(contract.get("component_fields") or ""))
@@ -462,7 +462,7 @@ def _tool_parameters_from_pairs(raw_pairs: str) -> dict[str, object]:
         if parsed is None:
             continue
         raw_key, raw_value = parsed
-        key = _clean_short_text(raw_key, "")
+        key = clean_short_text(raw_key, "")
         description, json_type = _field_description_and_json_type(raw_value)
         if not key or key in properties:
             continue
@@ -488,7 +488,7 @@ def _field_description_and_json_type(raw_value: str) -> tuple[str, str]:
             json_type = "number"
         elif "boolean" in normalized_type or "是/否" in normalized_type:
             json_type = "boolean"
-    return (_clean_prompt(value) or "", json_type)
+    return (clean_prompt(value) or "", json_type)
 
 
 def _split_keywords(raw_keywords: str) -> list[str]:
@@ -512,7 +512,7 @@ def _call_name(func: ast.expr) -> str:
     return ""
 
 
-def _build_source_for_config(config: BuilderSourceConfig) -> str:
+def build_source_for_config(config: BuilderSourceConfig) -> str:
     if config.profile_hint == "Custom Action" or config.action_module == "CustomAction":
         return _build_custom_action_source(config)
     return _build_workflow_source(config)
@@ -664,8 +664,8 @@ def _action_system_prompt_for_config(config: BuilderSourceConfig, action_class: 
     if action_class != "ToolCallAction":
         return config.action_prompt
     if config.action_prompt:
-        return f"{_INTERACTIVE_TOOL_POLICY}\n\n使用者設定的回覆規範：\n{config.action_prompt}"
-    return _INTERACTIVE_TOOL_POLICY
+        return f"{INTERACTIVE_TOOL_POLICY}\n\n使用者設定的回覆規範：\n{config.action_prompt}"
+    return INTERACTIVE_TOOL_POLICY
 
 
 def _perceive_expression(config: BuilderSourceConfig) -> str:
@@ -729,27 +729,27 @@ def _llm_arguments(*, binding_role: str | None = None) -> list[str]:
     ]
 
 
-def _retrieve_description(config: BuilderSourceConfig) -> str:
+def retrieve_description(config: BuilderSourceConfig) -> str:
     if config.retrieve_module == "SemanticRetrieve":
         if config.semantic_search_goal:
             return f"優先從這批參考文件查找：{config.semantic_search_goal}"[:240]
         if config.retrieve_description:
             return config.retrieve_description[:240]
-        return _DEFAULT_SEMANTIC_RETRIEVE_DESCRIPTION
+        return DEFAULT_SEMANTIC_RETRIEVE_DESCRIPTION
     if config.retrieve_description:
         return config.retrieve_description[:240]
     if config.retrieve_items:
         content = str(config.retrieve_items[0].get("content", "")).strip()
         if content:
             return content[:120]
-    return _DEFAULT_RETRIEVE_DESCRIPTION
+    return DEFAULT_RETRIEVE_DESCRIPTION
 
 
 def _explicit_retrieve_description(config: BuilderSourceConfig) -> str | None:
     if config.semantic_search_goal:
-        return _retrieve_description(config)
-    if config.retrieve_description and config.retrieve_description not in {_DEFAULT_RETRIEVE_DESCRIPTION, _DEFAULT_SEMANTIC_RETRIEVE_DESCRIPTION}:
-        return _retrieve_description(config)
+        return retrieve_description(config)
+    if config.retrieve_description and config.retrieve_description not in {DEFAULT_RETRIEVE_DESCRIPTION, DEFAULT_SEMANTIC_RETRIEVE_DESCRIPTION}:
+        return retrieve_description(config)
     if config.retrieve_items:
         content = str(config.retrieve_items[0].get("content", "")).strip()
         return content[:120] if content else None
@@ -783,12 +783,12 @@ def _module_names_for_source(python_source: str) -> list[str]:
 
 
 def _user_authored_action_prompt(prompt: str | None) -> str | None:
-    cleaned = _clean_prompt(str(prompt or ""))
+    cleaned = clean_prompt(str(prompt or ""))
     if not cleaned:
         return None
-    if cleaned == _INTERACTIVE_TOOL_POLICY:
+    if cleaned == INTERACTIVE_TOOL_POLICY:
         return None
-    if cleaned.startswith(f"{_INTERACTIVE_TOOL_POLICY}\n\n使用者設定的回覆規範：\n"):
+    if cleaned.startswith(f"{INTERACTIVE_TOOL_POLICY}\n\n使用者設定的回覆規範：\n"):
         cleaned = cleaned.split("使用者設定的回覆規範：\n", 1)[1].strip()
     if cleaned in _OUTPUT_FORMAT_PROMPTS.values():
         return None
@@ -824,9 +824,9 @@ def _interactive_api_contracts(payload: dict[str, Any]) -> list[dict[str, str | 
     contracts: list[dict[str, str | None]] = []
     if not raw_contracts:
         direct_fields = _rule_instruction_from_pairs(str(payload.get("component_fields", "")))
-        direct_trigger = _clean_prompt(str(payload.get("interaction_trigger", "")))
-        direct_api_method = _clean_short_text(str(payload.get("api_method", "POST")), "POST").upper()
-        direct_api_url = _clean_prompt(str(payload.get("api_url", "")))
+        direct_trigger = clean_prompt(str(payload.get("interaction_trigger", "")))
+        direct_api_method = clean_short_text(str(payload.get("api_method", "POST")), "POST").upper()
+        direct_api_url = clean_prompt(str(payload.get("api_url", "")))
         if direct_trigger or direct_api_url or direct_fields:
             return [
                 {
@@ -847,9 +847,9 @@ def _interactive_api_contracts(payload: dict[str, Any]) -> list[dict[str, str | 
         if not isinstance(contract, dict):
             continue
         fields = _rule_instruction_from_pairs(str(contract.get("component_fields", "")))
-        trigger = _clean_prompt(str(contract.get("interaction_trigger", "")))
-        api_method = _clean_short_text(str(contract.get("api_method", "POST")), "POST").upper()
-        api_url = _clean_prompt(str(contract.get("api_url", "")))
+        trigger = clean_prompt(str(contract.get("interaction_trigger", "")))
+        api_method = clean_short_text(str(contract.get("api_method", "POST")), "POST").upper()
+        api_url = clean_prompt(str(contract.get("api_url", "")))
         if trigger or api_url or fields:
             contracts.append({
                 "interaction_trigger": trigger,

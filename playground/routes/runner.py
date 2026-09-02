@@ -13,7 +13,7 @@ from playground.services.runner_conversation import RunnerConversationState
 from playground.services.runner_service import SemanticRuntime, get_default_scene_profile, get_runner_demo_result, run_agent, stream_agent_initialization, stream_agent_run
 from playground.services.semantic_runtime import runtime_root, source_files_dir
 from playground.services.session_spec import current_spec, store_spec
-from playground.services.source_builder import _DEFAULT_RUNNER_DESCRIPTION, get_workflow_summary
+from playground.services.source_builder import DEFAULT_RUNNER_DESCRIPTION, get_workflow_summary
 from playground.services.workflow_spec import apply_builder_step, spec_to_config
 
 
@@ -51,7 +51,7 @@ def runner():
         demo_result=demo_result,
         workflow_summary=workflow_summary,
         workflow_description=str(spec.get("description") or ""),
-        workflow_description_placeholder=_DEFAULT_RUNNER_DESCRIPTION,
+        workflow_description_placeholder=DEFAULT_RUNNER_DESCRIPTION,
         runner_greeting=_runner_greeting(),
         starter_questions=starter_questions,
         uses_semantic_retrieve=config.retrieve_module == "SemanticRetrieve",

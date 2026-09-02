@@ -296,10 +296,10 @@ def test_action_messages_require_direct_user_facing_answers_for_custom_prompts()
 
 
 def test_interactive_policy_keeps_tool_decisions_internal():
-    assert "內部決策規則" in source_builder._INTERACTIVE_TOOL_POLICY
-    assert "不要向使用者描述判斷、工具或元件流程" in source_builder._INTERACTIVE_TOOL_POLICY
-    assert "只能收集該工具 schema 中定義的欄位" in source_builder._INTERACTIVE_TOOL_POLICY
-    assert "不可自行要求、暗示或臆測未配置的業務欄位" in source_builder._INTERACTIVE_TOOL_POLICY
+    assert "內部決策規則" in source_builder.INTERACTIVE_TOOL_POLICY
+    assert "不要向使用者描述判斷、工具或元件流程" in source_builder.INTERACTIVE_TOOL_POLICY
+    assert "只能收集該工具 schema 中定義的欄位" in source_builder.INTERACTIVE_TOOL_POLICY
+    assert "不可自行要求、暗示或臆測未配置的業務欄位" in source_builder.INTERACTIVE_TOOL_POLICY
 
 
 def test_completed_runner_trace_is_collapsed_by_default():
