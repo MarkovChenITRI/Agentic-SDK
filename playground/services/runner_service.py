@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, InContextMemory, Workflow, WorkflowResult, WorkflowState
+from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, Gates, InContextMemory, Workflow, WorkflowResult, WorkflowState
 from agentic_sdk.core.events import WORKFLOW_MODULE_NAMES, default_event_label
 
 from playground.models import RunnerSceneProfile
@@ -1097,6 +1097,32 @@ def _to_attachment(raw: dict) -> Attachment:
     )
 
 
+_MEMORY_KINDS = {"in_context": InContextMemory}
+
+
+def _memory_from_spec(spec: dict[str, Any]) -> InContextMemory:
+    """Build the conversation memory the spec asks for.
+
+    A run gets its own store, so two requests never share one.
+    """
+    kind = str((spec.get("memory") or {}).get("kind") or "in_context")
+    try:
+        return _MEMORY_KINDS[kind]()
+    except KeyError:
+        raise ValueError(f"unknown memory kind {kind!r}; supported: {', '.join(sorted(_MEMORY_KINDS))}") from None
+
+
+def _gates_from_spec(spec: dict[str, Any]) -> Gates:
+    """Build the run limits the spec configures, falling back to the SDK defaults."""
+    raw = spec.get("gates") or {}
+    defaults = Gates()
+    return Gates(
+        max_node_hops=int(raw.get("max_node_hops") or defaults.max_node_hops),
+        max_revisit=int(raw.get("max_revisit") or defaults.max_revisit),
+        timeout_sec=float(raw.get("timeout_sec") or defaults.timeout_sec),
+    )
+
+
 def build_workflow(
     spec: dict[str, Any],
     endpoint_selections: dict[str, str],
@@ -1111,11 +1137,12 @@ def build_workflow(
     config = spec_to_config(spec)
     runtime = semantic_runtime or SemanticRuntime()
     reachable_roles = reachable_workflow_roles(config)
-    memory = InContextMemory()
     return Workflow(
         workflow_name=str(spec.get("workflow_name") or "default"),
         description=config.task_goal or None,
-        memory_type=memory,
+        memory_type=_memory_from_spec(spec),
+        gates=_gates_from_spec(spec),
+        entry_module=config.entry_module,
         events_schema=config.events_schema,
         perceive=_perceive_from_config(config, endpoint_selections, reachable_roles),
         plan=_plan_from_config(config, endpoint_selections, reachable_roles),

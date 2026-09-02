@@ -8,7 +8,9 @@ from types import SimpleNamespace
 
 from flask import session
 
-from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, InContextMemory, WorkflowResult, WorkflowState
+import pytest
+
+from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, Gates, InContextMemory, WorkflowResult, WorkflowState
 from agentic_sdk.core.events import default_events_schema
 from agentic_sdk.modules.action.generative import _FINAL_RESPONSE_CONTRACT, _build_messages
 from agentic_sdk.modules.action.tool_call import _tool_call_content
@@ -2074,3 +2076,54 @@ def test_config_load_route_leaves_the_session_running_the_loaded_agent(monkeypat
     assert response.status_code == 200
     assert running_config.perceive_module == "TextImagePerceive"
     assert running_config.retrieve_module == "KeywordRetrieve"
+
+
+def test_spec_gates_reach_the_workflow():
+    spec = build_spec()
+    spec["gates"] = {"max_node_hops": 7, "max_revisit": 2, "timeout_sec": 12.5}
+
+    workflow = runner_service.build_workflow(spec, {})
+
+    assert workflow.gates.max_node_hops == 7
+    assert workflow.gates.max_revisit == 2
+    assert workflow.gates.timeout_sec == 12.5
+
+
+def test_spec_gates_fall_back_to_the_sdk_defaults_when_unset():
+    workflow = runner_service.build_workflow(build_spec(), {})
+
+    assert workflow.gates.max_node_hops == Gates().max_node_hops
+    assert workflow.gates.max_revisit == Gates().max_revisit
+    assert workflow.gates.timeout_sec == Gates().timeout_sec
+
+
+def test_spec_entry_module_reaches_the_workflow():
+    spec = build_spec()
+    spec["entry_module"] = "retrieve"
+
+    workflow = runner_service.build_workflow(spec, {})
+
+    assert workflow.entry_module == "retrieve"
+
+
+def test_spec_memory_kind_reaches_the_workflow():
+    workflow = runner_service.build_workflow(build_spec(), {})
+
+    assert isinstance(workflow.memory_type, InContextMemory)
+
+
+def test_each_run_gets_its_own_memory_store():
+    spec = build_spec()
+
+    first = runner_service.build_workflow(spec, {})
+    second = runner_service.build_workflow(spec, {})
+
+    assert first.memory_type is not second.memory_type
+
+
+def test_unknown_memory_kind_is_rejected_rather_than_ignored():
+    spec = build_spec()
+    spec["memory"] = {"kind": "redis"}
+
+    with pytest.raises(ValueError, match="unknown memory kind"):
+        runner_service.build_workflow(spec, {})
