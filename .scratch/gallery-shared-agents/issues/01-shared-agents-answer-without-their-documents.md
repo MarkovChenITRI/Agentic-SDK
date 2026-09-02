@@ -77,42 +77,42 @@ GET  /api/playground/agents/{id}/bundle/load          400   AGENT_PLAYGROUND_CRE
 
 `tests/test_playground_contracts.py::test_a_shared_agent_says_its_documents_are_missing` 釘住這件事，反向驗證過會紅。
 
-## 剩下的（需要 AI Hub 端）— 依設計文件更正
+## 完成記錄：沿用既有端點，改權限判斷
 
-查了 `eosl-aihub-pages` 的交握設計文件，我先前兩個判斷是錯的：
+**不需要新端點。** `GET /api/playground/agents/{id}/bundle/load` 一直都在，卡的只是它一律要求帳密。AI Hub 的原始碼在 `~/Documents/GitHub/ai-hub-webui`。
 
-**錯誤一：我說「bundle 可能沒被存下來」。** 沒有根據。`playground-file-save.md` 寫明固定儲存位置是 `playground-agents/{agent_id}/bundle/agentic_playground_bundle.zip`——**路徑由 agent_id 推導**。程式碼也吻合：`restore_runtime_bundle` 只吃 `agent_id`，從頭到尾不讀 `semantic_bundle_ref`。那個欄位是空的不代表檔案不在。
+### AI Hub 側
 
-**錯誤二：我把匿名拿不到 bundle 講成缺陷。** `connection-and-responsibility.md` 的「Runner 唯讀模式與 AI Hub 保存邊界」明確定義：
+`utils/agent_workspace/playground_bundle.py` 新增 `load_public_agent_bundle`，和 `load_agent_bundle` 只差在問的問題不同：不問「你是不是擁有者」，問「這個 Agent 是不是已上架 Gallery」。判斷沿用現成的 `read_public_playground_agent`，它的 SQL 本來就在檢查 `gallery_domain IS NOT NULL AND <> ''`。
 
-> 非擁有者或未登入使用者從 Gallery 進入工作流時……由 Playground 依 `owner` 與 `agentId` 載入**公開 config**。這條路徑不需要 AI Hub 登入，也不提供保存、重新載入為擁有者或其他擁有者限定操作。
+`utils/routes/playground_routes.py` 的 `bundle/load` 在請求沒有宣稱任何身分時走公開分支；有宣稱身分的一樣要驗證，沒有放寬。
 
-唯讀路徑的設計範圍就是 config。bundle 的存取在 `playground-file-save.md` 裡兩條流程都寫著「AI Hub **驗證使用者權限**後」簽發短效連結——它是擁有者操作。
+### Playground 側
 
-所以匿名拿不到文件不是壞掉，是**設計上沒有涵蓋這個情境**。
+- `_request_bundle_url`：只有非 download 才強制要憑證。放不放行由 AI Hub 決定。
+- `_bundle_download_headers`：接受 `None`。
+- `aihub_bridge` 的 `read` 分支：比照 `edit` 分支還原，失敗就擋下來報錯。
 
-## 真正的落差
-
-同一份文件把 Gallery 的匿名入口定位成「使用者**試用**別人的 workflow」。但語意檢索的 Agent 沒有文件就試不了——十五個 agent 裡八個是語意檢索。所以「試用」在最常見的 Agent 型態上是空的。
-
-`semantic_bundle_ref` 也印證了這個設計缺口：`save_contract_v2` 有這個參數、公開 config API 也回傳它，但唯一的呼叫端 `aihub.py:121` 沒有傳，所以十五筆全空。讀的那一側準備好了，寫的那一側沒接上——不過就算接上也不夠，見下。
-
-## AI Hub 要補什麼
-
-需要一個公開的 bundle 取得端點，比照既有的 `config/public/load`：
+### 實測（真資料庫、真儲存體）
 
 ```
-POST /api/playground/agents/{agent_id}/bundle/public/load
+Timothy（已上架 Gallery）  OK   blob=playground-agents/agt_bf22b5544fb64d45/bundle/agentic_playground_bundle.zip
+                               簽出 SAS 連結
+血液生化（未上架）          404  找不到指定的 Agent。
 ```
 
-權限判斷不看使用者，看**這個 Agent 是不是已選 Gallery 類型**——就是 `PUT /api/me/agents/{id}/gallery-type` 設定的那個值，文件寫明「只有選成智慧大健康或智慧工廠次系統的 Agent 才會出現在公開 Gallery」。已經公開展示的 Agent，它的參考文件本來就跟著公開了。
+閘門正確：上架的給連結，沒上架的擋掉。
 
-**只給 `semantic_bundle_ref` 不夠。** 儲存帳戶 `agenticsdk` 的 `allowBlobPublicAccess` 是 `False`，容器 `playground-agent-files` 不可匿名讀。所以一定要 AI Hub 簽發短效下載連結，光有 blob 路徑沒有用。
+### 還沒驗到的一段
 
-Playground 這側要改的很小：`aihub_bridge.start_runner_bridge_session` 的 `read` 分支比照 `edit` 分支呼叫還原，只是改用公開端點、不帶 credentials。等 AI Hub 那條路開通再接。
+拿 SAS 去下載檔案時回 `AuthorizationPermissionMismatch`。原因是**執行測試的 az 帳號缺 Storage Blob Data Reader**，簽出來的 SAS 沒有實際讀取權。線上 App Service 的 managed identity 有這個角色，擁有者路徑現在就靠它運作。
 
-## 登入路徑的狀態
+所以「檔案確實在、內容是那 13 份 PDF」這件事我沒有親眼確認。要補這一段，需要在 `agenticsdk` 儲存帳戶上給測試帳號 Storage Blob Data Reader。
 
-沒有發現問題。`entry.py:99`（handoff 進 Runner）和 `entry.py:184`（選 Agent）兩處都有 `_restore_selected_agent_bundle`，而且還原失敗會擋下來報錯，不會靜靜地用空索引跑。
+### 安全性
 
-**但我沒有實測。** 那要用 Agent 擁有者的帳號登入走一次，我沒有帳號，也不會去資料庫撈使用者密碼。
+POC 站，已確認可接受：已上架 Gallery 的 Agent，其參考文件可經 API 取得（需帶 Playground 的 Origin）。網頁上沒有下載入口。
+
+## 部署注意
+
+`ai-hub-webui` **不是 git repo**，這兩個檔案的修改沒有版本控制。部署 AI Hub 之前要確認這兩處有被帶上去。

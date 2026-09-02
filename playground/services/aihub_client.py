@@ -482,7 +482,10 @@ def _request_bundle_url(
     resolved_agent_id = (agent_id or "").strip()
     if not resolved_agent_id:
         return _bundle_error("Missing AI Hub agent id.", "missing_agent_id", agent_id=resolved_agent_id)
-    if not _has_aihub_auth(credentials):
+    # Downloading is also how a shared agent gets its documents, and the
+    # public read-only Runner has no account. AI Hub decides whether that is
+    # allowed: it serves a download only for an agent listed in the gallery.
+    if direction != "download" and not _has_aihub_auth(credentials):
         return _bundle_error("AI Hub login is required before accessing the bundle.", "missing_credentials", agent_id=resolved_agent_id)
     base_url = _base_url_for_credentials(credentials)
     if not base_url:
@@ -553,7 +556,9 @@ def _auth_headers(credentials: AiHubCredentials, origin: str | None) -> dict[str
     return headers
 
 
-def _bundle_download_headers(credentials: AiHubCredentials, origin: str | None) -> dict[str, str]:
+def _bundle_download_headers(credentials: AiHubCredentials | None, origin: str | None) -> dict[str, str]:
+    if credentials is None:
+        return _json_headers(origin)
     headers = _auth_headers(credentials, origin)
     if not credentials.token:
         headers["X-Playground-Username"] = credentials.username

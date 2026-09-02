@@ -1381,3 +1381,36 @@ def test_login_rejects_invalid_ai_hub_credentials(monkeypatch):
         assert "We could not verify those AI Hub credentials" in response.get_data(as_text=True)
         with client.session_transaction() as session:
             assert "mode" not in session
+
+
+def test_a_shared_agent_restores_its_documents_without_an_account(monkeypatch):
+    """The gallery's read-only Runner must get the knowledge bundle too.
+
+    It never did, so every publicly shared semantic agent searched an empty
+    index and told anonymous visitors it found nothing. AI Hub decides whether
+    to serve the bundle — it does so only for an agent listed in the gallery —
+    so the Playground asks without an account rather than not asking at all.
+    """
+    spec = {"version": "2", "workflow_name": "shared", "retrieve": {"module": "SemanticRetrieve", "params": {"support_files": ["guide.pdf"]}}}
+    asked_with = []
+
+    monkeypatch.setattr(
+        aihub_bridge,
+        "load_public_config",
+        lambda agent_id, *, origin=None: {"loaded": True, "agent_id": agent_id, "workflow_spec": spec, "endpoint_bindings": {}},
+    )
+
+    def fake_restore(*, agent_id, credentials, origin=None):
+        asked_with.append(credentials)
+        return {"bundle_restored": True, "builder_upload_id": "upload-1"}
+
+    monkeypatch.setattr(aihub_bridge, "restore_runtime_bundle", fake_restore)
+
+    app = create_app()
+    app.config.update(TESTING=True, SECRET_KEY="test-secret")
+    with app.test_client() as client:
+        client.get("/playground/run?owner=someone&agentId=agt_1", base_url="https://playground.example")
+        with client.session_transaction(base_url="https://playground.example") as session:
+            assert session["builder_upload_id"] == "upload-1"
+
+    assert asked_with == [None]

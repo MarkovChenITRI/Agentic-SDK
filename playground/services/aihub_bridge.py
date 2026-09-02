@@ -66,6 +66,12 @@ def start_runner_bridge_session(args: Mapping[str, object], *, origin: str | Non
     session["mode"] = "aihub_readonly"
     session["account_context_present"] = False
     store_loaded_agent(result)
+    # A shared agent needs its documents as much as an owned one does. Without
+    # this the read-only Runner ran every semantic agent against an empty index
+    # and answered "nothing found" to every question.
+    bundle_result = _restore_selected_agent_bundle(str(result["agent_id"]), None, origin=origin)
+    if _semantic_bundle_required_for_result(result) and not bundle_result.get("bundle_restored"):
+        return {"started": False, "error": _semantic_bundle_restore_error(bundle_result), "status_code": 502}
     session["agent_owner"] = _arg(args, "owner")
     session["source_origin"] = "aihub_shared_readonly"
     return {"started": True, "mode": "read"}
@@ -131,7 +137,7 @@ def store_loaded_agent(result: dict[str, object]) -> None:
     session.pop("builder_form_state", None)
 
 
-def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials, *, origin: str | None = None) -> dict[str, object]:
+def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials | None, *, origin: str | None = None) -> dict[str, object]:
     _clear_bundle_runtime_state()
     bundle_result = restore_runtime_bundle(agent_id=agent_id, credentials=credentials, origin=origin)
     if bundle_result.get("bundle_restored"):
