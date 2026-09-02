@@ -22,7 +22,7 @@ from playground.services import semantic_ingestion
 from playground.services import source_builder
 from playground.services.runner_conversation import RunnerConversationState
 from playground.services.aihub_bridge import store_loaded_agent
-from playground.services.source_builder import BuilderSourceConfig, config_from_source
+from playground.services.source_builder import BuilderSourceConfig
 from support import build_source, build_spec
 from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec, spec_to_config
 from playground.services.workflow_reachability import reachable_workflow_roles
@@ -411,7 +411,7 @@ def test_builder_choices_map_to_runtime_modules():
         "text": "TextPerceive",
         "text_image": "TextImagePerceive",
     }.items():
-        config = config_from_source(build_source(("input_type", choice)))
+        config = spec_to_config(build_spec(("input_type", choice)))
         assert config.perceive_module == expected_module
         assert "perceive" in reachable_workflow_roles(config)
 
@@ -420,12 +420,12 @@ def test_builder_choices_map_to_runtime_modules():
         "keyword": "KeywordRetrieve",
         "semantic": "SemanticRetrieve",
     }.items():
-        config = config_from_source(build_source(("retrieve_policy", choice)))
+        config = spec_to_config(build_spec(("retrieve_policy", choice)))
         assert config.retrieve_module == expected_module
         assert "retrieve" in reachable_workflow_roles(config)
 
-    free_text = config_from_source(build_source(("output_format", "free_text")))
-    interactive = config_from_source(build_source(("output_format", "interactive")))
+    free_text = spec_to_config(build_spec(("output_format", "free_text")))
+    interactive = spec_to_config(build_spec(("output_format", "interactive")))
 
     assert free_text.action_module == "GenerativeAction"
     assert interactive.action_module == "ToolCallAction"
@@ -510,7 +510,7 @@ def test_partial_key_vault_endpoint_family_is_rejected():
 
 
 def test_interactive_action_contract_roundtrips_to_boolean_tool_schema():
-    source = build_source(
+    spec = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -525,7 +525,7 @@ def test_interactive_action_contract_roundtrips_to_boolean_tool_schema():
         ),
     )
 
-    config = config_from_source(source)
+    config = spec_to_config(spec)
     field = config.action_tools[0]["function"]["parameters"]["properties"]["是否提交"]
 
     assert config.action_module == "ToolCallAction"
@@ -1097,18 +1097,19 @@ def test_nonsemantic_initialization_does_not_require_knowledge_sources():
 def test_runner_edit_settings_navigation_preserves_current_draft():
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_source(("input_type", "text_image"))
+    spec = build_spec(("input_type", "text_image"))
 
     with app.test_client() as client:
         with client.session_transaction() as session:
-            session["python_source"] = source
+            session["workflow_spec"] = spec
+            session["python_source"] = compile_python_source(spec)
             session["builder_has_user_config"] = True
 
         runner_response = client.get("/playground/run")
         builder_response = client.get("/playground/builder")
 
         with client.session_transaction() as session:
-            preserved_config = config_from_source(session["python_source"])
+            preserved_config = spec_to_config(session["workflow_spec"])
 
     assert runner_response.status_code == 200
     assert builder_response.status_code == 200
@@ -1124,6 +1125,7 @@ def test_aihub_readonly_deep_link_without_loaded_source_does_not_dead_end(monkey
             "loaded": True,
             "agent_id": agent_id,
             "agent_name": "Shared Agent",
+            "workflow_spec": build_spec(("input_type", "text")),
             "python_source": build_source(("input_type", "text")),
         }
 
@@ -1132,7 +1134,7 @@ def test_aihub_readonly_deep_link_without_loaded_source_does_not_dead_end(monkey
     with app.test_client() as client:
         response = client.get("/playground?mode=aihub_readonly&agent_id=agent-1", follow_redirects=True)
         with client.session_transaction() as session:
-            loaded_config = config_from_source(session["python_source"])
+            loaded_config = spec_to_config(session["workflow_spec"])
 
     assert response.status_code == 200
     assert loaded_config.perceive_module == "TextPerceive"
@@ -1147,12 +1149,13 @@ def test_anonymous_start_clears_prior_loaded_agent_state():
         with client.session_transaction() as session:
             session["mode"] = "aihub_editable"
             session["agent_id"] = "old-agent"
-            session["python_source"] = build_source(("input_type", "text_image"))
+            session["workflow_spec"] = build_spec(("input_type", "text_image"))
+            session["python_source"] = compile_python_source(session["workflow_spec"])
             session["builder_upload_id"] = "old-upload"
 
         response = client.post("/playground/start/anonymous")
         with client.session_transaction() as session:
-            config = config_from_source(session["python_source"])
+            config = spec_to_config(session["workflow_spec"])
             session_snapshot = dict(session)
 
     assert response.status_code == 302
@@ -1180,11 +1183,12 @@ def test_runner_without_source_redirects_to_builder_without_dead_end():
 def test_source_preview_api_preserves_current_draft_without_legacy_page():
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_source(("input_type", "text"))
+    spec = build_spec(("input_type", "text"))
 
     with app.test_client() as client:
         with client.session_transaction() as session:
-            session["python_source"] = source
+            session["workflow_spec"] = spec
+            session["python_source"] = compile_python_source(spec)
             session["builder_has_user_config"] = True
 
         source_response = client.get("/playground/source/preview")
@@ -1192,7 +1196,7 @@ def test_source_preview_api_preserves_current_draft_without_legacy_page():
         export_response = client.post("/playground/source/export")
         runner_response = client.get("/playground/run")
         with client.session_transaction() as session:
-            preserved_config = config_from_source(session["python_source"])
+            preserved_config = spec_to_config(session["workflow_spec"])
 
     assert source_response.status_code == 200
     assert legacy_page_response.status_code == 404
@@ -1236,7 +1240,7 @@ def test_loading_v2_agent_compiles_canonical_execution_source():
                 "runner_presentation": {},
             }
         )
-        config = config_from_source(session["python_source"])
+        config = spec_to_config(session["workflow_spec"])
 
     assert config.action_module == "GenerativeAction"
 
@@ -1473,7 +1477,7 @@ def test_runner_uses_module_specific_process_completion_summaries():
 
 
 def test_runner_process_event_rejects_legacy_stage_event_without_schema():
-    config = config_from_source(build_source())
+    config = spec_to_config(build_spec())
 
     try:
         runner_service._process_event_for_workflow_event(
@@ -1493,7 +1497,7 @@ def test_runner_process_event_rejects_legacy_stage_event_without_schema():
 
 
 def test_runner_process_event_rejects_legacy_stage_alias_without_module():
-    config = config_from_source(build_source())
+    config = spec_to_config(build_spec())
     schema = default_events_schema()["perceive"]
 
     try:
@@ -2017,7 +2021,7 @@ def test_spec_path_and_compiled_source_path_agree_except_on_dropped_settings():
 
     for name, steps in sequences.items():
         spec = build_spec(*steps)
-        from_source = config_from_source(compile_python_source(spec))
+        from_source = spec_to_config(spec)
         from_spec = spec_to_config(spec)
         differing = {
             field.name

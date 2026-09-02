@@ -1,64 +1,20 @@
 import pytest
 
 from agentic_sdk.core.events import default_events_schema
-from playground.services.source_builder import build_python_source_from_builder_choice, config_from_source, get_builder_form_state, get_workflow_summary
-from playground.services.source_parser import parse_supported_source
+from playground.services.source_builder import get_workflow_summary
 from playground.services.runner_service import _process_event_for_workflow_event, run_agent
-from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec
+from playground.services.workflow_spec import (
+    apply_builder_step,
+    compile_python_source,
+    default_spec,
+    spec_to_config,
+    spec_to_form_state,
+)
 from support import build_source, build_spec
 
 
-def test_parse_supported_default_source_name():
-    parsed = parse_supported_source(build_source())
-    config = config_from_source(build_source())
-    source = build_source()
-
-    assert parsed.workflow_name == "default"
-    assert parsed.supported_subset is True
-    assert "WorkflowSettings" not in source
-    assert "from agentic_sdk import Workflow" in source
-    assert "InContextMemory" not in source
-    assert "memory = InContextMemory()" not in source
-    assert "memory_type=memory" not in source
-    assert config.events_schema is None
-    assert "events_schema=" not in source
-
-
-def test_events_schema_roundtrips_from_workflow_source():
-    source = """from agentic_sdk import Workflow
-
-workflow = Workflow(
-    workflow_name="Stage Agent",
-    events_schema={"retrieve": {"label": "正在查詢產品資料"}},
-)
-"""
-
-    config = config_from_source(source)
-
-    assert config.events_schema == {
-        "retrieve": {
-            "label": "正在查詢產品資料",
-            "fields": [],
-            "metadata": {},
-        }
-    }
-
-
-def test_events_schema_source_raises_for_invalid_module_key():
-    source = """from agentic_sdk import Workflow
-
-workflow = Workflow(
-    workflow_name="Stage Agent",
-    events_schema={"stage_labels": {"label": "Legacy"}},
-)
-"""
-
-    with pytest.raises(ValueError, match="events_schema module key"):
-        config_from_source(source)
-
-
 def test_runner_process_event_uses_workflow_stage_label():
-    config = config_from_source(build_source())
+    config = spec_to_config(build_spec())
     schema = default_events_schema()["retrieve"]
 
     event = _process_event_for_workflow_event(
@@ -139,11 +95,12 @@ def test_generated_model_placeholders_are_role_neutral():
 
 
 def test_generated_text_image_source_omits_unselected_importance_preset():
-    source = build_source(("input_type", "text_image"))
+    spec = build_spec(("input_type", "text_image"))
+    source = compile_python_source(spec)
 
     assert "TextImagePerceive(" in source
     assert "importance=" not in source
-    assert config_from_source(source).perceive_importance == 1.5
+    assert spec_to_config(spec).perceive_importance == 1.5
 
 
 def test_generated_retrieve_source_omits_empty_default_parameters():
@@ -158,21 +115,23 @@ def test_generated_retrieve_source_omits_empty_default_parameters():
 
 
 def test_generated_semantic_source_preserves_original_pptx_filename():
-    source = build_source(
+    spec = build_spec(
         ("retrieve_policy", "semantic"),
         ("retrieve", {"semantic_support_files": "AI-Hub.pptx"}),
     )
+    source = compile_python_source(spec)
 
     assert '"./AI-Hub.pptx"' in source
-    assert config_from_source(source).semantic_support_files == ("AI-Hub.pptx",)
+    assert spec_to_config(spec).semantic_support_files == ("AI-Hub.pptx",)
 
 
 def test_generated_reflect_source_omits_default_retry_policy_but_roundtrips():
-    source = build_source(("failure_policy", "retry"))
+    spec = build_spec(("failure_policy", "retry"))
+    source = compile_python_source(spec)
 
     assert "ResponseCheckReflect(" in source
     assert 'on_failure="retry_plan"' not in source
-    assert config_from_source(source).reflect_on_failure == "retry_plan"
+    assert spec_to_config(spec).reflect_on_failure == "retry_plan"
 
 
 def test_generated_plan_source_keeps_user_configured_retrieve_description():
@@ -183,21 +142,6 @@ def test_generated_plan_source_keeps_user_configured_retrieve_description():
 
     assert "retrieve_description=" in source
     assert "查找產品規格與限制" in source
-
-
-def test_legacy_runner_config_still_parses_for_existing_sources():
-    source = """from agentic_sdk import Workflow
-
-RUNNER_CONFIG = {"starter_questions": ["如何上架？"]}
-
-workflow = Workflow(
-    workflow_name="Legacy Agent",
-)
-"""
-
-    config = config_from_source(source)
-
-    assert config.starter_questions == ("如何上架？",)
 
 
 def test_keyword_retrieve_builder_emits_only_keyword_items_without_retrieve_fallback():
@@ -213,7 +157,7 @@ def test_keyword_retrieve_builder_emits_only_keyword_items_without_retrieve_fall
 
 
 def test_builder_form_state_roundtrips_generated_text_parameters():
-    source = build_source(
+    spec = build_spec(
         ("memory_type", {"starter_questions": "如何上架？"}),
         ("input_type", "text_image"),
         (
@@ -235,8 +179,9 @@ def test_builder_form_state_roundtrips_generated_text_parameters():
         ("output_format", "free_text"),
         ("action", {"response_instruction": "請用 FAE 口吻分步說明。"}),
     )
+    source = compile_python_source(spec)
 
-    state = get_builder_form_state(source)
+    state = spec_to_form_state(spec)
 
     assert state["choices"]["input_type"] == "text_image"
     assert state["choices"]["retrieve_policy"] == "semantic"
@@ -249,7 +194,7 @@ def test_builder_form_state_roundtrips_generated_text_parameters():
 
 
 def test_interactive_action_adds_generic_intent_gate_without_polluting_form_state():
-    source = build_source(
+    spec = build_spec(
         ("output_format", "interactive"),
         (
             "action",
@@ -263,6 +208,7 @@ def test_interactive_action_adds_generic_intent_gate_without_polluting_form_stat
             },
         ),
     )
+    source = compile_python_source(spec)
 
     assert "先在內部判斷使用者這一輪的意圖類型" in source
     assert "當使用者只是詢問資訊、要求分析、要求解釋" in source
@@ -272,8 +218,8 @@ def test_interactive_action_adds_generic_intent_gate_without_polluting_form_stat
     assert "tool_choice=\"auto\"" in source
     assert "使用者設定的回覆規範" in source
 
-    config = config_from_source(source)
-    state = get_builder_form_state(source)
+    config = spec_to_config(spec)
+    state = spec_to_form_state(spec)
 
     assert config.action_prompt == "請依使用者情境回覆，必要時才請使用者確認下一步。"
     assert config.action_tool_choice == "auto"

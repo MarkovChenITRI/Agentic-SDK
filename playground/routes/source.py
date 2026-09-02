@@ -5,7 +5,7 @@ import ast
 from flask import Blueprint, Response, abort, session
 
 from playground.services.mode_context import get_mode_context
-from playground.services.source_builder import build_default_python_source, normalize_python_source, render_python_source
+from playground.services.session_spec import current_spec
 from playground.services.workflow_spec import compile_python_source
 
 
@@ -25,15 +25,9 @@ def preview_source():
 
 
 def _current_python_source() -> str:
-    spec = session.get("workflow_spec")
-    if isinstance(spec, dict) and spec.get("version") == "2":
-        python_source = compile_python_source(spec)
-        session["python_source"] = python_source
-        return python_source
-
-    canonical_source = normalize_python_source(session.get("python_source") or build_default_python_source())
-    session["python_source"] = canonical_source
-    return render_python_source(canonical_source)
+    python_source = compile_python_source(current_spec())
+    session["python_source"] = python_source
+    return python_source
 
 
 def _source_preview_markdown(python_source: str) -> str:

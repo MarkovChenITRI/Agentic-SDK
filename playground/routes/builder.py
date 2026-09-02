@@ -10,11 +10,10 @@ from flask import Blueprint, abort, jsonify, render_template, request, session
 from playground.services.aihub_bridge import has_builder_bridge_query, start_builder_bridge_session
 from playground.services.mode_context import get_mode_context
 from playground.services.model_endpoints import endpoint_state, normalize_endpoint_selections
-from playground.services.session_spec import current_spec, store_spec
+from playground.services.session_spec import current_spec, store_spec, reset_spec
 from playground.services.semantic_runtime import new_upload_id, runtime_root, source_files_dir
 from playground.services.semantic_ingestion import accepted_upload_extensions, ingest_semantic_upload
 from playground.services.source_builder import (
-    build_default_python_source,
     get_builder_steps,
     get_workflow_summary,
 )
@@ -321,7 +320,7 @@ def _reset_transient_builder_state() -> None:
     session.pop("builder_upload_id", None)
     session.pop("workflow_spec", None)
     session.pop("runner_presentation", None)
-    session["python_source"] = build_default_python_source()
+    session["python_source"] = compile_python_source(reset_spec())
     session["workflow_spec"] = default_spec()
 
 

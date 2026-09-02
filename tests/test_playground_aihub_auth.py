@@ -16,6 +16,15 @@ from playground.services import model_endpoints
 from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec
 
 
+def _semantic_spec() -> dict:
+    """A spec whose retrieve module needs a knowledge bundle, as AI Hub stores it."""
+    return apply_builder_step(
+        apply_builder_step(default_spec(), "retrieve_policy", "semantic"),
+        "retrieve",
+        {"semantic_support_files": "knowledge.pptx"},
+    )
+
+
 def test_key_vault_settings_uses_deterministic_test_inventory():
     settings = key_vault_config.key_vault_settings()
 
@@ -565,6 +574,7 @@ workflow = Workflow(
             "loaded": True,
             "agent_id": agent_id,
             "agent_name": "Semantic Agent",
+            "workflow_spec": _semantic_spec(),
             "python_source": semantic_source,
         },
     )
@@ -574,6 +584,7 @@ workflow = Workflow(
         lambda *, agent_id=None, credentials=None, origin=None: {
             "bundle_restored": True,
             "builder_upload_id": "restored-upload",
+            "workflow_spec": _semantic_spec(),
             "python_source": semantic_source,
             "bundle_source_file_count": 1,
             "bundle_vectorstore_file_count": 2,
@@ -769,16 +780,8 @@ def test_bridge_runner_edit_loads_agent_with_token(monkeypatch):
 
 
 def test_bridge_runner_read_hides_owner_only_controls(monkeypatch):
-    python_source = """
-from agentic_sdk import Workflow
-from agentic_sdk.modules import DirectAnswerAction
-
-workflow = Workflow(
-    workflow_name="Shared Chat Agent",
-    task_goal="Answer shared chat requests.",
-    action=DirectAnswerAction(),
-)
-"""
+    workflow_spec = apply_builder_step(default_spec(), "name", "Shared Chat Agent")
+    python_source = compile_python_source(workflow_spec)
 
     monkeypatch.setattr(
         aihub_bridge,
@@ -787,6 +790,7 @@ workflow = Workflow(
             "loaded": True,
             "agent_id": agent_id,
             "agent_name": "Shared Chat Agent",
+            "workflow_spec": workflow_spec,
             "python_source": python_source,
         },
     )
@@ -1196,7 +1200,7 @@ workflow = Workflow(
 """
     monkeypatch.setattr(entry_routes, "verify_credentials", lambda *args, **kwargs: True)
     monkeypatch.setattr(entry_routes, "list_agents", lambda *, credentials=None, origin=None: {"loaded": True, "items": [{"agent_id": "agent-1", "agent_name": "Semantic Agent"}]})
-    monkeypatch.setattr(entry_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Semantic Agent", "python_source": semantic_source})
+    monkeypatch.setattr(entry_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Semantic Agent", "workflow_spec": _semantic_spec(), "python_source": semantic_source})
     monkeypatch.setattr(entry_routes, "restore_runtime_bundle", lambda **kwargs: {"bundle_restored": False, "bundle_error": "Bundle object was not found."})
     app = create_app()
     app.config.update(TESTING=True, SECRET_KEY="test-secret")
@@ -1223,7 +1227,7 @@ workflow = Workflow(
 )
 """
     monkeypatch.setattr(entry_routes, "verify_credentials", lambda *args, **kwargs: True)
-    monkeypatch.setattr(aihub_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Semantic Agent", "python_source": semantic_source})
+    monkeypatch.setattr(aihub_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Semantic Agent", "workflow_spec": _semantic_spec(), "python_source": semantic_source})
     monkeypatch.setattr(aihub_routes, "restore_runtime_bundle", lambda **kwargs: {"bundle_restored": False, "bundle_error": "Bundle object was not found."})
     app = create_app()
     app.config.update(TESTING=True, SECRET_KEY="test-secret")

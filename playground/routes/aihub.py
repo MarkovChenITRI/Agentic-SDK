@@ -10,7 +10,6 @@ from playground.services.runner_service import SemanticRuntime, prepare_semantic
 from playground.services.session_spec import current_spec
 from playground.services.security import is_allowed_origin
 from playground.services.semantic_runtime import runtime_root, source_files_dir
-from playground.services.source_builder import semantic_bundle_required_from_source
 from playground.services.workflow_spec import (
     compile_python_source,
     default_runner_presentation,
@@ -52,7 +51,7 @@ def load_aihub_config():
     session["endpoint_bindings"] = loaded.get("endpoint_bindings") or {}
     _load_v2_contract_into_session(loaded)
     bundle_result = _restore_bundle_for_session(str(loaded["agent_id"]), credentials)
-    if _semantic_bundle_required_for_source(loaded.get("python_source")) and not bundle_result.get("bundle_restored"):
+    if _loaded_agent_needs_semantic_bundle(loaded) and not bundle_result.get("bundle_restored"):
         return jsonify({**loaded, **bundle_result, "loaded": False, "error": _semantic_bundle_restore_error(bundle_result), "error_code": bundle_result.get("bundle_error_code") or "semantic_bundle_not_restored"}), 502
     session["source_origin"] = "aihub_loaded" if editable else "aihub_shared_readonly"
     return jsonify({**loaded, **bundle_result, "mode": session["mode"]})
@@ -91,7 +90,7 @@ def reload_aihub_config():
     session["endpoint_bindings"] = result.get("endpoint_bindings") or {}
     _load_v2_contract_into_session(result)
     bundle_result = _restore_bundle_for_session(str(result["agent_id"]), credentials)
-    if _semantic_bundle_required_for_source(result.get("python_source")) and not bundle_result.get("bundle_restored"):
+    if _loaded_agent_needs_semantic_bundle(result) and not bundle_result.get("bundle_restored"):
         return jsonify({**result, **bundle_result, "loaded": False, "error": _semantic_bundle_restore_error(bundle_result), "error_code": bundle_result.get("bundle_error_code") or "semantic_bundle_not_restored"}), 502
     session["source_origin"] = "aihub_loaded"
     session.pop("last_aihub_save", None)
@@ -229,10 +228,6 @@ def _clear_bundle_runtime_state() -> None:
     session.pop("last_aihub_bundle_load", None)
 
 
-def _semantic_bundle_required(workflow_config) -> bool:
-    return workflow_config.retrieve_module == "SemanticRetrieve" and semantic_bundle_required_from_source(session.get("python_source"), builder_upload_id=session.get("builder_upload_id") if isinstance(session.get("builder_upload_id"), str) else None)
-
-
 def _load_v2_contract_into_session(loaded: dict) -> None:
     """Populate session spec and runner_presentation from a loaded v2 contract."""
     spec = loaded.get("workflow_spec")
@@ -242,14 +237,15 @@ def _load_v2_contract_into_session(loaded: dict) -> None:
         session["runner_presentation"] = pres if isinstance(pres, dict) else default_runner_presentation()
         session.pop("builder_form_state", None)
     else:
-        # No v2 spec – clear any stale spec so builder derives it from python_source
+        # The agent has no playground config yet; current_spec() supplies the default.
         session.pop("workflow_spec", None)
         session.pop("runner_presentation", None)
         session.pop("builder_form_state", None)
 
 
-def _semantic_bundle_required_for_source(python_source: object) -> bool:
-    return semantic_bundle_required_from_source(str(python_source or ""))
+def _loaded_agent_needs_semantic_bundle(loaded: dict) -> bool:
+    spec = loaded.get("workflow_spec")
+    return semantic_bundle_required(validate_spec(spec)) if isinstance(spec, dict) else False
 
 
 def _semantic_bundle_restore_error(bundle_result: dict[str, object]) -> str:

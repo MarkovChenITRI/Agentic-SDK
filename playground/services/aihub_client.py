@@ -9,7 +9,7 @@ from urllib.parse import quote
 import httpx
 
 from playground.services.key_vault_config import KeyVaultConfigurationError, key_vault_settings
-from playground.services.source_builder import build_default_python_source
+from playground.services.workflow_spec import compile_python_source, default_spec
 
 
 _AUTH_VERIFY_PATH = "/api/playground/auth/verify"
@@ -296,7 +296,7 @@ def load_config(
         "agent_name": payload.get("workflow_name") or payload.get("agent_name") or "",
         "workflow_name": payload.get("workflow_name") or payload.get("agent_name") or "",
         "description": payload.get("description") or "",
-        "python_source": payload.get("python_source") or build_default_python_source(),
+        "python_source": payload.get("python_source") or compile_python_source(default_spec()),
         "endpoint_bindings": _endpoint_bindings_from_payload(payload),
         "exported_at": payload.get("playground_exported_at") or payload.get("exported_at") or "",
         # v2 contract fields
@@ -347,7 +347,7 @@ def load_public_config(
         "agent_name": response_payload.get("workflow_name") or response_payload.get("agent_name") or "",
         "workflow_name": response_payload.get("workflow_name") or response_payload.get("agent_name") or "",
         "description": response_payload.get("description") or "",
-        "python_source": response_payload.get("python_source") or build_default_python_source(),
+        "python_source": response_payload.get("python_source") or compile_python_source(default_spec()),
         "endpoint_bindings": _endpoint_bindings_from_payload(response_payload),
         "exported_at": response_payload.get("playground_exported_at") or response_payload.get("exported_at") or "",
         "contract_version": response_payload.get("contract_version") or "",

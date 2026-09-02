@@ -8,7 +8,8 @@ from playground.services.aihub_bundle_flow import restore_runtime_bundle
 from playground.services.aihub_client import AiHubCredentials, credentials_for_ticket, exchange_handoff_token, issue_credential_ticket, list_agents, load_config, load_public_config, verify_credentials, verify_identity
 from playground.services.aihub_session import active_credentials
 from playground.services.deep_link import apply_aihub_deep_link
-from playground.services.source_builder import build_default_python_source, semantic_bundle_required_from_source
+from playground.services.session_spec import reset_spec
+from playground.services.workflow_spec import compile_python_source, default_spec, semantic_bundle_required, validate_spec
 
 
 entry_bp = Blueprint("entry", __name__)
@@ -35,7 +36,7 @@ def entry():
 def start_anonymous():
     session.clear()
     session["mode"] = "anonymous"
-    session["python_source"] = build_default_python_source()
+    session["python_source"] = compile_python_source(reset_spec())
     session["source_origin"] = "manual_new"
     return redirect(url_for("builder.builder"))
 
@@ -154,7 +155,7 @@ def start_new_agent():
     _clear_selected_agent_state()
     session["mode"] = "manual_auth"
     session["account_context_present"] = True
-    session["python_source"] = build_default_python_source()
+    session["python_source"] = compile_python_source(reset_spec())
     session["source_origin"] = "manual_new"
     return redirect(url_for("builder.builder"))
 
@@ -242,7 +243,7 @@ def _start_authenticated_session(credentials: AiHubCredentials) -> None:
     session["ai_hub_username"] = credentials.username.strip()
     session["ai_hub_display_name"] = credentials.display_name.strip()
     session["ai_hub_credential_ticket"] = issue_credential_ticket(credentials.username, credentials.password, token=credentials.token, api_base_url=credentials.api_base_url, display_name=credentials.display_name, expires_at=credentials.expires_at)
-    session["python_source"] = build_default_python_source()
+    session["python_source"] = compile_python_source(reset_spec())
     session["source_origin"] = "manual_new"
 
 
@@ -279,7 +280,8 @@ def _clear_bundle_runtime_state() -> None:
 
 
 def _semantic_bundle_required_for_result(result: dict[str, object]) -> bool:
-    return semantic_bundle_required_from_source(str(result.get("python_source") or ""))
+    spec = result.get("workflow_spec")
+    return semantic_bundle_required(validate_spec(spec)) if isinstance(spec, dict) else False
 
 
 def _semantic_bundle_restore_error(bundle_result: dict[str, object]) -> str:

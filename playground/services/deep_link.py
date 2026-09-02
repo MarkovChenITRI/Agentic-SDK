@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from flask import session
 
-from playground.services.source_builder import build_default_python_source
+from playground.services.session_spec import reset_spec
+from playground.services.workflow_spec import compile_python_source, default_spec
 
 
 AIHUB_MODES = {"aihub_readonly", "aihub_editable"}
@@ -25,7 +26,7 @@ def apply_aihub_deep_link(requested_mode: str | None, agent_id: str | None = Non
     if resolved_agent_id:
         session["agent_id"] = resolved_agent_id
     else:
-        session.setdefault("python_source", build_default_python_source())
+        session.setdefault("python_source", compile_python_source(reset_spec()))
     return True
 
 
