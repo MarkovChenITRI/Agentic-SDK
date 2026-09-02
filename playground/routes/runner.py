@@ -276,6 +276,9 @@ def _public_execution_payload(execution: dict[str, object]) -> dict[str, object]
         "result": result,
         "scene_profile": execution.get("scene_profile"),
         "conversation_update": execution.get("conversation_update"),
+        # Forwarded so a failure reaching the browser can say what went wrong.
+        # It was assembled in the service and dropped here.
+        "detail": execution.get("detail"),
     }
 
 

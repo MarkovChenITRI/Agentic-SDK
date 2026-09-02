@@ -2189,3 +2189,23 @@ def test_builder_does_not_claim_a_question_was_answered_when_it_was_not():
         assert answered[unanswerable]["answer"] == "尚未選擇", unanswerable
         assert answered[unanswerable]["completed"] is False, unanswerable
     assert payload["builder_review_ready"] is False
+
+
+def test_the_execute_route_forwards_the_failure_detail_to_the_browser():
+    """The service assembled a detail and the route dropped it.
+
+    Every failure reached the browser as one sentence with no cause, which is
+    what the specific messages were supposed to end.
+    """
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    with app.test_client() as client:
+        client.post("/playground/start/anonymous")
+        client.post("/playground/builder/state", json={"step": "output_format", "choice": "free_text"})
+
+        response = client.post("/playground/run/execute", json={"message": "保固多久？"})
+
+    payload = response.get_json()
+    assert payload["status"] == "configuration_error"
+    assert payload["detail"], "the route must forward the cause, not only the message"

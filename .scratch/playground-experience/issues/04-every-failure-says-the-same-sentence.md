@@ -41,3 +41,18 @@
 `MissingEndpointBinding` 原本會落進通用分支被吞掉，現在有自己的處理。
 
 **票 05 讓這張票的第一個情境變罕見。** 純查表 agent 不再需要綁定，所以最常見的「缺綁定」失敗消失了。訊息仍然需要，因為使用者選了需要模型的輸出格式時還是會遇到。
+
+## 補充修正（同日，實測後發現）
+
+第一次做完之後我只驗證了服務層的回傳值。實際用瀏覽器會打的那條路由測，`detail` 仍然是 `null`——`_public_execution_payload` 挑選要送出的欄位，而 `detail` 不在清單裡。**服務層組好了，路由層丟掉了。**
+
+這是同一類錯誤的第三次：只驗證接縫的一側。前兩次是 code review 抓到的，這次是實際跑 app 才發現。
+
+修好之後，語意檢索缺 embedding 模型的失敗現在會帶著原因到達瀏覽器：
+
+```
+訊息   : 暫時無法產生回覆。
+detail : NotFoundError: Error code: 404 - model "text-embedding-3-large" not found
+```
+
+新增 `test_the_execute_route_forwards_the_failure_detail_to_the_browser` 守住路由這一側。
