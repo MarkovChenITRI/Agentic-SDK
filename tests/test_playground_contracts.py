@@ -2240,3 +2240,22 @@ def test_the_preview_memory_option_stays_locked_and_visible():
     assert preview.available is False
     assert preview.badge == "預覽中"
     assert builder_routes._is_locked_builder_choice("memory_type", preview.label) is True
+
+
+def test_an_agent_saved_before_the_planner_binding_still_runs():
+    """Agents in the gallery have no plan binding, and must not need one.
+
+    The Builder only began asking for it recently. Every agent saved before
+    that has perceive/retrieve/action bound and nothing for plan, so requiring
+    one would stop 11 of the 15 saved agents from running at all. They keep
+    borrowing the action endpoint until someone binds the planner.
+    """
+    spec = build_spec(("retrieve_policy", "keyword"), ("output_format", "free_text"))
+    saved_bindings = {"perceive": "gpt-54", "action": "gpt-55"}
+
+    borrowed = runner_service.build_workflow(spec, saved_bindings)
+    own = runner_service.build_workflow(spec, {**saved_bindings, "plan": "gpt-54"})
+
+    assert borrowed.plan is not None
+    assert borrowed.plan._model == borrowed.action._model
+    assert own.plan._model != own.action._model

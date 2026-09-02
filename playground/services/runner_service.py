@@ -1276,8 +1276,22 @@ def _plan_from_config(config: BuilderSourceConfig, endpoint_selections: dict[str
     return NextStepPlan(
         system_prompt=config.plan_system_prompt,
         retrieve_description=config.retrieve_description,
-        **endpoint_params_for_role("plan", endpoint_selections),
+        **endpoint_params_for_role(_plan_endpoint_role(endpoint_selections, reachable_roles), endpoint_selections),
     )
+
+
+def _plan_endpoint_role(endpoint_selections: dict[str, str], reachable_roles: set[str]) -> str:
+    """Which binding the planner runs on: its own, or a borrowed one.
+
+    The Builder only started asking for the planner's binding recently. Every
+    agent saved before that has bindings for the other roles and none for plan,
+    so demanding one would stop those agents from running at all. They keep the
+    endpoint they were already using — the action role's — until someone opens
+    the agent and binds the planner properly.
+    """
+    if endpoint_selections.get("plan"):
+        return "plan"
+    return "action" if "action" in reachable_roles else "perceive"
 
 
 def _retrieve_from_config(
