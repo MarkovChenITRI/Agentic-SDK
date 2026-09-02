@@ -20,4 +20,5 @@ Plan 模組負責根據感知結果與目前上下文決定 workflow 的下一�
 | `base_url` | `string` | 是 | 無 | OpenAI-compatible API base URL。 |
 | `model` | `string` | 是 | 無 | 每次推論呼叫送出的模型名稱。 |
 | `system_prompt` | `string|null` | 否 | `null` | 覆寫 planner 系統提示；未提供時由 SDK 根據 retrieve 描述產生預設 prompt。 |
-| `retrieve_description` | `string|null` | 否 | `null` | 取回節點用途說明，會被放入預設 planner prompt；不應放入個案名稱或展示用標籤。 |
+| `retrieve_description` | `string|null` | 否 | `null` | 取回節點用途說明，會被放入 planner prompt；不應放入個案名稱或展示用標籤。傳入自訂 `system_prompt` 時仍然生效。 |
+| `route_policy` | `callable|null` | 否 | `null` | 由呼叫方決定最終路由。收到 `(state, 模型選的模組)`，回傳要採用的模組；回傳模型的選擇即表示接受。SDK 不附預設政策——哪些問題需要查資料取決於題材，那是應用程式知道而通用 planner 不知道的事。 |

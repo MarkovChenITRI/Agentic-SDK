@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from flask import session
 
-from playground.services.workflow_spec import default_spec
 from playground.services.session_spec import clear_spec, current_spec
 
 

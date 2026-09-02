@@ -45,10 +45,9 @@ class NextStepPlan:
         """
         self._model = require_model(model, self.__class__.__name__)
         self._client = resolve_openai_client(self.__class__.__name__, api_key=api_key, base_url=base_url)
-        self._retrieve_description = retrieve_description or None
         self._route_policy = route_policy
         retrieve_hint = f"\nAvailable retrieve source: {retrieve_description}." if retrieve_description else ""
-        self._system_prompt = system_prompt or (_SYSTEM_PROMPT + retrieve_hint)
+        self._system_prompt = (system_prompt or _SYSTEM_PROMPT) + retrieve_hint
 
     @property
     def gen_ai_request_model(self) -> str:

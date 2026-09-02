@@ -25,6 +25,10 @@ prompt. Both parameters are now kept.
 
 ### Playground — behaviour changes
 
+**Agents plan by the model's judgement alone.** The Playground passes no route
+policy, so removing the SDK's built-in word list changes what every agent with a
+retrieve description does: it no longer forces a lookup on nine retail terms.
+
 **Run limits now come from the agent's spec.** An agent whose spec stores a
 smaller hop, revisit or timeout limit stops at that limit. Until now every agent
 ran with the SDK defaults (50 hops, 5 revisits per module, 300 seconds),

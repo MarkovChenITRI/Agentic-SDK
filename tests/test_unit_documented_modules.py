@@ -329,13 +329,19 @@ class DocumentedModuleUnitTests(unittest.TestCase):
 
     def test_next_step_plan_keeps_the_retrieve_description_when_a_prompt_is_given(self) -> None:
         """A custom prompt used to discard the retrieve description silently."""
-        plan = NextStepPlan(
-            system_prompt="PLAN. Answer in English.",
-            retrieve_description="a product catalog",
-            **_llm_params(),
-        )
+        state = WorkflowState(user_message="這個型號還有貨嗎？")
+        client = FoundryOpenAILikeClient(plan_sequence=["action"])
 
-        self.assertEqual("a product catalog", plan._retrieve_description)
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=client):
+            NextStepPlan(
+                system_prompt="PLAN. Answer in English.",
+                retrieve_description="a product catalog",
+                **_llm_params(),
+            )(state)
+
+        system_message = client.last_create_kwargs["messages"][0]["content"]
+        self.assertIn("PLAN. Answer in English.", system_message)
+        self.assertIn("a product catalog", system_message)
 
     def test_next_step_plan_uses_openai_decision(self) -> None:
         state = WorkflowState(user_message="TSiP 是什麼？")

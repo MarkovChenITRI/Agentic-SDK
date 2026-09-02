@@ -21,13 +21,19 @@ def current_spec() -> dict[str, Any]:
     it is stored so every later read in the same session agrees. Nothing is
     recovered from compiled text: AI Hub holds a spec for every agent.
     """
-    stored = session.get("workflow_spec")
-    if isinstance(stored, dict) and stored.get("version") == "2":
+    stored = _stored_spec()
+    if stored is not None:
         return stored
 
     spec = default_spec()
     session["workflow_spec"] = spec
     return spec
+
+
+def _stored_spec() -> dict[str, Any] | None:
+    """The session's draft, or None. One definition of "this session has one"."""
+    stored = session.get("workflow_spec")
+    return stored if isinstance(stored, dict) and stored.get("version") == "2" else None
 
 
 def has_spec() -> bool:
@@ -37,7 +43,7 @@ def has_spec() -> bool:
     creates one when the session has none. Use this wherever the absence of a
     draft is itself the answer, such as a route that redirects to the Builder.
     """
-    return isinstance(session.get("workflow_spec"), dict)
+    return _stored_spec() is not None
 
 
 def store_spec(spec: dict[str, Any]) -> None:

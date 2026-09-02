@@ -109,7 +109,7 @@ def test_session_draft_is_reached_only_through_its_store() -> None:
         if path == store or "__pycache__" in path.parts:
             continue
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if 'session["workflow_spec"]' in line or '"workflow_spec"' in line and "session" in line:
+            if "workflow_spec" in line and "session" in line:
                 offenders.append(f"{path.relative_to(PROJECT_ROOT)}:{number}: {line.strip()}")
 
     assert not offenders, "The session draft was reached without its store:\n" + "\n".join(offenders)
