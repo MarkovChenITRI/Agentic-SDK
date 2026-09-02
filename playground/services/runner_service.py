@@ -1087,8 +1087,11 @@ def _requested_product_identifiers(message: str) -> list[str]:
 def _retrieve_debug_message(config: BuilderSourceConfig, entries: list[ContextEntry], missed: bool) -> str:
     latest = entries[-1]
     metadata = latest.metadata
+    # Dispatch on which module ran, not on which metadata keys it happens to
+    # carry. Every module now reports hit_count, so keying on that alone
+    # labelled semantic runs as KeywordRetrieve.
     source = str(metadata.get("source") or config.retrieve_module)
-    if "hit_count" in metadata:
+    if source == "keyword_retrieve":
         hit_count = int(metadata.get("hit_count") or 0)
         if hit_count == 0:
             return "Retrieve：KeywordRetrieve 沒有命中任何條目，latest_retrieved_content 使用 fallback。"

@@ -2259,3 +2259,22 @@ def test_an_agent_saved_before_the_planner_binding_still_runs():
     assert borrowed.plan is not None
     assert borrowed.plan._model == borrowed.action._model
     assert own.plan._model != own.action._model
+
+
+def test_a_semantic_run_is_not_labelled_keyword_retrieve():
+    """The trace names the module that ran, not the metadata keys it carries.
+
+    Every retrieve module reports hit_count now, so a branch keyed on that
+    alone called every semantic run KeywordRetrieve in the user-visible trace.
+    """
+    config = spec_to_config(build_spec(("retrieve_policy", "semantic")))
+    entry = ContextEntry(
+        type=ContextEntryType.RETRIEVED,
+        content="…",
+        metadata={"source": "semantic_retrieve", "hit_count": 2, "kb_hit_count": 2, "memory_hit_count": 0},
+    )
+
+    message = runner_service._retrieve_debug_message(config, [entry], missed=False)
+
+    assert "SemanticRetrieve" in message
+    assert "KeywordRetrieve" not in message
