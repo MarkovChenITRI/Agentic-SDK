@@ -7,7 +7,7 @@ from playground.services.aihub_client import credentials_for_ticket, issue_crede
 from playground.services.aihub_session import active_credentials, reauthentication_payload
 from playground.services.model_endpoints import normalize_endpoint_selections
 from playground.services.runner_service import SemanticRuntime, prepare_semantic_runtime
-from playground.services.session_spec import current_spec
+from playground.services.session_spec import clear_spec, current_spec, has_spec, store_spec
 from playground.services.security import is_allowed_origin
 from playground.services.semantic_runtime import runtime_root, source_files_dir
 from playground.services.workflow_spec import (
@@ -110,9 +110,9 @@ def save_aihub_config():
 
     agent_id = payload.get("agent_id") or session.get("agent_id")
 
-    spec = session.get("workflow_spec")
-    if not isinstance(spec, dict) or spec.get("version") != "2":
+    if not has_spec():
         return jsonify({"saved": False, "error": "Workflow v2 contract is required before saving to AI Hub."}), 409
+    spec = current_spec()
 
     python_source = compile_python_source(spec)
     semantic_ready = _prepare_semantic_runtime_for_save() if semantic_bundle_required(spec, builder_upload_id=session.get("builder_upload_id") if isinstance(session.get("builder_upload_id"), str) else None) else {"prepared": False}
@@ -232,13 +232,13 @@ def _load_v2_contract_into_session(loaded: dict) -> None:
     if isinstance(spec, dict) and spec.get("version") == "2":
         # Validated on the way in: AI Hub is external, and an out-of-range gate
         # or unknown memory kind would otherwise reach the runtime unchecked.
-        session["workflow_spec"] = validate_spec(spec)
+        store_spec(validate_spec(spec))
         pres = loaded.get("runner_presentation")
         session["runner_presentation"] = pres if isinstance(pres, dict) else default_runner_presentation()
         session.pop("builder_form_state", None)
     else:
         # The agent has no playground config yet; current_spec() supplies the default.
-        session.pop("workflow_spec", None)
+        clear_spec()
         session.pop("runner_presentation", None)
         session.pop("builder_form_state", None)
 

@@ -10,7 +10,7 @@ from flask import Blueprint, abort, jsonify, render_template, request, session
 from playground.services.aihub_bridge import has_builder_bridge_query, start_builder_bridge_session
 from playground.services.mode_context import get_mode_context
 from playground.services.model_endpoints import endpoint_state, normalize_endpoint_selections
-from playground.services.session_spec import current_spec, store_spec, reset_spec
+from playground.services.session_spec import current_spec, has_spec, reset_spec, store_spec
 from playground.services.semantic_runtime import new_upload_id, runtime_root, source_files_dir
 from playground.services.semantic_ingestion import accepted_upload_extensions, ingest_semantic_upload
 from playground.services.source_builder import (
@@ -301,7 +301,7 @@ def _normalize_builder_endpoint_selections() -> dict[str, str]:
 def _should_reset_transient_builder_state() -> bool:
     if session.get("source_origin") in _PERSISTENT_SOURCE_ORIGINS:
         return False
-    if session.get("builder_has_user_config") or session.get("workflow_spec"):
+    if session.get("builder_has_user_config") or has_spec():
         return False
     return True
 

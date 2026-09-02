@@ -30,8 +30,24 @@ def current_spec() -> dict[str, Any]:
     return spec
 
 
+def has_spec() -> bool:
+    """Report whether this session is already editing an agent.
+
+    Distinct from :func:`current_spec`, which answers "give me a spec" and
+    creates one when the session has none. Use this wherever the absence of a
+    draft is itself the answer, such as a route that redirects to the Builder.
+    """
+    return isinstance(session.get("workflow_spec"), dict)
+
+
 def store_spec(spec: dict[str, Any]) -> None:
+    """Replace the session's draft with this spec."""
     session["workflow_spec"] = spec
+
+
+def clear_spec() -> None:
+    """Drop the session's draft, leaving it with none."""
+    session.pop("workflow_spec", None)
 
 
 def reset_spec() -> dict[str, Any]:

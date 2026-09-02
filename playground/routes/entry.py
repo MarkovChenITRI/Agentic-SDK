@@ -8,7 +8,7 @@ from playground.services.aihub_bundle_flow import restore_runtime_bundle
 from playground.services.aihub_client import AiHubCredentials, credentials_for_ticket, exchange_handoff_token, issue_credential_ticket, list_agents, load_config, load_public_config, verify_credentials, verify_identity
 from playground.services.aihub_session import active_credentials
 from playground.services.deep_link import apply_aihub_deep_link
-from playground.services.session_spec import reset_spec
+from playground.services.session_spec import clear_spec, has_spec, reset_spec
 from playground.services.workflow_spec import semantic_bundle_required, validate_spec
 
 
@@ -24,7 +24,7 @@ def index():
 @entry_bp.get("/playground/")
 def entry():
     if apply_aihub_deep_link(request.args.get("mode"), request.args.get("agent_id")):
-        if request.args.get("agent_id") and not session.get("workflow_spec"):
+        if request.args.get("agent_id") and not has_spec():
             return redirect(url_for("entry.navigate_from_shared_agent_to_runner", agent_id=request.args.get("agent_id")))
         return redirect(url_for("runner.runner"))
 
@@ -251,7 +251,7 @@ def _clear_selected_agent_state() -> None:
     session.pop("agent_id", None)
     session.pop("agent_name", None)
     session.pop("last_aihub_save", None)
-    session.pop("workflow_spec", None)
+    clear_spec()
     session.pop("runner_presentation", None)
     session.pop("builder_form_state", None)
     session.pop("last_aihub_bundle_load", None)

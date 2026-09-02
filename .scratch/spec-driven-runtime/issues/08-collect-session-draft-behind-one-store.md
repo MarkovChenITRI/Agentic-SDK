@@ -4,9 +4,11 @@
 
 **Blocked by:** 05
 
-**Status:** needs-info
+**Status:** done
 
-- [ ] 待設計
+- [x] 19 處直接觸碰改走 store
+- [x] 補上 `has_spec()`，解決存取器答不了「有沒有草稿」的問題
+- [x] 結構測試守住這個不變量
 
 ## Comments
 
@@ -21,3 +23,21 @@
 本票剩下的具體形狀，由票 04–06 的 code review 量出來：**`session["workflow_spec"]` 仍被 22 處直接觸碰**（`routes/runner.py` 9、`routes/builder.py` 3、`routes/aihub.py` 3、`services/aihub_bridge.py` 3、`routes/entry.py` 2、`services/deep_link.py` 2）。`session_spec.py` 提供 `current_spec()` / `store_spec()` / `reset_spec()`，但它們被繞過。
 
 一個已知的根因：`current_spec()` 找不到草稿時會自動種入預設值，所以它回答不了「這個 session 有沒有草稿」。多處路由因此改用 `session.get("workflow_spec")` 當閘門。設計時要決定這個存取器缺不缺一個 `has_spec()`。
+
+## 完成記錄
+
+**缺的那個函式是 `has_spec()`。** 記錄裡點出的根因成立：`current_spec()` 找不到草稿時會種入預設值，所以它答不了「這個 session 有沒有草稿」。八條 runner 路由、entry 與 builder 的兩個閘門因此都得自己摸 session。補上 `has_spec()` 之後，那十處全部改走 store。
+
+**store 的介面是五個函式**，各有一個明確的問題要回答：
+
+- `has_spec()` — 這個 session 在編輯 agent 嗎
+- `current_spec()` — 給我一份 spec（沒有就建立）
+- `store_spec(spec)` — 換掉草稿
+- `reset_spec()` — 換成預設
+- `clear_spec()` — 丟掉草稿
+
+`deep_link` 原本的 `session.setdefault("workflow_spec", default_spec())` 語意與 `current_spec()` 完全相同，所以不需要第六個函式。
+
+**結構測試守住它。** `test_session_draft_is_reached_only_through_its_store` 掃描 `playground/` 下除了 store 以外的所有模組，任何一處直接觸碰 `session["workflow_spec"]` 就變紅。已用「故意注入一個繞過」反向驗證過它真的會咬。
+
+**範圍：** 只處理草稿本身。原始架構報告提到的其他 session 欄位（`builder_upload_id`、`endpoint_bindings`、`runner_presentation` 等）不在本票內——票 05 已經拿掉其中最危險的那一個，剩下的沒有已知的不變量被違反。

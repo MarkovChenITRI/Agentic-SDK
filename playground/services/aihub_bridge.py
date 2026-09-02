@@ -6,7 +6,7 @@ from flask import session
 
 from playground.services.aihub_bundle_flow import restore_runtime_bundle
 from playground.services.aihub_client import AiHubCredentials, bridge_credentials, exchange_handoff_token, issue_credential_ticket, load_config, load_public_config
-from playground.services.session_spec import reset_spec
+from playground.services.session_spec import clear_spec, reset_spec, store_spec
 from playground.services.workflow_spec import default_runner_presentation, semantic_bundle_required, validate_spec
 
 
@@ -112,7 +112,7 @@ def _clear_selected_agent_state() -> None:
     session.pop("builder_has_user_config", None)
     session.pop("endpoint_bindings", None)
     session.pop("builder_upload_id", None)
-    session.pop("workflow_spec", None)
+    clear_spec()
     session.pop("runner_presentation", None)
 
 
@@ -122,11 +122,11 @@ def store_loaded_agent(result: dict[str, object]) -> None:
     session["endpoint_bindings"] = result.get("endpoint_bindings") or {}
     spec = result.get("workflow_spec")
     if isinstance(spec, dict) and spec.get("version") == "2":
-        session["workflow_spec"] = validate_spec(spec)
+        store_spec(validate_spec(spec))
         presentation = result.get("runner_presentation")
         session["runner_presentation"] = presentation if isinstance(presentation, dict) else default_runner_presentation()
     else:
-        session.pop("workflow_spec", None)
+        clear_spec()
         session.pop("runner_presentation", None)
     session.pop("builder_form_state", None)
 

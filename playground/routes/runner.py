@@ -12,7 +12,7 @@ from playground.services.mode_context import get_mode_context
 from playground.services.runner_conversation import RunnerConversationState
 from playground.services.runner_service import SemanticRuntime, get_default_scene_profile, get_runner_demo_result, run_agent, stream_agent_initialization, stream_agent_run
 from playground.services.semantic_runtime import runtime_root, source_files_dir
-from playground.services.session_spec import current_spec, store_spec
+from playground.services.session_spec import current_spec, has_spec, store_spec
 from playground.services.source_builder import DEFAULT_RUNNER_DESCRIPTION, get_workflow_summary
 from playground.services.workflow_spec import apply_builder_step, spec_to_config
 
@@ -30,7 +30,7 @@ def runner():
     else:
         apply_aihub_deep_link(request.args.get("mode"), request.args.get("agent_id"))
 
-    if not session.get("workflow_spec"):
+    if not has_spec():
         return redirect(url_for("builder.builder"))
 
     _ensure_runner_conversation_state()
@@ -84,7 +84,7 @@ def _starter_questions_from_text(value: object) -> list[str]:
 
 @runner_bp.post("/execute")
 def execute_runner():
-    if not session.get("workflow_spec"):
+    if not has_spec():
         return jsonify({"error": "No agent is available for execution."}), 400
 
     payload = request.get_json(silent=True) or {}
@@ -108,7 +108,7 @@ def execute_runner():
 
 @runner_bp.post("/execute/stream")
 def execute_runner_stream():
-    if not session.get("workflow_spec"):
+    if not has_spec():
         return jsonify({"error": "No agent is available for execution."}), 400
 
     payload = request.get_json(silent=True) or {}
@@ -141,7 +141,7 @@ def execute_runner_stream():
 
 @runner_bp.post("/conversation/commit")
 def commit_runner_conversation():
-    if not session.get("workflow_spec"):
+    if not has_spec():
         return jsonify({"committed": False, "error": "No agent is available for execution."}), 400
 
     payload = request.get_json(silent=True) or {}
@@ -166,7 +166,7 @@ def commit_runner_conversation():
 
 @runner_bp.post("/initialize/stream")
 def initialize_runner_stream():
-    if not session.get("workflow_spec"):
+    if not has_spec():
         return jsonify({"error": "No agent is available for initialization."}), 400
 
     endpoint_selections = _runner_endpoint_selections()
@@ -186,7 +186,7 @@ def initialize_runner_stream():
 
 @runner_bp.post("/name")
 def update_runner_name():
-    if not session.get("workflow_spec"):
+    if not has_spec():
         return jsonify({"updated": False, "error": "No agent is available for renaming."}), 400
     if not get_mode_context().can_edit:
         return jsonify({"updated": False, "error": "This runner is read-only."}), 403
@@ -213,7 +213,7 @@ def update_runner_name():
 
 @runner_bp.post("/description")
 def update_runner_description():
-    if not session.get("workflow_spec"):
+    if not has_spec():
         return jsonify({"updated": False, "error": "No agent is available for description updates."}), 400
     if not get_mode_context().can_edit:
         return jsonify({"updated": False, "error": "This runner is read-only."}), 403
@@ -232,7 +232,7 @@ def update_runner_description():
 
 @runner_bp.post("/metadata")
 def update_runner_metadata():
-    if not session.get("workflow_spec"):
+    if not has_spec():
         return jsonify({"updated": False, "error": "No agent is available for metadata updates."}), 400
     if not get_mode_context().can_edit:
         return jsonify({"updated": False, "error": "This runner is read-only."}), 403

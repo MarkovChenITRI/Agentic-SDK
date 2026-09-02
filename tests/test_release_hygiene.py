@@ -82,3 +82,23 @@ assert 'faiss' not in sys.modules
 """
 
     subprocess.run([sys.executable, "-c", script], cwd=PROJECT_ROOT, check=True)
+
+
+def test_session_draft_is_reached_only_through_its_store() -> None:
+    """The session's agent draft has one door: playground/services/session_spec.py.
+
+    Every other module asks that store. The invariant this protects is that a
+    session cannot end up holding a draft nobody validated, or answer "do I have
+    a draft" differently in two places.
+    """
+    store = PROJECT_ROOT / "playground" / "services" / "session_spec.py"
+    offenders: list[str] = []
+
+    for path in (PROJECT_ROOT / "playground").rglob("*.py"):
+        if path == store or "__pycache__" in path.parts:
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if 'session["workflow_spec"]' in line or '"workflow_spec"' in line and "session" in line:
+                offenders.append(f"{path.relative_to(PROJECT_ROOT)}:{number}: {line.strip()}")
+
+    assert not offenders, "The session draft was reached without its store:\n" + "\n".join(offenders)
