@@ -131,6 +131,8 @@ def _deployment_requirements(config: BuilderSourceConfig) -> list[OpenAIRequirem
     reachable_roles = reachable_workflow_roles(config)
     if "perceive" in reachable_llm_roles:
         requirements.append(OpenAIRequirement("perceive", "輸入解析器", config.perceive_module, "Perceive"))
+    if "plan" in reachable_llm_roles:
+        requirements.append(OpenAIRequirement("plan", "步驟規劃器", "NextStepPlan", "Plan"))
     if "retrieve" in reachable_roles and config.retrieve_module == "SemanticRetrieve":
         requirements.append(OpenAIRequirement("retrieve", "語意搜尋", config.retrieve_module, "Retrieve"))
     if "action" in reachable_llm_roles:
@@ -172,6 +174,7 @@ def _api_key_for_role(endpoint: ModelEndpoint, role: str) -> str:
 def _role_label(role: str) -> str:
     return {
         "perceive": "輸入解析器",
+        "plan": "步驟規劃器",
         "retrieve": "語意搜尋",
         "action": "模型回覆器",
         "reflect": "回覆檢核器",

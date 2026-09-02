@@ -38,18 +38,33 @@ Q3 的關鍵字選項寫著「**用 key/value 對照表命中固定內容**」�
 
 ## 完成記錄
 
-選檢索方式不再自動裝上 `NextStepPlan`。流程變成 perceive → retrieve → action，每一輪都查表，不判斷——那正是關鍵字選項寫的「用 key/value 對照表命中固定內容」。
+**已回退。** 原本的做法是「選檢索方式不再自動裝 `NextStepPlan`」，那是錯的，理由有兩層。
 
-實測結果：
+**一、我拿來當根據的失敗是我自己造出來的。** 我用一個沒有回答 Q4 的 spec 去試，action 因此停在 `DirectAnswerAction`，跑出來的失敗不是這張票描述的那件事。真正照 wizard 走完的流程（perceive → plan → retrieve → action）在我做這張票之前就跑得通，回覆是「保固期限為自購買日起十二個月，申保時須出示購買憑證。」
+
+**二、選項 A 和 B 是給使用者選的，我卻自己走了第三條路。** 而且拆掉 plan 等於拆掉「這一題到底要不要查」的判斷——實測第二題「你們有賣咖啡機嗎？」時，plan 決定跳過查表直接回；沒有 plan 的話每一輪都會去查一張命中不了的表。
+
+## 實際的修法（選項 B）
+
+真正的缺口不是「plan 不該存在」，是**Builder 裝了 plan 卻沒跟使用者要那個綁定**。所以：
+
+- `_deployment_requirements` 補上 plan 那一條，`_role_label` 補「步驟規劃器」。使用者現在看得到、也綁得到。
+- `_plan_from_config` 不再借 action 的端點。原本 `endpoint_role = "action" if ... else "perceive"`，等於使用者綁的是一個位置、實際用的是另一個。
+
+實測（plan 綁 gpt-55、action 綁 gpt-54，確認各用各的）：
 
 ```
-需要綁定的模型：（一個都不用）
+Builder 要求綁定：perceive、plan、action
+plan 用的部署  : agentic-sdk-gpt-5.5
+action 用的部署: agentic-sdk-gpt-5.4
+
 使用者 > 保固多久？
-Agent  > 保固十二個月。
+Agent  > 保固十二個月，申保須出示購買憑證。
+路徑   : perceive → plan → retrieve → action
+
+使用者 > 你們有賣咖啡機嗎？
+Agent  > 目前無法確認你們是否有賣咖啡機……
+路徑   : perceive → plan → action        ← plan 判斷這題不用查
 ```
 
-**`failure_policy = retry` 仍然會裝 plan**，那是必要的：`on_failure="retry_plan"` 會把流程送回 plan，沒有 plan 模組就會以「unknown module」中止。
-
-**副作用是連 `output_format=free_text` 的 agent 也少一個模型角色**——原本要綁 action 和 plan，現在只要 action。
-
-**沒有做的事：** Q4 仍然只有兩個需要模型的選項，所以走完整個 wizard 還是做不出零模型 agent；只有在不回答 Q4 的情況下才拿得到 `DirectAnswerAction`。與票 03 是同一件剩餘工作。
+**還沒解決的：** 零模型 agent 依然做不出來，而且現在更明確——關鍵字流程一定會有 plan，一定要綁模型。這是產品定位問題，不是缺陷；票 03 的剩餘工作同源。

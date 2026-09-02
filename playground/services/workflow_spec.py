@@ -347,15 +347,15 @@ def apply_builder_step(spec: dict[str, Any], step_key: str, choice_label: object
                 "plan": {"module": None, "params": {"strategy": None, "system_prompt": existing_plan.get("params", {}).get("system_prompt")}},
             }
         elif choice in ("keyword", "semantic"):
-            # Choosing where answers come from does not also choose a planner.
-            # It used to add NextStepPlan, which needs a model endpoint the
-            # Builder never asked anyone to bind, so the run failed. Without it
-            # the workflow simply always looks things up, which is what the
-            # keyword option says it does.
             retrieve_module = "KeywordRetrieve" if choice == "keyword" else "SemanticRetrieve"
+            current_strategy = existing_plan.get("params", {}).get("strategy")
             return {
                 **spec,
                 "retrieve": {**spec.get("retrieve", {}), "module": retrieve_module},
+                "plan": {
+                    "module": "NextStepPlan",
+                    "params": {"strategy": current_strategy or "RouteBySupport", "system_prompt": existing_plan.get("params", {}).get("system_prompt")},
+                },
             }
         return spec
 

@@ -459,11 +459,14 @@ def test_deployment_options_follow_reachable_modules_and_require_selection():
 
     state = model_endpoints.endpoint_state(spec, {})
 
-    assert [requirement["role"] for requirement in state["requirements"]] == ["perceive", "retrieve", "action"]
-    assert state["selections"] == {"perceive": "", "retrieve": "", "action": ""}
-    assert state["binding_missing_roles"] == {"perceive": True, "retrieve": True, "action": True}
+    # The planner needs a model too, and the Builder must ask for it: leaving it
+    # off the list is what made a keyword or semantic agent fail at run time.
+    assert [requirement["role"] for requirement in state["requirements"]] == ["perceive", "plan", "retrieve", "action"]
+    assert state["selections"] == {"perceive": "", "plan": "", "retrieve": "", "action": ""}
+    assert state["binding_missing_roles"] == {"perceive": True, "plan": True, "retrieve": True, "action": True}
     assert state["configured"] is True
-    assert {option["id"] for option in state["requirements"][1]["options"]} == {"embedded-large", "embedded-small"}
+    retrieve_requirement = next(r for r in state["requirements"] if r["role"] == "retrieve")
+    assert {option["id"] for option in retrieve_requirement["options"]} == {"embedded-large", "embedded-small"}
 
     spec = default_spec()
     spec["perceive"]["module"] = "TextPerceive"
@@ -2142,22 +2145,6 @@ def test_every_failure_carries_a_detail_field():
     assert result.get("detail")
 
 
-def test_a_keyword_agent_runs_without_any_model_binding():
-    """Choosing a lookup table must not drag in a model the Builder never asked for."""
-    spec = build_spec(
-        ("retrieve_policy", "keyword"),
-        ("retrieve", {"keyword_pairs": "保固 = 本產品保固十二個月。"}),
-    )
-
-    assert (spec.get("plan") or {}).get("module") is None
-    assert model_endpoints.endpoint_state(spec, {})["requirements"] == []
-
-    result = runner_service.run_agent(spec, message="保固多久？")
-
-    assert result["status"] == "completed"
-    assert "十二個月" in result["final_message"]
-
-
 def test_builder_does_not_claim_a_question_was_answered_when_it_was_not():
     """A person who answers one question used to see all five ticked.
 
@@ -2209,3 +2196,32 @@ def test_the_execute_route_forwards_the_failure_detail_to_the_browser():
     payload = response.get_json()
     assert payload["status"] == "configuration_error"
     assert payload["detail"], "the route must forward the cause, not only the message"
+
+
+def test_a_keyword_agent_asks_for_the_planner_it_installs():
+    """Choosing a lookup adds a planner, and the Builder must say it needs a model.
+
+    It did not, so the run failed with nothing on screen to fix. Removing the
+    planner instead would have taken away the step that decides whether a turn
+    needs a lookup at all.
+    """
+    spec = build_spec(
+        ("retrieve_policy", "keyword"),
+        ("retrieve", {"keyword_pairs": "保固 = 本產品保固十二個月。"}),
+    )
+
+    assert (spec.get("plan") or {}).get("module") == "NextStepPlan"
+    roles = [r["role"] for r in model_endpoints.endpoint_state(spec, {})["requirements"]]
+    assert "plan" in roles
+
+
+def test_the_planner_uses_its_own_binding_not_the_action_role():
+    """It borrowed the action role's endpoint, so binding reflect did not help."""
+    spec = build_spec(("failure_policy", "retry"))
+
+    roles = [r["role"] for r in model_endpoints.endpoint_state(spec, {})["requirements"]]
+    assert "plan" in roles
+
+    workflow = runner_service.build_workflow(spec, {"plan": "gpt-54", "reflect": "gpt-54"})
+
+    assert workflow.plan is not None

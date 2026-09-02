@@ -1273,11 +1273,10 @@ def _plan_from_config(config: BuilderSourceConfig, endpoint_selections: dict[str
 
     if "plan" not in reachable_roles or not config.plan_strategy:
         return None
-    endpoint_role = "action" if "action" in reachable_roles else "perceive"
     return NextStepPlan(
         system_prompt=config.plan_system_prompt,
         retrieve_description=config.retrieve_description,
-        **endpoint_params_for_role(endpoint_role, endpoint_selections),
+        **endpoint_params_for_role("plan", endpoint_selections),
     )
 
 
