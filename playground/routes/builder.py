@@ -75,7 +75,6 @@ def builder():
     # Use v2 spec if present in session; fall back to python_source
     spec = current_spec()
     python_source = compile_python_source(spec)
-    session["python_source"] = python_source
     endpoint_selections = _normalize_builder_endpoint_selections()
     workflow_summary = get_workflow_summary(current_spec())
     builder_form_state = _builder_form_state_from_spec(spec)
@@ -142,7 +141,6 @@ def update_builder_state():
     spec = apply_builder_step(spec, step_key, choice_label)
     store_spec(spec)
     python_source = compile_python_source(spec)
-    session["python_source"] = python_source
     endpoint_selections = _normalize_builder_endpoint_selections()
     session["builder_has_user_config"] = True
     session.pop("builder_form_state", None)  # spec is now the truth; invalidate cache
@@ -210,7 +208,6 @@ def upload_builder_files():
     spec = apply_builder_step(spec, "retrieve", {"semantic_support_files": "\n".join(stored_names)})
     store_spec(spec)
     python_source = compile_python_source(spec)
-    session["python_source"] = python_source
     endpoint_selections = _normalize_builder_endpoint_selections()
     session["builder_has_user_config"] = True
     session.pop("builder_form_state", None)
@@ -305,7 +302,7 @@ def _normalize_builder_endpoint_selections() -> dict[str, str]:
 def _should_reset_transient_builder_state() -> bool:
     if session.get("source_origin") in _PERSISTENT_SOURCE_ORIGINS:
         return False
-    if session.get("builder_has_user_config") or session.get("python_source"):
+    if session.get("builder_has_user_config") or session.get("workflow_spec"):
         return False
     return True
 
@@ -320,7 +317,7 @@ def _reset_transient_builder_state() -> None:
     session.pop("builder_upload_id", None)
     session.pop("workflow_spec", None)
     session.pop("runner_presentation", None)
-    session["python_source"] = compile_python_source(reset_spec())
+    reset_spec()
     session["workflow_spec"] = default_spec()
 
 

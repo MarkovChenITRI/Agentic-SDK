@@ -47,7 +47,6 @@ def load_aihub_config():
     editable = requested_editable and bool(session.get("account_context_present"))
     session["mode"] = "aihub_editable" if editable else "aihub_readonly"
     session["agent_id"] = loaded["agent_id"]
-    session["python_source"] = loaded["python_source"]
     session["endpoint_bindings"] = loaded.get("endpoint_bindings") or {}
     _load_v2_contract_into_session(loaded)
     bundle_result = _restore_bundle_for_session(str(loaded["agent_id"]), credentials)
@@ -86,7 +85,6 @@ def reload_aihub_config():
     session["mode"] = "aihub_editable"
     session["agent_id"] = result["agent_id"]
     session["agent_name"] = result.get("agent_name") or ""
-    session["python_source"] = result["python_source"]
     session["endpoint_bindings"] = result.get("endpoint_bindings") or {}
     _load_v2_contract_into_session(result)
     bundle_result = _restore_bundle_for_session(str(result["agent_id"]), credentials)

@@ -24,7 +24,7 @@ def index():
 @entry_bp.get("/playground/")
 def entry():
     if apply_aihub_deep_link(request.args.get("mode"), request.args.get("agent_id")):
-        if request.args.get("agent_id") and not session.get("python_source"):
+        if request.args.get("agent_id") and not session.get("workflow_spec"):
             return redirect(url_for("entry.navigate_from_shared_agent_to_runner", agent_id=request.args.get("agent_id")))
         return redirect(url_for("runner.runner"))
 
@@ -36,7 +36,7 @@ def entry():
 def start_anonymous():
     session.clear()
     session["mode"] = "anonymous"
-    session["python_source"] = compile_python_source(reset_spec())
+    reset_spec()
     session["source_origin"] = "manual_new"
     return redirect(url_for("builder.builder"))
 
@@ -155,7 +155,7 @@ def start_new_agent():
     _clear_selected_agent_state()
     session["mode"] = "manual_auth"
     session["account_context_present"] = True
-    session["python_source"] = compile_python_source(reset_spec())
+    reset_spec()
     session["source_origin"] = "manual_new"
     return redirect(url_for("builder.builder"))
 
@@ -243,7 +243,7 @@ def _start_authenticated_session(credentials: AiHubCredentials) -> None:
     session["ai_hub_username"] = credentials.username.strip()
     session["ai_hub_display_name"] = credentials.display_name.strip()
     session["ai_hub_credential_ticket"] = issue_credential_ticket(credentials.username, credentials.password, token=credentials.token, api_base_url=credentials.api_base_url, display_name=credentials.display_name, expires_at=credentials.expires_at)
-    session["python_source"] = compile_python_source(reset_spec())
+    reset_spec()
     session["source_origin"] = "manual_new"
 
 

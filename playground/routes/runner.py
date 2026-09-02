@@ -30,11 +30,10 @@ def runner():
     else:
         apply_aihub_deep_link(request.args.get("mode"), request.args.get("agent_id"))
 
-    python_source = session.get("python_source")
-    if not python_source:
+    if not session.get("workflow_spec"):
         return redirect(url_for("builder.builder"))
 
-    _ensure_runner_conversation_state(python_source)
+    _ensure_runner_conversation_state()
     mode_context = get_mode_context()
     scene_profile = get_default_scene_profile()
     demo_result = get_runner_demo_result(scene_profile)
@@ -85,14 +84,13 @@ def _starter_questions_from_text(value: object) -> list[str]:
 
 @runner_bp.post("/execute")
 def execute_runner():
-    python_source = session.get("python_source")
-    if not python_source:
-        return jsonify({"error": "No Python source is available for execution."}), 400
+    if not session.get("workflow_spec"):
+        return jsonify({"error": "No agent is available for execution."}), 400
 
     payload = request.get_json(silent=True) or {}
     endpoint_selections = _runner_endpoint_selections()
     semantic_runtime = _semantic_runtime()
-    conversation_state = _append_normal_user_turn(python_source, payload)
+    conversation_state = _append_normal_user_turn(payload)
     execution = run_agent(
         current_spec(),
         message=str(payload.get("message", "")),
@@ -110,15 +108,14 @@ def execute_runner():
 
 @runner_bp.post("/execute/stream")
 def execute_runner_stream():
-    python_source = session.get("python_source")
-    if not python_source:
-        return jsonify({"error": "No Python source is available for execution."}), 400
+    if not session.get("workflow_spec"):
+        return jsonify({"error": "No agent is available for execution."}), 400
 
     payload = request.get_json(silent=True) or {}
     endpoint_selections = _runner_endpoint_selections()
     semantic_runtime = _semantic_runtime()
     spec = current_spec()
-    conversation_state = _append_normal_user_turn(python_source, payload)
+    conversation_state = _append_normal_user_turn(payload)
 
     def generate():
         for item in stream_agent_run(
@@ -144,13 +141,12 @@ def execute_runner_stream():
 
 @runner_bp.post("/conversation/commit")
 def commit_runner_conversation():
-    python_source = session.get("python_source")
-    if not python_source:
-        return jsonify({"committed": False, "error": "No Python source is available for execution."}), 400
+    if not session.get("workflow_spec"):
+        return jsonify({"committed": False, "error": "No agent is available for execution."}), 400
 
     payload = request.get_json(silent=True) or {}
     update = payload.get("conversation_update")
-    current = _runner_conversation_state(python_source)
+    current = _runner_conversation_state()
     candidate = RunnerConversationState.from_dict(update)
     if candidate.as_dict() == current.as_dict():
         return jsonify({"committed": True, "conversation": current.as_dict()})
@@ -170,9 +166,8 @@ def commit_runner_conversation():
 
 @runner_bp.post("/initialize/stream")
 def initialize_runner_stream():
-    python_source = session.get("python_source")
-    if not python_source:
-        return jsonify({"error": "No Python source is available for initialization."}), 400
+    if not session.get("workflow_spec"):
+        return jsonify({"error": "No agent is available for initialization."}), 400
 
     endpoint_selections = _runner_endpoint_selections()
     semantic_runtime = _semantic_runtime()
@@ -191,16 +186,14 @@ def initialize_runner_stream():
 
 @runner_bp.post("/name")
 def update_runner_name():
-    python_source = session.get("python_source")
-    if not python_source:
-        return jsonify({"updated": False, "error": "No Python source is available for renaming."}), 400
+    if not session.get("workflow_spec"):
+        return jsonify({"updated": False, "error": "No agent is available for renaming."}), 400
     if not get_mode_context().can_edit:
         return jsonify({"updated": False, "error": "This runner is read-only."}), 403
 
     payload = request.get_json(silent=True) or {}
     spec = apply_builder_step(current_spec(), "name", str(payload.get("name", "")))
     store_spec(spec)
-    session["python_source"] = compile_python_source(spec)
     session["builder_has_user_config"] = True
     workflow_summary = get_workflow_summary(spec)
     _store_builder_name(workflow_summary.name)
@@ -220,16 +213,14 @@ def update_runner_name():
 
 @runner_bp.post("/description")
 def update_runner_description():
-    python_source = session.get("python_source")
-    if not python_source:
-        return jsonify({"updated": False, "error": "No Python source is available for description updates."}), 400
+    if not session.get("workflow_spec"):
+        return jsonify({"updated": False, "error": "No agent is available for description updates."}), 400
     if not get_mode_context().can_edit:
         return jsonify({"updated": False, "error": "This runner is read-only."}), 403
 
     payload = request.get_json(silent=True) or {}
     spec = apply_builder_step(current_spec(), "description", str(payload.get("description", "")))
     store_spec(spec)
-    session["python_source"] = compile_python_source(spec)
     session["builder_has_user_config"] = True
     return jsonify(
         {
@@ -241,9 +232,8 @@ def update_runner_description():
 
 @runner_bp.post("/metadata")
 def update_runner_metadata():
-    python_source = session.get("python_source")
-    if not python_source:
-        return jsonify({"updated": False, "error": "No Python source is available for metadata updates."}), 400
+    if not session.get("workflow_spec"):
+        return jsonify({"updated": False, "error": "No agent is available for metadata updates."}), 400
     if not get_mode_context().can_edit:
         return jsonify({"updated": False, "error": "This runner is read-only."}), 403
 
@@ -251,7 +241,6 @@ def update_runner_metadata():
     spec = apply_builder_step(current_spec(), "name", str(payload.get("name", "")))
     spec = apply_builder_step(spec, "description", str(payload.get("description", "")))
     store_spec(spec)
-    session["python_source"] = compile_python_source(spec)
     session["builder_has_user_config"] = True
     workflow_summary = get_workflow_summary(spec)
     _store_builder_name(workflow_summary.name)
@@ -302,20 +291,20 @@ def _runner_endpoint_selections() -> dict[str, str]:
     return selections if isinstance(selections, dict) else {}
 
 
-def _runner_conversation_state(python_source: str) -> RunnerConversationState:
+def _runner_conversation_state() -> RunnerConversationState:
     return RunnerConversationState.from_dict(session.get(_CONVERSATION_SESSION_KEY))
 
 
-def _ensure_runner_conversation_state(python_source: str) -> RunnerConversationState:
-    current = _runner_conversation_state(python_source)
+def _ensure_runner_conversation_state() -> RunnerConversationState:
+    current = _runner_conversation_state()
     stored = session.get(_CONVERSATION_SESSION_KEY)
     if not isinstance(stored, dict) or stored != current.as_dict():
         session[_CONVERSATION_SESSION_KEY] = current.as_dict()
     return current
 
 
-def _append_normal_user_turn(python_source: str, payload: dict[str, object]) -> RunnerConversationState:
-    current = _runner_conversation_state(python_source)
+def _append_normal_user_turn(payload: dict[str, object]) -> RunnerConversationState:
+    current = _runner_conversation_state()
     if isinstance(payload.get("tool_call_submission"), dict):
         return current
     message = str(payload.get("message") or "").strip()

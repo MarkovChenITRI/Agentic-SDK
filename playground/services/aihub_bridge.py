@@ -29,7 +29,7 @@ def start_builder_bridge_session(args: Mapping[str, object], *, origin: str | No
         _store_bridge_context(args, credentials)
     else:
         session["mode"] = "anonymous"
-        session["python_source"] = compile_python_source(reset_spec())
+        reset_spec()
         session["source_origin"] = "manual_new"
     _clear_selected_agent_state()
 
@@ -84,7 +84,7 @@ def _start_authenticated_session(credentials: AiHubCredentials) -> None:
         display_name=credentials.display_name,
         expires_at=credentials.expires_at,
     )
-    session["python_source"] = compile_python_source(reset_spec())
+    reset_spec()
     session["source_origin"] = "manual_new"
 
 
@@ -123,11 +123,9 @@ def store_loaded_agent(result: dict[str, object]) -> None:
     spec = result.get("workflow_spec")
     if isinstance(spec, dict) and spec.get("version") == "2":
         session["workflow_spec"] = spec
-        session["python_source"] = compile_python_source(spec)
         presentation = result.get("runner_presentation")
         session["runner_presentation"] = presentation if isinstance(presentation, dict) else default_runner_presentation()
     else:
-        session["python_source"] = result["python_source"]
         session.pop("workflow_spec", None)
         session.pop("runner_presentation", None)
     session.pop("builder_form_state", None)

@@ -14,6 +14,8 @@ from agentic_sdk.modules.action.generative import _FINAL_RESPONSE_CONTRACT, _bui
 from agentic_sdk.modules.action.tool_call import _tool_call_content
 from agentic_sdk.modules.retrieve.semantic import FaissKnowledgeBase
 from playground.app import create_app
+from playground.routes import aihub as aihub_routes
+from playground.services.aihub_client import AiHubCredentials
 from playground.routes import builder as builder_routes
 from playground.routes import runner as runner_routes
 from playground.services import key_vault_config, model_endpoints
@@ -248,7 +250,7 @@ def test_semantic_retrieve_falls_back_to_pypdf_for_pdf(tmp_path, monkeypatch):
 
 
 def test_runner_execution_memory_keeps_current_image_attachment_transient():
-    source = build_source()
+    spec = build_spec()
     conversation = RunnerConversationState.start().append_user("請解讀足測報告")
     attachment = Attachment(
         kind="image",
@@ -665,7 +667,7 @@ def test_runner_execute_routes_forward_attachment_payloads(monkeypatch):
 
     with app.test_client() as client:
         with client.session_transaction() as session:
-            session["python_source"] = build_source()
+            session["workflow_spec"] = build_spec()
         response = client.post(
             "/playground/run/execute",
             json={
@@ -713,7 +715,7 @@ def test_runner_conversation_state_restores_ordered_turns_across_source_changes(
 
 
 def test_runner_conversation_memory_exposes_prior_retrieval_evidence_to_modules():
-    source = build_source()
+    spec = build_spec()
     state = RunnerConversationState.from_dict(
         {
             **RunnerConversationState.start().as_dict(),
@@ -758,7 +760,7 @@ def test_runner_execution_injects_conversation_memory_into_workflow(monkeypatch)
 
 
 def test_tool_continuation_extends_the_same_conversation_memory():
-    source = build_source()
+    spec = build_spec()
     conversation = RunnerConversationState.from_dict(
         {
             **RunnerConversationState.start().as_dict(),
@@ -803,7 +805,7 @@ def test_tool_continuation_extends_the_same_conversation_memory():
 
 
 def test_tool_submission_update_keeps_selection_and_api_outcome_internal():
-    source = build_source()
+    spec = build_spec()
     conversation = RunnerConversationState.start()
 
     update = runner_service._conversation_update(
@@ -831,11 +833,11 @@ def test_tool_submission_update_keeps_selection_and_api_outcome_internal():
 def test_runner_conversation_commit_persists_one_expected_revision(monkeypatch):
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_source()
+    spec = build_spec()
 
     with app.test_client() as client:
         with client.session_transaction() as current_session:
-            current_session["python_source"] = source
+            current_session["workflow_spec"] = spec
             initial = RunnerConversationState.start()
             current_session["runner_conversation"] = initial.as_dict()
 
@@ -877,7 +879,7 @@ def test_runner_conversation_commit_persists_one_expected_revision(monkeypatch):
 def test_runner_persists_normal_user_turn_before_execution(monkeypatch):
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_source()
+    spec = build_spec()
     captured = {}
 
     def fake_execute(_source, **kwargs):
@@ -888,7 +890,7 @@ def test_runner_persists_normal_user_turn_before_execution(monkeypatch):
 
     with app.test_client() as client:
         with client.session_transaction() as current_session:
-            current_session["python_source"] = source
+            current_session["workflow_spec"] = spec
             current_session["runner_conversation"] = RunnerConversationState.start().as_dict()
 
         response = client.post("/playground/run/execute", json={"message": "我有高足弓"})
@@ -905,11 +907,11 @@ def test_runner_persists_normal_user_turn_before_execution(monkeypatch):
 def test_runner_page_initializes_conversation_state_for_first_turn():
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_source()
+    spec = build_spec()
 
     with app.test_client() as client:
         with client.session_transaction() as current_session:
-            current_session["python_source"] = source
+            current_session["workflow_spec"] = spec
 
         response = client.get("/playground/run")
 
@@ -929,7 +931,7 @@ def test_atomic_runner_metadata_update_compiles_the_current_v2_spec():
     with app.test_client() as client:
         with client.session_transaction() as session:
             session["workflow_spec"] = spec
-            session["python_source"] = build_source()
+            session["workflow_spec"] = build_spec()
 
         response = client.post(
             "/playground/run/metadata",
@@ -1102,7 +1104,7 @@ def test_runner_edit_settings_navigation_preserves_current_draft():
     with app.test_client() as client:
         with client.session_transaction() as session:
             session["workflow_spec"] = spec
-            session["python_source"] = compile_python_source(spec)
+            session["workflow_spec"] = spec
             session["builder_has_user_config"] = True
 
         runner_response = client.get("/playground/run")
@@ -1150,7 +1152,7 @@ def test_anonymous_start_clears_prior_loaded_agent_state():
             session["mode"] = "aihub_editable"
             session["agent_id"] = "old-agent"
             session["workflow_spec"] = build_spec(("input_type", "text_image"))
-            session["python_source"] = compile_python_source(session["workflow_spec"])
+            
             session["builder_upload_id"] = "old-upload"
 
         response = client.post("/playground/start/anonymous")
@@ -1188,7 +1190,7 @@ def test_source_preview_api_preserves_current_draft_without_legacy_page():
     with app.test_client() as client:
         with client.session_transaction() as session:
             session["workflow_spec"] = spec
-            session["python_source"] = compile_python_source(spec)
+            session["workflow_spec"] = spec
             session["builder_has_user_config"] = True
 
         source_response = client.get("/playground/source/preview")
@@ -1213,14 +1215,10 @@ def test_v2_source_preview_preserves_renamed_workflow():
     with app.test_client() as client:
         with client.session_transaction() as session:
             session["workflow_spec"] = spec
-            session["python_source"] = build_source()
 
         response = client.get("/playground/source/preview")
-        with client.session_transaction() as session:
-            compiled_source = session["python_source"]
 
     assert response.status_code == 200
-    assert 'workflow_name="Contract verification"' in compiled_source
     assert 'workflow_name="Contract verification"' in response.get_data(as_text=True)
 
 
@@ -1248,11 +1246,11 @@ def test_loading_v2_agent_compiles_canonical_execution_source():
 def test_runner_starter_questions_use_session_metadata_not_python_source():
     app = create_app()
     app.config.update(TESTING=True)
-    source = build_source(("memory_type", {"starter_questions": "如何上架？"}))
+    spec = build_spec(("memory_type", {"starter_questions": "如何上架？"}))
 
     with app.test_client() as client:
         with client.session_transaction() as session:
-            session["python_source"] = source
+            session["workflow_spec"] = spec
             session["builder_form_state"] = {
                 "choices": {},
                 "values": {"memory_type": {"starter_questions": "如何上架？\n如何部署？"}},
@@ -1294,7 +1292,7 @@ def test_streaming_execute_route_forwards_attachment_payloads(monkeypatch):
 
     with app.test_client() as client:
         with client.session_transaction() as session:
-            session["python_source"] = build_source()
+            session["workflow_spec"] = build_spec()
         response = client.post(
             "/playground/run/execute/stream",
             json={
@@ -1361,7 +1359,7 @@ def test_streaming_execute_route_forwards_finish_fields_as_ndjson_process_events
 
     with app.test_client() as client:
         with client.session_transaction() as session:
-            session["python_source"] = build_source()
+            session["workflow_spec"] = build_spec()
         response = client.post(
             "/playground/run/execute/stream",
             json={"message": "測試輸入"},
@@ -1957,7 +1955,7 @@ def test_runner_metadata_routes_answer_for_a_session_that_only_has_python_source
 
     with app.test_client() as client:
         with client.session_transaction() as session:
-            session["python_source"] = build_source()
+            session["workflow_spec"] = build_spec()
             session["mode"] = "anonymous"
 
         name = client.post("/playground/run/name", json={"name": "改名後的 Agent"})
@@ -2029,3 +2027,50 @@ def test_spec_path_and_compiled_source_path_agree_except_on_dropped_settings():
             if getattr(from_source, field.name) != getattr(from_spec, field.name)
         }
         assert differing <= _SETTINGS_THE_SPEC_PATH_NOW_HONOURS, f"{name}: {differing}"
+
+
+def test_config_load_route_leaves_the_session_running_the_loaded_agent(monkeypatch):
+    """The load route used to store AI Hub's source without recompiling it.
+
+    Two routes load an agent. One recompiled the Python text from the loaded
+    spec, the other stored whatever text came back, and the runtime executed
+    that text. An agent loaded through the second route therefore ran a stale
+    configuration. With the spec as the only draft the session keeps, the two
+    routes cannot disagree.
+    """
+    app = create_app()
+    app.config.update(TESTING=True)
+    loaded_spec = build_spec(("input_type", "text_image"), ("retrieve_policy", "keyword"))
+
+    monkeypatch.setattr(
+        aihub_routes,
+        "load_config",
+        lambda agent_id, *, credentials=None, origin=None: {
+            "loaded": True,
+            "agent_id": agent_id,
+            "agent_name": "Loaded Agent",
+            "workflow_spec": loaded_spec,
+            # Deliberately stale: what the old code path would have executed.
+            "python_source": compile_python_source(build_spec()),
+            "endpoint_bindings": {},
+        },
+    )
+    monkeypatch.setattr(
+        aihub_routes,
+        "active_credentials",
+        lambda: AiHubCredentials(username="creator", password="secret"),
+    )
+
+    with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["mode"] = "aihub_editable"
+            session["ai_hub_username"] = "creator"
+
+        response = client.post("/playground/aihub/config/load", json={"agent_id": "agent-1"})
+
+        with client.session_transaction() as session:
+            running_config = spec_to_config(session["workflow_spec"])
+
+    assert response.status_code == 200
+    assert running_config.perceive_module == "TextImagePerceive"
+    assert running_config.retrieve_module == "KeywordRetrieve"

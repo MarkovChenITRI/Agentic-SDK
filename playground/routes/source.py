@@ -25,9 +25,7 @@ def preview_source():
 
 
 def _current_python_source() -> str:
-    python_source = compile_python_source(current_spec())
-    session["python_source"] = python_source
-    return python_source
+    return compile_python_source(current_spec())
 
 
 def _source_preview_markdown(python_source: str) -> str:
