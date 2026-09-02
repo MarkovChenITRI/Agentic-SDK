@@ -2225,3 +2225,18 @@ def test_the_planner_uses_its_own_binding_not_the_action_role():
     workflow = runner_service.build_workflow(spec, {"plan": "gpt-54", "reflect": "gpt-54"})
 
     assert workflow.plan is not None
+
+
+def test_the_preview_memory_option_stays_locked_and_visible():
+    """The locked memory choice is a roadmap signal, not dead code.
+
+    It tells people where CrossContextMemory is going. It was once removed for
+    looking like a promise the product could not keep; a choice marked 預覽中
+    and visibly unclickable promises a direction, not a feature.
+    """
+    memory_step = next(step for step in builder_routes.get_builder_steps() if step.key == "memory_type")
+    preview = next(c for c in memory_step.choices if c.label == "workflow_recall_preview")
+
+    assert preview.available is False
+    assert preview.badge == "預覽中"
+    assert builder_routes._is_locked_builder_choice("memory_type", preview.label) is True
