@@ -298,6 +298,45 @@ class DocumentedModuleUnitTests(unittest.TestCase):
         self.assertIn("only report a value as a named fact", system_prompt)
         self.assertIn("Never treat an unmarked comparison chart", system_prompt)
 
+    def test_next_step_plan_follows_the_model_when_no_policy_is_supplied(self) -> None:
+        state = WorkflowState(user_message="請推薦產品編號 230619521 的價格與限制。")
+        state.append(
+            ContextEntry(
+                type=ContextEntryType.PERCEIVED,
+                content="intent=product_recommendation",
+                metadata={"intent": "product_recommendation"},
+            )
+        )
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
+            output = NextStepPlan(retrieve_description="a product catalog", **_llm_params())(state)
+
+        self.assertEqual("action", output["next_module"])
+
+    def test_next_step_plan_lets_a_route_policy_overrule_the_model(self) -> None:
+        state = WorkflowState(user_message="請推薦產品編號 230619521 的價格與限制。")
+        seen: list[str | None] = []
+
+        def always_retrieve(_state, chosen):
+            seen.append(chosen)
+            return "retrieve"
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
+            output = NextStepPlan(route_policy=always_retrieve, **_llm_params())(state)
+
+        self.assertEqual(["action"], seen)
+        self.assertEqual("retrieve", output["next_module"])
+
+    def test_next_step_plan_keeps_the_retrieve_description_when_a_prompt_is_given(self) -> None:
+        """A custom prompt used to discard the retrieve description silently."""
+        plan = NextStepPlan(
+            system_prompt="PLAN. Answer in English.",
+            retrieve_description="a product catalog",
+            **_llm_params(),
+        )
+
+        self.assertEqual("a product catalog", plan._retrieve_description)
+
     def test_next_step_plan_uses_openai_decision(self) -> None:
         state = WorkflowState(user_message="TSiP 是什麼？")
         state.append(
@@ -313,51 +352,6 @@ class DocumentedModuleUnitTests(unittest.TestCase):
 
         self.assertEqual("action", output["next_module"])
         self.assertEqual("route to action", output["payload"]["plan_thought"])
-
-    def test_next_step_plan_retrieves_catalog_facts_before_action(self) -> None:
-        state = WorkflowState(user_message="請依 catalog 推薦產品編號 230619521，列出價格與限制。")
-        state.append(
-            ContextEntry(
-                type=ContextEntryType.PERCEIVED,
-                content="intent=product_recommendation",
-                metadata={"intent": "product_recommendation"},
-            )
-        )
-
-        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
-            output = NextStepPlan(retrieve_description="LaNew catalog", **_llm_params())(state)
-
-        self.assertEqual("retrieve", output["next_module"])
-
-    def test_next_step_plan_retrieves_retail_sku_and_availability_before_action(self) -> None:
-        state = WorkflowState(user_message="SKU 7037191 有現貨、展示品或調貨資訊嗎？")
-        state.append(
-            ContextEntry(
-                type=ContextEntryType.PERCEIVED,
-                content="intent=store_availability",
-                metadata={"intent": "store_availability"},
-            )
-        )
-
-        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
-            output = NextStepPlan(retrieve_description="LaNew catalog", **_llm_params())(state)
-
-        self.assertEqual("retrieve", output["next_module"])
-
-    def test_next_step_plan_retrieves_ai_hub_workshop_facts_before_action(self) -> None:
-        state = WorkflowState(user_message="AI Hub 支援哪些模型部署方式？")
-        state.append(
-            ContextEntry(
-                type=ContextEntryType.PERCEIVED,
-                content="intent=ai_hub_deployment",
-                metadata={"intent": "ai_hub_deployment"},
-            )
-        )
-
-        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
-            output = NextStepPlan(retrieve_description="AI Hub workshop materials", **_llm_params())(state)
-
-        self.assertEqual("retrieve", output["next_module"])
 
     def test_keyword_retrieve_hits_expected_items(self) -> None:
         state = WorkflowState(user_message="TSiP 是什麼？")

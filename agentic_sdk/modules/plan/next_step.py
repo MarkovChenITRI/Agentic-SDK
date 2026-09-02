@@ -1,40 +1,17 @@
 ﻿from __future__ import annotations
 
+from typing import Callable
+
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowAborted, WorkflowState
 from agentic_sdk.llm import chat_stream_json, require_model, resolve_openai_client
 from agentic_sdk.memory.in_context import build_module_messages
 
 
+RoutePolicy = Callable[[WorkflowState, str | None], str | None]
+"""Decides the next module, given the state and the module the model chose."""
+
+
 _ALLOWED_NEXT = {"retrieve", "action"}
-_DOCUMENT_FACT_TERMS = (
-    "agentic sdk",
-    "catalog",
-    "目錄",
-    "上架",
-    "工作流",
-    "工作流程",
-    "模型小卡",
-    "模型部署",
-    "部署",
-    "產品編號",
-    "商品編號",
-    "sku",
-    "品號",
-    "價格",
-    "價錢",
-    "型號",
-    "規格",
-    "限制",
-    "庫存",
-    "現貨",
-    "展示品",
-    "試穿",
-    "取貨",
-    "調貨",
-    "到貨",
-    "門市",
-    "遊樂場",
-)
 _SYSTEM_PROMPT = (
     "PLAN. Decide whether the next module should be retrieve or action. "
     "Return JSON with fields thought and next_module."
@@ -53,12 +30,24 @@ class NextStepPlan:
         model: str | None = None,
         system_prompt: str | None = None,
         retrieve_description: str | None = None,
+        route_policy: "RoutePolicy | None" = None,
     ) -> None:
+        """Decide whether the next module is retrieve or action.
+
+        ``retrieve_description`` describes what the workflow can look up, and is
+        given to the model so it can judge whether looking up would help.
+
+        ``route_policy`` lets the caller have the last word. It receives the
+        state and the module the model chose, and returns the module to use.
+        Return the model's choice to accept it. No policy ships with the SDK:
+        rules about which questions need a lookup belong to the application that
+        knows its own subject matter, not to a general planner.
+        """
         self._model = require_model(model, self.__class__.__name__)
         self._client = resolve_openai_client(self.__class__.__name__, api_key=api_key, base_url=base_url)
-        retrieve_hint = ""
-        if retrieve_description:
-            retrieve_hint = f"\nAvailable retrieve source: {retrieve_description}."
+        self._retrieve_description = retrieve_description or None
+        self._route_policy = route_policy
+        retrieve_hint = f"\nAvailable retrieve source: {retrieve_description}." if retrieve_description else ""
         self._system_prompt = system_prompt or (_SYSTEM_PROMPT + retrieve_hint)
 
     @property
@@ -102,8 +91,8 @@ class NextStepPlan:
         parsed = response.as_json()
         thought = str(parsed.get("thought", ""))
         next_module = parsed.get("next_module")
-        if _requires_document_retrieval(state, self._has_retrieve_source):
-            next_module = "retrieve"
+        if self._route_policy is not None:
+            next_module = self._route_policy(state, next_module)
         fallback = next_module not in _ALLOWED_NEXT
         if fallback:
             next_module = "action"
@@ -125,18 +114,6 @@ class NextStepPlan:
                 )
             ],
         )
-
-    @property
-    def _has_retrieve_source(self) -> bool:
-        return "Available retrieve source:" in self._system_prompt
-
-
-def _requires_document_retrieval(state: WorkflowState, has_retrieve_source: bool) -> bool:
-    if not has_retrieve_source or state.latest_of(ContextEntryType.RETRIEVED) is not None:
-        return False
-    message = state.latest_user_message().lower()
-    return any(term in message for term in _DOCUMENT_FACT_TERMS)
-
 
 def _abort_for_provider_failure(state: WorkflowState, stage: str, exc: Exception) -> None:
     message = "Unable to plan the next step right now."

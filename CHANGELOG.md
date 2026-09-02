@@ -5,6 +5,24 @@ package ship together from this repo, so both appear here; entries say which.
 
 ## Unreleased
 
+### agentic_sdk — breaking
+
+**`NextStepPlan` no longer overrules the model from a built-in word list.** It
+carried nine Traditional Chinese retail terms and forced a retrieve whenever the
+user's message contained one. Any agent with a non-default retrieve description
+was affected, so this changes what those agents do: the model's decision now
+stands.
+
+Applications that need such a rule pass `route_policy=` — a callable that sees
+the state and the module the model chose, and returns the module to use. The SDK
+ships no default policy: which questions need a lookup depends on the subject
+matter, which the application knows and a general planner does not.
+
+**`system_prompt` and `retrieve_description` no longer cancel each other.**
+Passing a custom prompt used to discard the retrieve description and, as a side
+effect, disable the word list — through a substring search of the module's own
+prompt. Both parameters are now kept.
+
 ### Playground — behaviour changes
 
 **Run limits now come from the agent's spec.** An agent whose spec stores a

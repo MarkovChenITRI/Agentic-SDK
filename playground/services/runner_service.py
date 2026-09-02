@@ -200,7 +200,7 @@ def run_agent(
     if not panel_decision:
         panel_decision = _panel_decision_reason(user_message, final_message)
     if handoff_reason:
-        final_message = f"{handoff_reason} 已停止推薦與下一步送出，請交由服務人員人工確認產品資料、庫存與適用條件。"
+        final_message = f"{handoff_reason} 已停止推薦與下一步送出，請交由服務人員人工確認。"
     result = {
         "title": "回覆結果",
         "message": final_message,

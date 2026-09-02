@@ -20,6 +20,17 @@ CASE_SPECIFIC_DEFAULT_TERMS = (
     "ICOPE",
     "submit_booking",
     "booking",
+    # Added after a retail vocabulary sat in the SDK's planner for months while
+    # this list stayed green, because none of the terms above appeared in it.
+    "試穿",
+    "門市",
+    "取貨",
+    "調貨",
+    "庫存",
+    "現貨",
+    "展示品",
+    "品號",
+    "遊樂場",
 )
 
 RUNTIME_SCENARIO_WORDING = (
