@@ -52,11 +52,21 @@ class KnowledgeBase:
         self._entries = entries
 
     def search(self, query: str, top_k: int = 3) -> list[KnowledgeHit]:
+        """Stand in for a semantic search.
+
+        Matching on whitespace-separated tokens never fires for Chinese, which
+        has none, so this stub silently returned nothing for every Chinese
+        query. Overlapping character pairs stand in for similarity well enough
+        to tell "found something" from "found nothing".
+        """
         normalized = query.lower()
+        pairs = {normalized[i:i + 2] for i in range(len(normalized) - 1)}
         hits = [
             KnowledgeHit(entry)
             for entry in self._entries
-            if entry.title.lower() in normalized or any(token and token in entry.content.lower() for token in normalized.split())
+            if entry.title.lower() in normalized
+            or any(token and token in entry.content.lower() for token in normalized.split())
+            or any(pair in entry.content.lower() for pair in pairs)
         ]
         return hits[:top_k]
 

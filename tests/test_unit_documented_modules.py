@@ -10,6 +10,7 @@ from unittest.mock import patch
 from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, WorkflowState
 from agentic_sdk.memory import InContextMemory, InMemoryStore
 from agentic_sdk.modules import (
+    PassThroughRetrieve,
     DirectAnswerAction,
     EvidenceCheckReflect,
     GenerativeAction,
@@ -459,6 +460,40 @@ class DocumentedModuleUnitTests(unittest.TestCase):
         self.assertEqual("第一輪回答", messages[2]["content"])
         self.assertEqual("第二輪追問", messages[3]["content"])
 
+    def test_generative_action_answers_openly_when_nothing_was_retrieved(self) -> None:
+        """A workflow that never retrieves must not be told to answer only from context."""
+        state = WorkflowState(user_message="用一句話說明什麼是保固。")
+        client = FoundryOpenAILikeClient()
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=client):
+            GenerativeAction(**_llm_params())(state)
+
+        system_message = client.last_create_kwargs["messages"][0]["content"]
+        self.assertNotIn("請只根據 retrieved_context 回答", system_message)
+        self.assertIn("不確定時說明不確定", system_message)
+
+    def test_generative_action_stays_grounded_when_something_was_retrieved(self) -> None:
+        state = WorkflowState(user_message="保固多久？")
+        state.append(ContextEntry(type=ContextEntryType.RETRIEVED, content="保固十二個月。"))
+        client = FoundryOpenAILikeClient()
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=client):
+            GenerativeAction(**_llm_params())(state)
+
+        system_message = client.last_create_kwargs["messages"][0]["content"]
+        self.assertIn("請只根據 retrieved_context 回答", system_message)
+
+    def test_generative_action_lets_a_caller_prompt_replace_both_defaults(self) -> None:
+        state = WorkflowState(user_message="保固多久？")
+        client = FoundryOpenAILikeClient()
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=client):
+            GenerativeAction(system_prompt="ACT. Answer in English.", **_llm_params())(state)
+
+        system_message = client.last_create_kwargs["messages"][0]["content"]
+        self.assertIn("ACT. Answer in English.", system_message)
+        self.assertNotIn("請只根據 retrieved_context 回答", system_message)
+
     def test_action_prompt_includes_perceived_context_with_retrieved_context(self) -> None:
         state = WorkflowState(user_message="請推薦鞋墊")
         state.payload["perceived_summary"] = "足測報告顯示足弓指數高，足底局部壓力集中。"
@@ -606,21 +641,47 @@ class DocumentedModuleUnitTests(unittest.TestCase):
         self.assertIsNone(evidence_output["next_module"])
         self.assertEqual("pass", evidence_output["payload"]["reflect_verdict"])
 
-    def test_evidence_check_reflect_fails_when_retrieve_reports_no_hits(self) -> None:
-        state = WorkflowState(user_message="未知問題")
-        state.last_action_result = {"content": "目前沒有找到相關參考資料。"}
-        state.append(
-            ContextEntry(
-                type=ContextEntryType.RETRIEVED,
-                content="目前沒有找到相關參考資料。",
-                metadata={"hit_count": 0},
-            )
-        )
+    def test_evidence_check_reflect_fails_after_a_real_retrieve_finds_nothing(self) -> None:
+        """Runs the retrieve modules rather than hand-building their output.
 
-        output = EvidenceCheckReflect(on_failure="end")(state)
+        The forged version of this test passed while the integration was broken:
+        SemanticRetrieve reported its count under a different key, so the check
+        never saw it and every semantic workflow passed unconditionally.
+        """
+        from agentic_sdk.modules.retrieve.semantic import SemanticRetrieve
 
-        self.assertIsNone(output["next_module"])
-        self.assertEqual("fail", output["payload"]["reflect_verdict"])
+        for label, retrieve in (
+            ("keyword", KeywordRetrieve(items=[])),
+            ("semantic", SemanticRetrieve()),
+        ):
+            with self.subTest(retrieve=label):
+                state = WorkflowState(user_message="未知問題")
+                for entry in retrieve(state).get("context_updates") or []:
+                    state.append(entry)
+                state.last_action_result = {"content": "目前沒有找到相關參考資料。"}
+
+                output = EvidenceCheckReflect(on_failure="end")(state)
+
+                self.assertIsNone(output["next_module"])
+                self.assertEqual("fail", output["payload"]["reflect_verdict"])
+
+    def test_evidence_check_reflect_passes_when_a_real_retrieve_finds_something(self) -> None:
+        state = WorkflowState(user_message="保固多久？")
+        retrieve = KeywordRetrieve(items=[{"keywords": ["保固"], "content": "保固十二個月。"}])
+        for entry in retrieve(state).get("context_updates") or []:
+            state.append(entry)
+        state.last_action_result = {"content": "保固十二個月。"}
+
+        self.assertEqual("pass", EvidenceCheckReflect()(state)["payload"]["reflect_verdict"])
+
+    def test_evidence_check_reflect_has_no_opinion_when_nothing_was_looked_up(self) -> None:
+        """PassThroughRetrieve makes no evidence claim, so the check must not fail it."""
+        state = WorkflowState(user_message="用一句話說明什麼是保固。")
+        for entry in PassThroughRetrieve()(state).get("context_updates") or []:
+            state.append(entry)
+        state.last_action_result = {"content": "保固是一種售後承諾。"}
+
+        self.assertEqual("pass", EvidenceCheckReflect()(state)["payload"]["reflect_verdict"])
 
     def test_text_perceive_writes_memory_when_memory_store_exists(self) -> None:
         store = InMemoryStore()

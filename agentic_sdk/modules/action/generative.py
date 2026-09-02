@@ -7,11 +7,16 @@ from agentic_sdk.llm import chat_stream, require_model, resolve_openai_client
 from agentic_sdk.memory.in_context import build_module_messages
 
 
-DEFAULT_SYSTEM_PROMPT = (
+GROUNDED_SYSTEM_PROMPT = (
     "你是 Agentic SDK 的 Action 模組。請只根據 retrieved_context 回答使用者；"
     "如果 retrieved_context 已有明確答案，直接用繁體中文簡潔回答，不要加入未出現在上下文的機構、英文全名或推測。"
     "如果 retrieved_context 沒有足夠資料，請明確說沒有足夠資料。"
 )
+OPEN_SYSTEM_PROMPT = (
+    "你是 Agentic SDK 的 Action 模組。請用繁體中文簡潔回答使用者的問題。"
+    "不要杜撰具體的機構名稱、數字或條款；不確定時說明不確定，而不是拒絕回答。"
+)
+DEFAULT_SYSTEM_PROMPT = GROUNDED_SYSTEM_PROMPT
 _FINAL_RESPONSE_CONTRACT = (
     "直接回答最新使用者問題，第一句就提供所問的結果、解釋或決定。"
     "perceived_context、retrieved_context、規劃、工具規則與資料比對都是內部依據，不得在對外回答中逐段盤點、"
@@ -35,8 +40,17 @@ class GenerativeAction:
         temperature: float | None = None,
         system_prompt: str | None = None,
     ) -> None:
+        """Generate the user-visible reply.
+
+        Without ``system_prompt`` the module picks its own instruction per turn:
+        when the workflow retrieved something it answers only from that; when it
+        retrieved nothing it answers openly. A workflow whose retrieve step
+        passes the input straight through never has retrieved context, so
+        instructing it to answer only from context would make it refuse every
+        question.
+        """
         self._temperature = temperature
-        self._system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        self._system_prompt = system_prompt
         self._model = require_model(model, self.__class__.__name__)
         self._client = resolve_openai_client(self.__class__.__name__, api_key=api_key, base_url=base_url)
 
@@ -97,12 +111,13 @@ class GenerativeAction:
         )
 
 
-def _build_messages(state: WorkflowState, system_prompt: str) -> list[dict[str, str]]:
+def _build_messages(state: WorkflowState, system_prompt: str | None) -> list[dict[str, str]]:
     retrieved = state.lookup("latest_retrieved_content") or state.lookup("retrieved_snippet") or ""
     perceived = _perceived_context(state)
+    resolved_prompt = system_prompt or (GROUNDED_SYSTEM_PROMPT if str(retrieved).strip() else OPEN_SYSTEM_PROMPT)
     return build_module_messages(
         state.memory,
-        system_prompt=system_prompt,
+        system_prompt=resolved_prompt,
         extra_context={
             "final_response_contract": _FINAL_RESPONSE_CONTRACT,
             "perceived_context_instruction": "perceived_context 是輸入理解階段整理出的使用者需求與附件判讀；回答時必須保留這些事實，不要被 retrieved_context 覆蓋。影像資料只能輸出其中同時具有清楚欄位名稱與數值的事實；不得依版面位置推測欄位名稱，欄位或數值不清楚時必須標示不確定。未勾選的對照圖、圖例或範例分類不可當作使用者的實際分類；即使圖例文字清楚，只要沒有明確標示此使用者的左右腳與選取結果或結果欄位，就必須說分類不確定。",

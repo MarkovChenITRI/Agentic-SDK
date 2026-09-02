@@ -24,7 +24,7 @@ class EvidenceCheckReflect:
             reason = evidence_error
         else:
             reason = "action_result ok"
-        next_module = _ON_FAILURE_TO_NEXT[self._on_failure] if verdict == "fail" else None
+        next_module = _next_after_failure(self._on_failure, state) if verdict == "fail" else None
         return ModuleOutput(
             next_module=next_module,
             payload={"reflect_verdict": verdict},
@@ -38,15 +38,27 @@ class EvidenceCheckReflect:
         )
 
 
-def _evidence_error(state: WorkflowState) -> str | None:
-    retrieved = state.latest_of(ContextEntryType.RETRIEVED)
-    if retrieved is None:
+def _next_after_failure(on_failure: str, state: WorkflowState) -> str | None:
+    """Send the workflow back to plan once, then stop.
+
+    "Retry" means try again, not try until the hop limit stops you. A second
+    failure means re-planning did not change the outcome, so looping again only
+    spends model calls to reach the same verdict and then abort.
+    """
+    if on_failure != "retry_plan" or state.visit_counts.get("reflect", 0) > 1:
         return None
-    hit_counts = [
-        value
-        for key, value in retrieved.metadata.items()
-        if key == "hit_count"
-    ]
-    if hit_counts and all(int(value or 0) == 0 for value in hit_counts):
+    return "plan"
+
+
+def _evidence_error(state: WorkflowState) -> str | None:
+    """Report an error when the workflow looked something up and found nothing.
+
+    A retrieve module that does not look anything up reports no count at all,
+    and gets no verdict: it has no claim to make about evidence.
+    """
+    retrieved = state.latest_of(ContextEntryType.RETRIEVED)
+    if retrieved is None or "hit_count" not in retrieved.metadata:
+        return None
+    if int(retrieved.metadata.get("hit_count") or 0) == 0:
         return "no retrieved evidence"
     return None
