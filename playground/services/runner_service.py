@@ -215,7 +215,9 @@ def run_agent(
     if not panel_decision:
         panel_decision = _panel_decision_reason(user_message, final_message)
     if handoff_reason:
-        final_message = f"{handoff_reason} 已停止推薦與下一步送出，請交由服務人員人工確認。"
+        # Each reason carries its own follow-up: documents that never loaded
+        # call for stopping, an unverifiable catalog id calls for a person.
+        final_message = handoff_reason
     result = {
         "title": "回覆結果",
         "message": final_message,
@@ -1069,15 +1071,31 @@ def _human_handoff_reason(config: BuilderSourceConfig, entries: list[ContextEntr
         return None
     retrieve_entries = [entry for entry in entries if _entry_type(entry) == ContextEntryType.RETRIEVED.value]
     if _retrieve_missed(retrieve_entries):
-        return "目前沒有找到可支持這項決策的產品資料。"
+        reason = _documents_unavailable_reason(config) or "目前沒有在參考資料中找到可以支持這個回答的內容。"
+        return f"{reason} 已停止作答，避免給出沒有依據的內容。"
     requested_identifiers = _requested_product_identifiers(user_message)
     if not requested_identifiers or not retrieve_entries:
         return None
     retrieved_content = "\n".join(str(entry.content or "") for entry in retrieve_entries).lower()
     missing_identifier = next((identifier for identifier in requested_identifiers if identifier.lower() not in retrieved_content), None)
     if missing_identifier:
-        return f"catalog 沒有可驗證產品編號 {missing_identifier} 的資料。"
+        return f"catalog 沒有可驗證產品編號 {missing_identifier} 的資料。已停止推薦與下一步送出，請交由服務人員人工確認。"
     return None
+
+
+def _documents_unavailable_reason(config: BuilderSourceConfig) -> str | None:
+    """Say the documents are missing when that is what happened.
+
+    Semantic search has no score threshold: with anything in the index, top-k
+    always returns at least one hit. So an agent that declares support files
+    and still retrieves nothing has an empty index — its documents were never
+    loaded. Reporting that as "nothing in the reference material matched" tells
+    the reader the documents were consulted and came up short, which is a
+    different and untrue statement.
+    """
+    if config.retrieve_module != "SemanticRetrieve" or not config.semantic_support_files:
+        return None
+    return "這個 Agent 的參考文件目前沒有載入，所以沒有任何內容可以查。"
 
 
 def _requested_product_identifiers(message: str) -> list[str]:

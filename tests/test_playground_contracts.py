@@ -2278,3 +2278,39 @@ def test_a_semantic_run_is_not_labelled_keyword_retrieve():
 
     assert "SemanticRetrieve" in message
     assert "KeywordRetrieve" not in message
+
+
+def test_a_shared_agent_says_its_documents_are_missing(monkeypatch):
+    """Anonymous gallery visitors were told the agent sells nothing they want.
+
+    Every agent whose evidence check stopped it got the same retail sentence
+    about 產品資料 and 庫存 — a wound-care agent told people to ask staff about
+    stock. And the cause was not "nothing matched": the documents had never
+    been loaded at all.
+    """
+    spec = build_spec(
+        ("retrieve_policy", "semantic"),
+        ("retrieve", {"semantic_support_files": "guide.pdf", "search_goal": "查傷口照護步驟"}),
+        ("output_format", "free_text"),
+        ("failure_policy", "handoff"),
+    )
+
+    class EmptyIndexWorkflow:
+        def run(self, *_args, **_kwargs):
+            return WorkflowResult(
+                workflow_id="w",
+                final_message="換藥前先洗手。",
+                entries=[ContextEntry(
+                    type=ContextEntryType.RETRIEVED,
+                    content="",
+                    metadata={"source": "semantic_retrieve", "hit_count": 0, "kb_hit_count": 0, "memory_hit_count": 0},
+                )],
+                entities={},
+            )
+
+    monkeypatch.setattr(runner_service, "build_workflow", lambda *a, **k: EmptyIndexWorkflow())
+
+    message = runner_service.run_agent(spec, message="傷口照護的步驟")["final_message"]
+
+    assert "參考文件目前沒有載入" in message
+    assert "產品資料" not in message and "庫存" not in message
