@@ -138,6 +138,7 @@ def update_builder_state():
             choice_label = "in_context"
 
     spec = apply_builder_step(spec, step_key, choice_label)
+    _record_answered_step(step_key)
     store_spec(spec)
     python_source = compile_python_source(spec)
     endpoint_selections = _normalize_builder_endpoint_selections()
@@ -315,6 +316,7 @@ def _reset_transient_builder_state() -> None:
     session.pop("endpoint_bindings", None)
     session.pop("builder_upload_id", None)
     session.pop("runner_presentation", None)
+    session.pop("builder_answered_steps", None)
     reset_spec()
 
 
@@ -325,11 +327,27 @@ def _semantic_runtime_dir_for_id(upload_id: object) -> Path | None:
 
 
 def _builder_review_payload(steps: list[object], builder_form_state: dict[str, object], builder_endpoint_state: dict[str, object]) -> dict[str, object]:
-    items = _builder_review_state(steps, builder_form_state, builder_endpoint_state)
+    items = _builder_review_state(steps, builder_form_state, builder_endpoint_state, _answered_steps())
     return {"items": items, "ready": all(bool(item.get("completed")) for item in items)}
 
 
-def _builder_review_state(steps: list[object], builder_form_state: dict[str, object], builder_endpoint_state: dict[str, object]) -> list[dict[str, str | bool]]:
+def _answered_steps() -> set[str]:
+    """The Builder questions this session has actually answered.
+
+    The review used to fall back to a question's first choice when nothing was
+    selected, and mark it complete. A person who answered one question saw all
+    five ticked with answers they never gave, two of which did not match the
+    agent they were about to run.
+    """
+    stored = session.get("builder_answered_steps")
+    return set(stored) if isinstance(stored, list) else set()
+
+
+def _record_answered_step(step_key: str) -> None:
+    session["builder_answered_steps"] = sorted(_answered_steps() | {step_key})
+
+
+def _builder_review_state(steps: list[object], builder_form_state: dict[str, object], builder_endpoint_state: dict[str, object], answered_steps: set[str] | None = None) -> list[dict[str, str | bool]]:
     choice_state = builder_form_state.get("choices") if isinstance(builder_form_state.get("choices"), dict) else {}
     values_state = builder_form_state.get("values") if isinstance(builder_form_state.get("values"), dict) else {}
     endpoint_requirements = _endpoint_requirements_by_step(builder_endpoint_state)
@@ -343,7 +361,7 @@ def _builder_review_state(steps: list[object], builder_form_state: dict[str, obj
             if choice.label == selected_label and choice.available:
                 selected_choice = choice
                 break
-        if selected_choice is None:
+        if selected_choice is None and step.key in (answered_steps or set()):
             selected_choice = next((choice for choice in step.choices if choice.available), None)
         errors = []
         if selected_choice is None:

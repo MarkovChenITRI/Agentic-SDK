@@ -95,7 +95,10 @@ def default_spec(*, workflow_name: str = DEFAULT_WORKFLOW_NAME) -> dict[str, Any
         "action": {
             "module": "DirectAnswerAction",
             "params": {
-                "output_format": "free_text",
+                # An untouched spec answers directly from what was retrieved.
+                # It claimed "free_text" here while holding DirectAnswerAction,
+                # so the Builder displayed an answer to Q4 nobody had given.
+                "output_format": None,
                 "system_prompt": None,
                 "tools": [],
                 "tool_choice": None,
@@ -344,15 +347,15 @@ def apply_builder_step(spec: dict[str, Any], step_key: str, choice_label: object
                 "plan": {"module": None, "params": {"strategy": None, "system_prompt": existing_plan.get("params", {}).get("system_prompt")}},
             }
         elif choice in ("keyword", "semantic"):
+            # Choosing where answers come from does not also choose a planner.
+            # It used to add NextStepPlan, which needs a model endpoint the
+            # Builder never asked anyone to bind, so the run failed. Without it
+            # the workflow simply always looks things up, which is what the
+            # keyword option says it does.
             retrieve_module = "KeywordRetrieve" if choice == "keyword" else "SemanticRetrieve"
-            current_strategy = existing_plan.get("params", {}).get("strategy")
             return {
                 **spec,
                 "retrieve": {**spec.get("retrieve", {}), "module": retrieve_module},
-                "plan": {
-                    "module": "NextStepPlan",
-                    "params": {"strategy": current_strategy or "RouteBySupport", "system_prompt": existing_plan.get("params", {}).get("system_prompt")},
-                },
             }
         return spec
 
@@ -601,11 +604,23 @@ def spec_to_form_state(spec: dict[str, Any], runner_presentation: dict[str, Any]
     # Q3 choices
     retrieve_policy_choice = {"KeywordRetrieve": "keyword", "SemanticRetrieve": "semantic"}.get(retrieve_module, "none")
 
-    # Q4 choices
-    output_format = action_params.get("output_format") or ("interactive" if action_module == "ToolCallAction" else "free_text")
+    # Q4 choices. DirectAnswerAction is what an untouched spec holds and Q4
+    # offers no choice for it, so report nothing rather than naming a choice the
+    # agent does not have.
+    if action_params.get("output_format"):
+        output_format = str(action_params["output_format"])
+    elif action_module == "ToolCallAction":
+        output_format = "interactive"
+    elif action_module == "GenerativeAction":
+        output_format = "free_text"
+    else:
+        output_format = ""
 
-    # Q5 choices
-    if reflect_module and reflect_params.get("on_failure") == "retry_plan":
+    # Q5 choices. Both answers install a reflect module, so a spec without one
+    # has not answered this question.
+    if not reflect_module:
+        failure_policy_choice = ""
+    elif reflect_params.get("on_failure") == "retry_plan":
         failure_policy_choice = "retry"
     else:
         failure_policy_choice = "handoff"

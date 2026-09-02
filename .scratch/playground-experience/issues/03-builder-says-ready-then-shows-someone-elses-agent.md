@@ -4,9 +4,9 @@
 
 **Blocked by:** 無，可立即開始
 
-**Status:** needs-info
+**Status:** done
 
-- [ ] 待設計
+- [x] 待設計
 
 ## 使用者遭遇的事
 
@@ -46,3 +46,15 @@ Builder 也因此算不出需要綁定模型（它是照 spec 算的），於是
 兩個選項的差別是「Builder 是一份要填完的表單，還是一組可以只改一格的預設值」。這是產品定位，不是實作細節。
 
 **與票 05 一起決定。**
+
+## 完成記錄
+
+**編造答案的地方不是退回邏輯，是有損的對應。** `spec_to_form_state` 在 spec 是 `DirectAnswerAction` 時回報 Q4 =「純文字回覆」，在沒有 reflect 時回報 Q5 =「先停下來」。兩者都是 spec 表達不了的狀態，卻硬給了一個答案。
+
+而且 `default_spec()` 自己就矛盾：action 是 `DirectAnswerAction`，params 裡卻寫著 `output_format: "free_text"`。
+
+修法：spec 表達不了的狀態就回報空值，畫面顯示「尚未選擇」。預設的 `output_format` 改成 `None`。
+
+**Q2 維持顯示答案是對的，不是漏改。** 它的預設 `PassThroughPerceive` 在 Q2 有對應的選項，而 agent 真的那樣做——顯示它是誠實的。編造的只有 Q4 和 Q5。
+
+**沒有做的事：** 沒有為 Q4 加一個對應 `DirectAnswerAction` 的選項。那會改動產品的問題集，而我看不到 UI 沒辦法驗證渲染結果。現況是誠實的（說「尚未選擇」），但使用者仍然沒辦法明確選擇「直接回傳查到的內容」。這是剩下的工作。

@@ -118,8 +118,7 @@ def get_builder_steps() -> list[BuilderStep]:
             "",
             (
                 BuilderChoice("in_context", "即時問答", "只根據目前這次對話內容產生問答，不參考先前互動。"),
-                BuilderChoice("workflow_recall_preview", "承接前文問答", "問答時需要接續先前互動內容或狀態。", available=False, badge="預覽中"),
-            ),
+                            ),
             True,
         ),
         BuilderStep(

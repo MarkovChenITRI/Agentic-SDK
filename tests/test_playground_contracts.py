@@ -2109,3 +2109,83 @@ def test_spec_retrieve_fallback_reaches_the_retrieve_module():
     workflow = build_workflow_with_stub_endpoints(spec)
 
     assert workflow.retrieve._fallback == "沒有支援資料。"
+
+
+def _run_without_bindings(spec):
+    return runner_service.run_agent(spec, message="保固期限是多久？")
+
+
+def test_missing_model_binding_names_the_role_that_needs_one():
+    spec = build_spec(("output_format", "free_text"))
+
+    result = _run_without_bindings(spec)
+
+    assert result["status"] == "configuration_error"
+    assert "還沒有指定要用哪個模型" in result["final_message"]
+    assert result["detail"]
+
+
+def test_semantic_agent_without_documents_says_to_upload_them():
+    spec = build_spec(("retrieve_policy", "semantic"), ("output_format", "free_text"))
+
+    result = _run_without_bindings(spec)
+
+    assert "還沒有上傳任何文件" in result["final_message"] or "還沒有指定要用哪個模型" in result["final_message"]
+
+
+def test_every_failure_carries_a_detail_field():
+    """The generic message used to arrive with detail set to null."""
+    spec = build_spec(("output_format", "free_text"))
+
+    result = _run_without_bindings(spec)
+
+    assert result.get("detail")
+
+
+def test_a_keyword_agent_runs_without_any_model_binding():
+    """Choosing a lookup table must not drag in a model the Builder never asked for."""
+    spec = build_spec(
+        ("retrieve_policy", "keyword"),
+        ("retrieve", {"keyword_pairs": "保固 = 本產品保固十二個月。"}),
+    )
+
+    assert (spec.get("plan") or {}).get("module") is None
+    assert model_endpoints.endpoint_state(spec, {})["requirements"] == []
+
+    result = runner_service.run_agent(spec, message="保固多久？")
+
+    assert result["status"] == "completed"
+    assert "十二個月" in result["final_message"]
+
+
+def test_builder_does_not_claim_a_question_was_answered_when_it_was_not():
+    """A person who answers one question used to see all five ticked.
+
+    Two of the displayed answers did not match the agent about to run, and the
+    Builder then said it was ready to use.
+    """
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    with app.test_client() as client:
+        client.post("/playground/start/anonymous")
+        response = client.post(
+            "/playground/builder/state",
+            json={"step": "retrieve_policy", "choice": "keyword"},
+        )
+
+    payload = response.get_json()
+    answered = {i["step_key"]: i for i in payload["builder_review_state"]}
+
+    assert answered["retrieve_policy"]["answer"] != "尚未選擇"
+
+    # Q2's default is PassThroughPerceive, which the question can express, so
+    # showing it is truthful: that is what the agent does.
+    assert answered["input_type"]["answer"] == "直接傳遞文字"
+
+    # Q4 and Q5 cannot express what an untouched spec holds — DirectAnswerAction
+    # and no reflect module — so they must say so rather than name a choice.
+    for unanswerable in ("output_format", "failure_policy"):
+        assert answered[unanswerable]["answer"] == "尚未選擇", unanswerable
+        assert answered[unanswerable]["completed"] is False, unanswerable
+    assert payload["builder_review_ready"] is False

@@ -17,7 +17,7 @@ from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, Gates, 
 from agentic_sdk.core.events import WORKFLOW_MODULE_NAMES, default_event_label
 
 from playground.models import RunnerSceneProfile
-from playground.services.model_endpoints import MissingEndpointCredentials, endpoint_params_for_role
+from playground.services.model_endpoints import MissingEndpointBinding, MissingEndpointCredentials, endpoint_params_for_role
 from playground.services.runner_conversation import RunnerConversationState, RunnerConversationTurn
 from playground.services.source_builder import BuilderSourceConfig
 from playground.services.workflow_reachability import reachable_workflow_roles
@@ -166,15 +166,30 @@ def run_agent(
             "scene_profile": asdict(scene_profile),
             "source_execution": source_execution,
         }
-    except Exception as exc:
+    except MissingEndpointBinding as exc:
+        message = f"{exc.role_label}還沒有指定要用哪個模型。請回到設定頁面，為它選一個模型端點再試一次。"
         fallback = get_runner_demo_result(scene_profile)
         return {
-            "status": "fallback",
-            "final_message": "暫時無法產生回覆。",
-            "error": "暫時無法產生回覆。",
+            "status": "configuration_error",
+            "final_message": message,
+            "error": message,
             "detail": str(exc),
-            "debug_messages": ["執行：Workflow 建立或模組執行失敗，Action 沒有成功產生主體回覆。"],
-            "process_events": [_process_event("workflow", "執行流程", "流程建立或工具執行時發生問題，尚未產生主回覆。")],
+            "debug_messages": [f"設定：{exc.role_label} 沒有綁定模型端點，Workflow 尚未執行 Action。"],
+            "process_events": [_process_event("endpoint", "檢查模型端點", message)],
+            "result": fallback,
+            "scene_profile": asdict(scene_profile),
+            "source_execution": source_execution,
+        }
+    except Exception as exc:
+        message = _configuration_hint(config) or "暫時無法產生回覆。"
+        fallback = get_runner_demo_result(scene_profile)
+        return {
+            "status": "configuration_error" if message != "暫時無法產生回覆。" else "fallback",
+            "final_message": message,
+            "error": message,
+            "detail": f"{type(exc).__name__}: {exc}",
+            "debug_messages": [f"執行：{message}"],
+            "process_events": [_process_event("workflow", "執行流程", message)],
             "result": fallback,
             "scene_profile": asdict(scene_profile),
             "source_execution": source_execution,
@@ -235,6 +250,19 @@ def run_agent(
             tool_submission_context=tool_submission_context,
         ),
     }
+
+
+def _configuration_hint(config: BuilderSourceConfig) -> str | None:
+    """Name the setting a run is missing, when the configuration shows which one.
+
+    Every failure used to read "暫時無法產生回覆。" with no detail, whether the
+    agent was missing a knowledge file, an API contract, or a model binding.
+    """
+    if config.retrieve_module == "SemanticRetrieve" and not config.semantic_support_files:
+        return "這個 Agent 設定成依參考文件回答，但還沒有上傳任何文件。請先在設定頁面上傳，再試一次。"
+    if config.action_module == "ToolCallAction" and not config.action_tools:
+        return "這個 Agent 設定成顯示互動元件，但還沒有設定可互動元件 API。請先補上，再試一次。"
+    return None
 
 
 def _conversation_memory_for_execution(

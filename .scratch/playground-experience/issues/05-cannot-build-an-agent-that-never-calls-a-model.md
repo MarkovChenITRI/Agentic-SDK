@@ -4,9 +4,9 @@
 
 **Blocked by:** 無，可立即開始
 
-**Status:** needs-info
+**Status:** done
 
-- [ ] 待設計
+- [x] 待設計
 
 ## 使用者遭遇的事
 
@@ -35,3 +35,21 @@ Q3 的關鍵字選項寫著「**用 key/value 對照表命中固定內容**」�
 傾向 A：關鍵字對照表的整個賣點就是便宜、快、可預測。硬要配一次模型呼叫等於把那個賣點抵銷掉。但這是產品定位。
 
 **與票 03 一起決定**——票 03 的選項 B（把預設套進 spec）會讓每個 agent 都變成 `GenerativeAction`，那會直接排除掉零模型的可能。
+
+## 完成記錄
+
+選檢索方式不再自動裝上 `NextStepPlan`。流程變成 perceive → retrieve → action，每一輪都查表，不判斷——那正是關鍵字選項寫的「用 key/value 對照表命中固定內容」。
+
+實測結果：
+
+```
+需要綁定的模型：（一個都不用）
+使用者 > 保固多久？
+Agent  > 保固十二個月。
+```
+
+**`failure_policy = retry` 仍然會裝 plan**，那是必要的：`on_failure="retry_plan"` 會把流程送回 plan，沒有 plan 模組就會以「unknown module」中止。
+
+**副作用是連 `output_format=free_text` 的 agent 也少一個模型角色**——原本要綁 action 和 plan，現在只要 action。
+
+**沒有做的事：** Q4 仍然只有兩個需要模型的選項，所以走完整個 wizard 還是做不出零模型 agent；只有在不回答 Q4 的情況下才拿得到 `DirectAnswerAction`。與票 03 是同一件剩餘工作。

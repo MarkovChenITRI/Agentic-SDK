@@ -135,6 +135,9 @@ def test_generated_plan_source_keeps_user_configured_retrieve_description():
     source = build_source(
         ("retrieve_policy", "semantic"),
         ("retrieve", {"semantic_search_goal": "查找產品規格與限制"}),
+        # retrieve_description reaches the planner, and a planner only exists
+        # when the failure policy asks to re-plan.
+        ("failure_policy", "retry"),
     )
 
     assert "retrieve_description=" in source
