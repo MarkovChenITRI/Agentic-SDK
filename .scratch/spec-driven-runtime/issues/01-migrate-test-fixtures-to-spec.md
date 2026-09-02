@@ -4,7 +4,7 @@
 
 **Blocked by:** 無，可立即開始
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] 所有以程式碼文字建構的 fixture，改為先用 Builder 的逐步套用函式疊出 spec，再編譯成現有簽名需要的字串
 - [ ] 測試的斷言一行未改
