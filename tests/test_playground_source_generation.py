@@ -1,7 +1,4 @@
-import pytest
-
 from agentic_sdk.core.events import default_events_schema
-from playground.services.source_builder import get_workflow_summary
 from playground.services.runner_service import _process_event_for_workflow_event, run_agent
 from playground.services.workflow_spec import (
     apply_builder_step,

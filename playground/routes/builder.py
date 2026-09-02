@@ -72,7 +72,6 @@ def builder():
     steps = get_builder_steps()
     if _should_reset_transient_builder_state():
         _reset_transient_builder_state()
-    # Use v2 spec if present in session; fall back to python_source
     spec = current_spec()
     python_source = compile_python_source(spec)
     endpoint_selections = _normalize_builder_endpoint_selections()
@@ -315,10 +314,8 @@ def _reset_transient_builder_state() -> None:
     session.pop("builder_has_user_config", None)
     session.pop("endpoint_bindings", None)
     session.pop("builder_upload_id", None)
-    session.pop("workflow_spec", None)
     session.pop("runner_presentation", None)
     reset_spec()
-    session["workflow_spec"] = default_spec()
 
 
 def _semantic_runtime_dir_for_id(upload_id: object) -> Path | None:

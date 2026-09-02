@@ -14,7 +14,7 @@ from playground.services.runner_service import SemanticRuntime, get_default_scen
 from playground.services.semantic_runtime import runtime_root, source_files_dir
 from playground.services.session_spec import current_spec, store_spec
 from playground.services.source_builder import _DEFAULT_RUNNER_DESCRIPTION, get_workflow_summary
-from playground.services.workflow_spec import apply_builder_step, compile_python_source, spec_to_config
+from playground.services.workflow_spec import apply_builder_step, spec_to_config
 
 
 runner_bp = Blueprint("runner", __name__, url_prefix="/playground/run")
@@ -37,9 +37,9 @@ def runner():
     mode_context = get_mode_context()
     scene_profile = get_default_scene_profile()
     demo_result = get_runner_demo_result(scene_profile)
-    workflow_summary = get_workflow_summary(current_spec())
-    config = spec_to_config(current_spec())
-    spec = session.get("workflow_spec")
+    spec = current_spec()
+    workflow_summary = get_workflow_summary(spec)
+    config = spec_to_config(spec)
     runner_presentation = session.get("runner_presentation")
     starter_questions = _starter_questions_from_runner_state(config, runner_presentation)
     auto_save_after_login = bool(session.pop("pending_runner_auto_save", False)) and mode_context.can_save
@@ -50,7 +50,7 @@ def runner():
         scene_profile=scene_profile,
         demo_result=demo_result,
         workflow_summary=workflow_summary,
-        workflow_description=(str(spec.get("description") or "") if isinstance(spec, dict) else config.task_goal or ""),
+        workflow_description=str(spec.get("description") or ""),
         workflow_description_placeholder=_DEFAULT_RUNNER_DESCRIPTION,
         runner_greeting=_runner_greeting(),
         starter_questions=starter_questions,

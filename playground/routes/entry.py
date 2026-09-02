@@ -9,7 +9,7 @@ from playground.services.aihub_client import AiHubCredentials, credentials_for_t
 from playground.services.aihub_session import active_credentials
 from playground.services.deep_link import apply_aihub_deep_link
 from playground.services.session_spec import reset_spec
-from playground.services.workflow_spec import compile_python_source, default_spec, semantic_bundle_required, validate_spec
+from playground.services.workflow_spec import semantic_bundle_required, validate_spec
 
 
 entry_bp = Blueprint("entry", __name__)

@@ -1347,7 +1347,7 @@ def test_aihub_login_route_authenticates_without_saving(monkeypatch):
     with app.test_client() as client:
         client.post("/playground/start/anonymous", base_url="https://playground.example")
         with client.session_transaction(base_url="https://playground.example") as session:
-            session["workflow_spec"] = default_spec()
+            session["workflow_spec"] = apply_builder_step(default_spec(), "name", "Draft in progress")
         response = client.post(
             "/playground/aihub/auth/login",
             base_url="https://playground.example",
@@ -1363,7 +1363,7 @@ def test_aihub_login_route_authenticates_without_saving(monkeypatch):
     assert response.json["authenticated"] is True
     assert saved_mode == "manual_auth"
     assert saved_username == "creator"
-    assert saved_spec["workflow_name"] == "default"
+    assert saved_spec["workflow_name"] == "Draft in progress"
     assert pending_auto_save is None
 
 

@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agentic_sdk.core.events import normalize_events_schema
 from agentic_sdk.defaults import DEFAULT_NO_MATCHING_ENTRIES_MESSAGE, DEFAULT_RETRIEVED_CONTENT_KEY, SEMANTIC_RETRIEVE_DEFAULT_SAVED_PATH
 from playground.models import BuilderChoice, BuilderStep, WorkflowSummary
 from playground.services.workflow_reachability import reachable_workflow_roles

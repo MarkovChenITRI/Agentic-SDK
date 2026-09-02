@@ -1976,61 +1976,6 @@ def test_runner_metadata_routes_answer_for_a_session_that_only_has_python_source
     assert metadata.get_json()["description"] == "再寫一次說明。"
 
 
-# The three settings the spec path newly honours. Each is a value the Builder
-# collected and the compiled source silently dropped, so the runtime used a
-# module default instead. Wiring the remaining four is a separate ticket.
-_SETTINGS_THE_SPEC_PATH_NOW_HONOURS = {"perceive_importance", "retrieve_fallback", "retrieve_top_k"}
-
-
-def test_spec_path_and_compiled_source_path_agree_except_on_dropped_settings():
-    from dataclasses import fields
-
-    sequences = {
-        "text_image with perceive parameters": (
-            ("input_type", "text_image"),
-            ("perceive", {"welcome_message": "歡迎", "importance": "4.0"}),
-        ),
-        "keyword with items and fallback": (
-            ("retrieve_policy", "keyword"),
-            ("retrieve", {"keyword_pairs": "保固 = 說明", "fallback": "沒有資料。"}),
-        ),
-        "semantic with a search goal": (
-            ("retrieve_policy", "semantic"),
-            ("retrieve", {"top_k": "9", "semantic_search_goal": "查規格"}),
-        ),
-        "semantic with no parameters": (("retrieve_policy", "semantic"),),
-        "keyword with no parameters": (("retrieve_policy", "keyword"),),
-        "interactive action": (
-            ("output_format", "interactive"),
-            (
-                "action",
-                {
-                    "response_instruction": "請確認",
-                    "api_method": "POST",
-                    "api_url": "https://example.com/confirm",
-                    "component_fields": "是否確認 = 說明（資料類型：是/否)",
-                },
-            ),
-        ),
-        "text with retry": (
-            ("input_type", "text"),
-            ("output_format", "free_text"),
-            ("failure_policy", "retry"),
-        ),
-    }
-
-    for name, steps in sequences.items():
-        spec = build_spec(*steps)
-        from_source = spec_to_config(spec)
-        from_spec = spec_to_config(spec)
-        differing = {
-            field.name
-            for field in fields(from_source)
-            if getattr(from_source, field.name) != getattr(from_spec, field.name)
-        }
-        assert differing <= _SETTINGS_THE_SPEC_PATH_NOW_HONOURS, f"{name}: {differing}"
-
-
 def test_config_load_route_leaves_the_session_running_the_loaded_agent(monkeypatch):
     """The load route used to store AI Hub's source without recompiling it.
 
@@ -2090,7 +2035,10 @@ def test_spec_gates_reach_the_workflow():
 
 
 def test_spec_gates_fall_back_to_the_sdk_defaults_when_unset():
-    workflow = runner_service.build_workflow(build_spec(), {})
+    spec = build_spec()
+    del spec["gates"]
+
+    workflow = runner_service.build_workflow(spec, {})
 
     assert workflow.gates.max_node_hops == Gates().max_node_hops
     assert workflow.gates.max_revisit == Gates().max_revisit
@@ -2127,3 +2075,37 @@ def test_unknown_memory_kind_is_rejected_rather_than_ignored():
 
     with pytest.raises(ValueError, match="unknown memory kind"):
         runner_service.build_workflow(spec, {})
+
+
+def build_workflow_with_stub_endpoints(spec):
+    """Build a workflow with every model role bound, so module wiring is observable."""
+    selections = {role: "gpt-54" for role in ("perceive", "plan", "action", "reflect")}
+    selections["retrieve"] = "embedded-large"
+    return runner_service.build_workflow(spec, selections)
+
+
+def test_spec_perceive_importance_reaches_the_perceive_module():
+    spec = build_spec(("input_type", "text"), ("perceive", {"importance": "4.0"}))
+
+    workflow = build_workflow_with_stub_endpoints(spec)
+
+    assert workflow.perceive._importance == 4.0
+
+
+def test_spec_retrieve_top_k_reaches_the_retrieve_module():
+    spec = build_spec(("retrieve_policy", "semantic"), ("retrieve", {"top_k": "9"}))
+
+    workflow = build_workflow_with_stub_endpoints(spec)
+
+    assert workflow.retrieve._top_k == 9
+
+
+def test_spec_retrieve_fallback_reaches_the_retrieve_module():
+    spec = build_spec(
+        ("retrieve_policy", "keyword"),
+        ("retrieve", {"keyword_pairs": "保固 = 說明", "fallback": "沒有支援資料。"}),
+    )
+
+    workflow = build_workflow_with_stub_endpoints(spec)
+
+    assert workflow.retrieve._fallback == "沒有支援資料。"

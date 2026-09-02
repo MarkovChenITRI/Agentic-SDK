@@ -230,7 +230,9 @@ def _load_v2_contract_into_session(loaded: dict) -> None:
     """Populate session spec and runner_presentation from a loaded v2 contract."""
     spec = loaded.get("workflow_spec")
     if isinstance(spec, dict) and spec.get("version") == "2":
-        session["workflow_spec"] = spec
+        # Validated on the way in: AI Hub is external, and an out-of-range gate
+        # or unknown memory kind would otherwise reach the runtime unchecked.
+        session["workflow_spec"] = validate_spec(spec)
         pres = loaded.get("runner_presentation")
         session["runner_presentation"] = pres if isinstance(pres, dict) else default_runner_presentation()
         session.pop("builder_form_state", None)

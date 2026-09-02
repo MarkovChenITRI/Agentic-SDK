@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 
-from flask import Blueprint, Response, abort, session
+from flask import Blueprint, Response, abort
 
 from playground.services.mode_context import get_mode_context
 from playground.services.session_spec import current_spec

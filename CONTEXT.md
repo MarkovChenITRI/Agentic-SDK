@@ -24,5 +24,7 @@ agent — `run_agent` — rather than for the format it reads.
 ### Not an agent
 
 - The **compiled Python source** is an export of a spec, produced for people to
-  read and for AI Hub to store. It is never read back.
+  read and for AI Hub to store. Nothing reads it back to recover an agent. The
+  preview does parse it, but only to split the import block from the workflow
+  block for display.
 - A **Workflow** is one execution of an agent, holding the run's state.
