@@ -77,8 +77,42 @@ GET  /api/playground/agents/{id}/bundle/load          400   AGENT_PLAYGROUND_CRE
 
 `tests/test_playground_contracts.py::test_a_shared_agent_says_its_documents_are_missing` 釘住這件事，反向驗證過會紅。
 
-## 剩下的（需要 AI Hub 端）
+## 剩下的（需要 AI Hub 端）— 依設計文件更正
 
-**這只改了字，沒有讓 Agent 拿回它的文件。** 部署後匿名點進 Timothy 仍然答不出傷口照護步驟——只是它現在會老實說原因，而不是叫使用者去問庫存。
+查了 `eosl-aihub-pages` 的交握設計文件，我先前兩個判斷是錯的：
 
-要真正修好，需要先確認 bundle 有沒有被存下來（`semantic_bundle_ref` 十五個全空），再開放公開取得路徑。這兩件都不在本 repo。
+**錯誤一：我說「bundle 可能沒被存下來」。** 沒有根據。`playground-file-save.md` 寫明固定儲存位置是 `playground-agents/{agent_id}/bundle/agentic_playground_bundle.zip`——**路徑由 agent_id 推導**。程式碼也吻合：`restore_runtime_bundle` 只吃 `agent_id`，從頭到尾不讀 `semantic_bundle_ref`。那個欄位是空的不代表檔案不在。
+
+**錯誤二：我把匿名拿不到 bundle 講成缺陷。** `connection-and-responsibility.md` 的「Runner 唯讀模式與 AI Hub 保存邊界」明確定義：
+
+> 非擁有者或未登入使用者從 Gallery 進入工作流時……由 Playground 依 `owner` 與 `agentId` 載入**公開 config**。這條路徑不需要 AI Hub 登入，也不提供保存、重新載入為擁有者或其他擁有者限定操作。
+
+唯讀路徑的設計範圍就是 config。bundle 的存取在 `playground-file-save.md` 裡兩條流程都寫著「AI Hub **驗證使用者權限**後」簽發短效連結——它是擁有者操作。
+
+所以匿名拿不到文件不是壞掉，是**設計上沒有涵蓋這個情境**。
+
+## 真正的落差
+
+同一份文件把 Gallery 的匿名入口定位成「使用者**試用**別人的 workflow」。但語意檢索的 Agent 沒有文件就試不了——十五個 agent 裡八個是語意檢索。所以「試用」在最常見的 Agent 型態上是空的。
+
+`semantic_bundle_ref` 也印證了這個設計缺口：`save_contract_v2` 有這個參數、公開 config API 也回傳它，但唯一的呼叫端 `aihub.py:121` 沒有傳，所以十五筆全空。讀的那一側準備好了，寫的那一側沒接上——不過就算接上也不夠，見下。
+
+## AI Hub 要補什麼
+
+需要一個公開的 bundle 取得端點，比照既有的 `config/public/load`：
+
+```
+POST /api/playground/agents/{agent_id}/bundle/public/load
+```
+
+權限判斷不看使用者，看**這個 Agent 是不是已選 Gallery 類型**——就是 `PUT /api/me/agents/{id}/gallery-type` 設定的那個值，文件寫明「只有選成智慧大健康或智慧工廠次系統的 Agent 才會出現在公開 Gallery」。已經公開展示的 Agent，它的參考文件本來就跟著公開了。
+
+**只給 `semantic_bundle_ref` 不夠。** 儲存帳戶 `agenticsdk` 的 `allowBlobPublicAccess` 是 `False`，容器 `playground-agent-files` 不可匿名讀。所以一定要 AI Hub 簽發短效下載連結，光有 blob 路徑沒有用。
+
+Playground 這側要改的很小：`aihub_bridge.start_runner_bridge_session` 的 `read` 分支比照 `edit` 分支呼叫還原，只是改用公開端點、不帶 credentials。等 AI Hub 那條路開通再接。
+
+## 登入路徑的狀態
+
+沒有發現問題。`entry.py:99`（handoff 進 Runner）和 `entry.py:184`（選 Agent）兩處都有 `_restore_selected_agent_bundle`，而且還原失敗會擋下來報錯，不會靜靜地用空索引跑。
+
+**但我沒有實測。** 那要用 Agent 擁有者的帳號登入走一次，我沒有帳號，也不會去資料庫撈使用者密碼。
