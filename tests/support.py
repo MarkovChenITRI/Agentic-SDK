@@ -194,10 +194,21 @@ def build_spec(*steps: tuple[str, object]) -> dict:
     Each step is a ``(step_key, choice)`` pair, applied to the default spec in
     order. Use this wherever a test drives the execution tier, and
     :func:`build_source` where a test asserts on the exported Python text.
+
+    Q4 is answered for you when the steps do not answer it, because an agent
+    whose output format is unchosen is no longer runnable — the Builder used to
+    fill that in silently, which is how an unfinished agent could reach the
+    gallery. The stand-in is the answer that needs no model, so a test about
+    gates or memory does not accidentally require a binding. Pass an
+    ``output_format`` step to choose otherwise, or reach for
+    :func:`~playground.services.workflow_spec.default_spec` to hold a spec with
+    the question genuinely unanswered.
     """
     from playground.services.workflow_spec import apply_builder_step, default_spec
 
     spec = default_spec()
+    if not any(step_key == "output_format" for step_key, _ in steps):
+        spec = apply_builder_step(spec, "output_format", "direct")
     for step_key, choice in steps:
         spec = apply_builder_step(spec, step_key, choice)
     return spec

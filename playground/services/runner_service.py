@@ -166,6 +166,20 @@ def run_agent(
             "scene_profile": asdict(scene_profile),
             "source_execution": source_execution,
         }
+    except UnansweredBuilderQuestion as exc:
+        message = f"這個 Agent 還沒設定完成：{exc.question} 尚未選擇。請回到設定頁面把它選好。"
+        fallback = get_runner_demo_result(scene_profile)
+        return {
+            "status": "configuration_error",
+            "final_message": message,
+            "error": message,
+            "detail": f"UnansweredBuilderQuestion: {exc.question}",
+            "debug_messages": [f"設定：{exc.question} 尚未選擇，Workflow 未執行。"],
+            "process_events": [_process_event("builder", "檢查設定", message)],
+            "result": fallback,
+            "scene_profile": asdict(scene_profile),
+            "source_execution": source_execution,
+        }
     except MissingEndpointBinding as exc:
         message = f"{exc.role_label}還沒有指定要用哪個模型。請回到設定頁面，為它選一個模型端點再試一次。"
         fallback = get_runner_demo_result(scene_profile)
@@ -1380,6 +1394,14 @@ def _warm_semantic_retrieve(module) -> None:
         ensure_ready()
 
 
+class UnansweredBuilderQuestion(Exception):
+    """A Builder question the person never answered, reached at run time."""
+
+    def __init__(self, question: str) -> None:
+        super().__init__(question)
+        self.question = question
+
+
 def _action_from_config(config: BuilderSourceConfig, endpoint_selections: dict[str, str], reachable_roles: set[str]):
     from agentic_sdk.modules.action import DirectAnswerAction, GenerativeAction, ToolCallAction
 
@@ -1391,6 +1413,11 @@ def _action_from_config(config: BuilderSourceConfig, endpoint_selections: dict[s
         return ToolCallAction(system_prompt=config.action_prompt, tools=list(config.action_tools), tool_choice=config.action_tool_choice, **endpoint_params_for_role("action", endpoint_selections))
     if config.action_module == "CustomAction":
         return DirectAnswerAction(memory_key=config.custom_action_memory_key, fallback=config.custom_action_fallback, prefix=config.custom_action_prefix)
+    if config.action_module != "DirectAnswerAction":
+        # No module means Q4 was never answered. Running the lookup answer here
+        # anyway is the last place the Builder decided for the person: it made
+        # an unfinished agent look finished, all the way through to a reply.
+        raise UnansweredBuilderQuestion("Q4：最後回覆要怎麼呈現給使用者")
     return DirectAnswerAction(memory_key=config.direct_answer_memory_key, fallback=config.direct_answer_fallback, prefix=config.direct_answer_prefix)
 
 
