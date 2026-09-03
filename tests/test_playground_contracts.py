@@ -28,7 +28,7 @@ from playground.services.runner_conversation import RunnerConversationState
 from playground.services.aihub_bridge import store_loaded_agent
 from playground.services.source_builder import BuilderSourceConfig
 from support import build_source, build_spec
-from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec, spec_to_config
+from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec, spec_to_config, spec_to_form_state
 from playground.services.workflow_reachability import reachable_workflow_roles
 
 
@@ -2347,3 +2347,40 @@ def test_an_agent_with_nothing_to_look_up_keeps_the_planners_judgement():
     empty = spec_to_config(build_spec(("retrieve_policy", "semantic"), ("output_format", "free_text")))
 
     assert runner_service._has_retrievable_content(empty) is False
+
+
+def test_a_stored_output_format_does_not_speak_for_an_unanswered_question():
+    """The module answers Q4, not whatever output_format the spec carries.
+
+    Two agents reached the public gallery unable to answer anything, because
+    an untouched spec holds DirectAnswerAction *and* output_format free_text.
+    Reading the format first reported an answer nobody gave, the review page
+    saw five complete questions, and the Finish button lit up.
+    """
+    untouched = default_spec()
+    untouched["action"]["params"]["output_format"] = "free_text"
+
+    assert untouched["action"]["module"] is None
+    assert spec_to_form_state(untouched)["choices"]["output_format"] == ""
+
+    for choice, module in [("free_text", "GenerativeAction"), ("interactive", "ToolCallAction"), ("direct", "DirectAnswerAction")]:
+        answered = apply_builder_step(default_spec(), "output_format", choice)
+        assert answered["action"]["module"] == module, choice
+        assert spec_to_form_state(answered)["choices"]["output_format"] == choice, choice
+
+
+def test_the_finish_button_stays_shut_on_an_unanswered_wizard():
+    """The gate exists; it was the input that lied. This pins the whole chain."""
+    untouched = default_spec()
+    untouched["action"]["params"]["output_format"] = "free_text"
+
+    items = builder_routes._builder_review_state(
+        builder_routes.get_builder_steps(),
+        spec_to_form_state(untouched),
+        model_endpoints.endpoint_state(untouched, {}),
+        set(),
+    )
+    by_title = {str(i["step_title"])[:2]: i["completed"] for i in items}
+
+    assert by_title["Q4"] is False
+    assert all(i["completed"] for i in items) is False

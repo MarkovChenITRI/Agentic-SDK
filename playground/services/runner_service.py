@@ -1339,7 +1339,14 @@ def _plan_endpoint_role(endpoint_selections: dict[str, str], reachable_roles: se
     """
     if endpoint_selections.get("plan"):
         return "plan"
-    return "action" if "action" in reachable_roles else "perceive"
+    # Borrow only a binding that exists. Falling through to action when nothing
+    # is bound blamed the answering step for a planner nobody had configured,
+    # and an agent answering straight from a lookup table has no action binding
+    # to blame in the first place.
+    for role in ("action", "perceive"):
+        if role in reachable_roles and endpoint_selections.get(role):
+            return role
+    return "plan"
 
 
 def _retrieve_from_config(

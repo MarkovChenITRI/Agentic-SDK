@@ -36,6 +36,7 @@ from playground.services.source_builder import (
     ALLOWED_DIRECT_RESULT_KEYS,
     INTERACTIVE_TOOL_POLICY,
     ALLOWED_ENTRY_MODULES,
+    DIRECT_ANSWER_OUTPUT_CHOICES,
     FREE_TEXT_OUTPUT_CHOICES,
     INTERACTIVE_OUTPUT_CHOICES,
     TOOL_CALL_OUTPUT_CHOICES,
@@ -93,11 +94,12 @@ def default_spec(*, workflow_name: str = DEFAULT_WORKFLOW_NAME) -> dict[str, Any
             "params": {"strategy": None, "system_prompt": None},
         },
         "action": {
-            "module": "DirectAnswerAction",
+            # No module until Q4 is answered. A default that names a real module
+            # is indistinguishable from a choice, and DirectAnswerAction runs
+            # without a model, so an unfinished agent looked finished and needed
+            # nothing bound — which is how two empty agents reached the gallery.
+            "module": None,
             "params": {
-                # An untouched spec answers directly from what was retrieved.
-                # It claimed "free_text" here while holding DirectAnswerAction,
-                # so the Builder displayed an answer to Q4 nobody had given.
                 "output_format": None,
                 "system_prompt": None,
                 "tools": [],
@@ -239,9 +241,9 @@ def _apply_plan(spec: dict, raw: object) -> None:
 def _apply_action(spec: dict, raw: object) -> None:
     if not isinstance(raw, dict):
         return
-    module = str(raw.get("module") or "DirectAnswerAction")
-    if module not in _ALLOWED_ACTION_MODULES:
-        module = "DirectAnswerAction"
+    module = str(raw.get("module") or "") or None
+    if module is not None and module not in _ALLOWED_ACTION_MODULES:
+        module = None
     spec["action"]["module"] = module
     p = raw.get("params") or {}
     if not isinstance(p, dict):
@@ -255,7 +257,7 @@ def _apply_action(spec: dict, raw: object) -> None:
             params["output_format"] = None
         else:
             fmt = str(p["output_format"])
-            params["output_format"] = fmt if fmt in (FREE_TEXT_OUTPUT_CHOICES | INTERACTIVE_OUTPUT_CHOICES) else "free_text"
+            params["output_format"] = fmt if fmt in (FREE_TEXT_OUTPUT_CHOICES | INTERACTIVE_OUTPUT_CHOICES | DIRECT_ANSWER_OUTPUT_CHOICES) else "free_text"
     if "system_prompt" in p:
         params["system_prompt"] = clean_prompt(str(p["system_prompt"] or "")) or None
     if "tools" in p and isinstance(p["tools"], list):
@@ -367,9 +369,14 @@ def apply_builder_step(spec: dict[str, Any], step_key: str, choice_label: object
 
     if step_key == "output_format":
         choice = str(choice_label)
-        if choice not in (FREE_TEXT_OUTPUT_CHOICES | INTERACTIVE_OUTPUT_CHOICES):
+        if choice not in (FREE_TEXT_OUTPUT_CHOICES | INTERACTIVE_OUTPUT_CHOICES | DIRECT_ANSWER_OUTPUT_CHOICES):
             return spec
-        action_module = "ToolCallAction" if choice in TOOL_CALL_OUTPUT_CHOICES else "GenerativeAction"
+        if choice in TOOL_CALL_OUTPUT_CHOICES:
+            action_module = "ToolCallAction"
+        elif choice in DIRECT_ANSWER_OUTPUT_CHOICES:
+            action_module = "DirectAnswerAction"
+        else:
+            action_module = "GenerativeAction"
         existing_action_params = spec.get("action", {}).get("params", {})
         return {
             **spec,
@@ -446,7 +453,7 @@ def apply_builder_step(spec: dict[str, Any], step_key: str, choice_label: object
         existing_action = spec.get("action", {})
         existing_params = existing_action.get("params", {})
         new_params = dict(existing_params)
-        action_module = existing_action.get("module", "DirectAnswerAction")
+        action_module = existing_action.get("module") or ""
 
         action_prompt = action_prompt_from_payload(choice_label, existing_params.get("system_prompt"))
         payload_tools = tuple(tools_from_action_payload(choice_label)) if payload_has_interactive_contract(choice_label) else ()
@@ -495,7 +502,7 @@ def spec_to_config(spec: dict[str, Any]) -> BuilderSourceConfig:
 
     perceive_module = perceive.get("module") or "PassThroughPerceive"
     retrieve_module = retrieve.get("module") or "PassThroughRetrieve"
-    action_module = action.get("module") or "DirectAnswerAction"
+    action_module = action.get("module") or ""
     reflect_module = reflect.get("module") or None
     plan_strategy = plan_params.get("strategy") or None
 
@@ -593,7 +600,7 @@ def spec_to_form_state(spec: dict[str, Any], runner_presentation: dict[str, Any]
     plan_params = plan.get("params") or {}
 
     action = spec.get("action") or {}
-    action_module = action.get("module") or "DirectAnswerAction"
+    action_module = action.get("module") or ""
     action_params = action.get("params") or {}
 
     reflect = spec.get("reflect") or {}
@@ -613,12 +620,17 @@ def spec_to_form_state(spec: dict[str, Any], runner_presentation: dict[str, Any]
     # Q4 choices. DirectAnswerAction is what an untouched spec holds and Q4
     # offers no choice for it, so report nothing rather than naming a choice the
     # agent does not have.
-    if action_params.get("output_format"):
-        output_format = str(action_params["output_format"])
-    elif action_module == "ToolCallAction":
-        output_format = "interactive"
+    # The module decides, not the stored format. Answering Q4 always installs
+    # GenerativeAction or ToolCallAction, so any other module means the question
+    # was never answered — whatever output_format the spec happens to carry.
+    # Reading the format first let a stored "free_text" beside a DirectAnswer
+    # action report an answer nobody gave, and the review page passed it.
+    if action_module == "ToolCallAction":
+        output_format = str(action_params.get("output_format") or "interactive")
     elif action_module == "GenerativeAction":
-        output_format = "free_text"
+        output_format = str(action_params.get("output_format") or "free_text")
+    elif action_module == "DirectAnswerAction":
+        output_format = "direct"
     else:
         output_format = ""
 

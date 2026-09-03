@@ -42,6 +42,10 @@ INTERACTIVE_TOOL_POLICY = """互動元件使用原則：
 FREE_TEXT_OUTPUT_CHOICES = {"free_text", "natural", "bullets"}
 INTERACTIVE_OUTPUT_CHOICES = {"interactive", "table", "json", "custom_schema"}
 TOOL_CALL_OUTPUT_CHOICES = {"interactive"}
+# Answering with what was looked up, without a model in the loop. The module
+# has always existed and the README opens with it; Q4 just never offered it,
+# so an agent built on a lookup table had to buy a model call it did not need.
+DIRECT_ANSWER_OUTPUT_CHOICES = {"direct"}
 STRUCTURED_OUTPUT_CHOICES = {"table", "json", "custom_schema"}
 DEFAULT_RETRIEVE_DESCRIPTION = "依使用者設定的關鍵字參考資料判斷是否需要查詢。"
 DEFAULT_SEMANTIC_RETRIEVE_DESCRIPTION = "依上傳的參考文件查找與問題最相關的內容。"
@@ -158,6 +162,7 @@ def get_builder_steps() -> list[BuilderStep]:
             (
                 BuilderChoice("free_text", "純文字回覆", "設定 Agent 的角色、語氣、回答順序與限制。"),
                 BuilderChoice("interactive", "可互動元件", "沿用同一組回覆風格與規範，再追加抽取欄位與 API 提交規格。"),
+                BuilderChoice("direct", "直接回傳查到的內容", "把查到的內容原樣回覆，不經過模型改寫。查不到時回覆你設定的備援字句。"),
             ),
         ),
         BuilderStep(
