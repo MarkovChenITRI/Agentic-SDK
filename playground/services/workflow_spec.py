@@ -248,8 +248,14 @@ def _apply_action(spec: dict, raw: object) -> None:
         return
     params = spec["action"]["params"]
     if "output_format" in p:
-        fmt = str(p["output_format"] or "free_text")
-        params["output_format"] = fmt if fmt in (FREE_TEXT_OUTPUT_CHOICES | INTERACTIVE_OUTPUT_CHOICES) else "free_text"
+        # No output format is a state the spec can hold: nobody has answered
+        # Q4 yet. Defaulting it to free_text here wrote an answer the person
+        # never gave, and every AI Hub load runs through this.
+        if p["output_format"] is None:
+            params["output_format"] = None
+        else:
+            fmt = str(p["output_format"])
+            params["output_format"] = fmt if fmt in (FREE_TEXT_OUTPUT_CHOICES | INTERACTIVE_OUTPUT_CHOICES) else "free_text"
     if "system_prompt" in p:
         params["system_prompt"] = clean_prompt(str(p["system_prompt"] or "")) or None
     if "tools" in p and isinstance(p["tools"], list):

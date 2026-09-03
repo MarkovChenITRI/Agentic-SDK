@@ -238,7 +238,6 @@ def upload_builder_files():
 @builder_bp.post("/endpoints")
 def update_builder_endpoints():
     spec = current_spec()
-    python_source = compile_python_source(spec)
     payload = request.get_json(silent=True) or {}
     selections = normalize_endpoint_selections(current_spec(), payload.get("selections") or {})
     session["endpoint_bindings"] = selections

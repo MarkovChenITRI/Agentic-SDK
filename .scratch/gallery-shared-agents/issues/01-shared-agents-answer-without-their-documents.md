@@ -2,13 +2,13 @@
 
 **What to build:** 匿名點開畫廊裡的 Agent 時，它要嘛拿得到自己的參考文件，要嘛老實說拿不到。
 
-**Blocked by:** 取得文件那半需要 AI Hub 端的變更，見下。
+**Blocked by:** 無
 
-**Status:** ready-for-human
+**Status:** done
 
 - [x] 失敗訊息不再假設使用者在賣東西
 - [x] 分不出「查不到」與「根本沒有文件可查」時，不要說成前者
-- [ ] AI Hub 端開放公開 agent 的 bundle 取得路徑（不在本 repo）
+- [x] AI Hub 放寬既有 `bundle/load` 的權限判斷（在 `ai-hub-webui`，已部署）
 
 ## 使用者遭遇的事
 
@@ -116,3 +116,31 @@ POC 站，已確認可接受：已上架 Gallery 的 Agent，其參考文件可�
 ## 部署注意
 
 `ai-hub-webui` **不是 git repo**，這兩個檔案的修改沒有版本控制。部署 AI Hub 之前要確認這兩處有被帶上去。
+
+
+## 更正（2026-09-03）：不需要新端點，AI Hub 那半已完成
+
+我先前寫「AI Hub 要補一個公開 bundle 端點」，那是錯的判斷，而且我當時把「不在本 repo」當成做不到的理由。**`bundle/load` 早就存在**，卡的只是它對所有呼叫者一律要帳密；而 AI Hub 的原始碼就在 `~/Documents/GitHub/ai-hub-webui`（`R300-AI/ai-hub-webui`）。
+
+### AI Hub 側（commit `990b53c`，已部署）
+
+`load_public_agent_bundle` 問的問題和 `load_agent_bundle` 不同：不問「你是不是擁有者」，問「這個 Agent 有沒有上架 Gallery」。判斷沿用現成的 `read_public_playground_agent`。路由在請求完全沒宣稱身分時走公開分支；有宣稱身分的照原本驗證。
+
+部署後線上實測：
+
+```
+Timothy（已上架）    HTTP=200  簽出 blob 下載連結，實際下載到 66,962,477 bytes
+血液生化（未上架）    HTTP=404
+Origin 錯誤          HTTP=403
+帳密錯誤             HTTP=401
+```
+
+### Playground 側
+
+匿名的兩個入口都補上還原，且**還原失敗降級而非擋下**——擁有者被擋下能自己修，畫廊訪客只會拿到死頁。失敗原因留在 session，並在 agent 真的需要文件時進入 `debug_messages`。
+
+**兩個入口**：`aihub_bridge.start_runner_bridge_session` 的 read 分支，以及 `entry.py` 的 `navigate_from_shared_agent_to_runner`。後者是 code review 才發現的漏修——那四個 bundle/session helper 在兩個檔案裡各有一份逐字相同的副本，改一處就會漏另一處。收斂成一個模組列為後續工作，不在這次。
+
+### 已知的後續問題
+
+Timothy 的 bundle 是 67 MB。`restore_agent_bundle_zip` 每次還原都用新的 `upload_id`，**每個 session 一份解壓副本，沒有回收機制**。先前只有擁有者會走這條路，現在每個匿名訪客都會。需要以 agent_id 加 ETag 做快取，另開票追。

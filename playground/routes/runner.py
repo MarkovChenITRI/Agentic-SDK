@@ -14,7 +14,7 @@ from playground.services.runner_service import SemanticRuntime, get_default_scen
 from playground.services.semantic_runtime import runtime_root, source_files_dir
 from playground.services.session_spec import current_spec, has_spec, store_spec
 from playground.services.source_builder import DEFAULT_RUNNER_DESCRIPTION, get_workflow_summary
-from playground.services.workflow_spec import apply_builder_step, spec_to_config
+from playground.services.workflow_spec import apply_builder_step, semantic_bundle_required, spec_to_config
 
 
 runner_bp = Blueprint("runner", __name__, url_prefix="/playground/run")
@@ -289,6 +289,8 @@ def _bundle_failure_notes() -> list[str]:
     refusing the request, the bundle not being there, the link having expired —
     looks identical from the chat. The reason belongs in the trace.
     """
+    if not has_spec() or not semantic_bundle_required(current_spec()):
+        return []
     stored = session.get("last_aihub_bundle_load")
     if not isinstance(stored, dict) or stored.get("bundle_restored"):
         return []

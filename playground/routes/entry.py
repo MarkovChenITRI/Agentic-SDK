@@ -118,6 +118,10 @@ def navigate_from_shared_agent_to_runner():
     session["mode"] = "aihub_readonly"
     session["account_context_present"] = False
     store_loaded_agent(result)
+    # The second door into the read-only Runner. It needs the documents for the
+    # same reason the first one does, and degrades the same way: a visitor who
+    # is turned away here can do nothing about it.
+    _restore_selected_agent_bundle(str(result["agent_id"]), None, allow_public=True)
     session["source_origin"] = "aihub_shared_readonly"
     return redirect(url_for("runner.runner"))
 
@@ -262,15 +266,14 @@ def _clear_selected_agent_state() -> None:
     session.pop("builder_upload_id", None)
 
 
-def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials) -> dict[str, object]:
+def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials | None, *, allow_public: bool = False) -> dict[str, object]:
     _clear_bundle_runtime_state()
-    bundle_result = restore_runtime_bundle(agent_id=agent_id, credentials=credentials, origin=request.host_url)
-    if bundle_result.get("bundle_restored"):
-        if bundle_result.get("builder_upload_id"):
-            session["builder_upload_id"] = bundle_result["builder_upload_id"]
-        session["last_aihub_bundle_load"] = bundle_result
-    else:
-        session.pop("last_aihub_bundle_load", None)
+    bundle_result = restore_runtime_bundle(agent_id=agent_id, credentials=credentials, origin=request.host_url, allow_public=allow_public)
+    if bundle_result.get("bundle_restored") and bundle_result.get("builder_upload_id"):
+        session["builder_upload_id"] = bundle_result["builder_upload_id"]
+    # Keep the failure too: it is the only record of why the documents are
+    # missing, and the chat cannot tell the causes apart.
+    session["last_aihub_bundle_load"] = bundle_result
     return bundle_result
 
 

@@ -1,16 +1,14 @@
 ﻿from __future__ import annotations
 
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
-
-
-_ON_FAILURE_TO_NEXT: dict[str, str | None] = {"retry_plan": "plan", "end": None}
+from agentic_sdk.modules.reflect.retry_policy import ON_FAILURE_TO_NEXT, next_after_failure
 
 
 class EvidenceCheckReflect:
     name = "reflect"
 
     def __init__(self, on_failure: str = "retry_plan") -> None:
-        if on_failure not in _ON_FAILURE_TO_NEXT:
+        if on_failure not in ON_FAILURE_TO_NEXT:
             raise ValueError(f"unsupported on_failure={on_failure!r}")
         self._on_failure = on_failure
 
@@ -24,7 +22,7 @@ class EvidenceCheckReflect:
             reason = evidence_error
         else:
             reason = "action_result ok"
-        next_module = _next_after_failure(self._on_failure, state) if verdict == "fail" else None
+        next_module = next_after_failure(self._on_failure, state) if verdict == "fail" else None
         return ModuleOutput(
             next_module=next_module,
             payload={"reflect_verdict": verdict},
@@ -36,18 +34,6 @@ class EvidenceCheckReflect:
                 )
             ],
         )
-
-
-def _next_after_failure(on_failure: str, state: WorkflowState) -> str | None:
-    """Send the workflow back to plan once, then stop.
-
-    "Retry" means try again, not try until the hop limit stops you. A second
-    failure means re-planning did not change the outcome, so looping again only
-    spends model calls to reach the same verdict and then abort.
-    """
-    if on_failure != "retry_plan" or state.visit_counts.get("reflect", 0) > 1:
-        return None
-    return "plan"
 
 
 def _evidence_error(state: WorkflowState) -> str | None:

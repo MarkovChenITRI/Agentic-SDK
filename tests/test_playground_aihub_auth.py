@@ -1184,12 +1184,16 @@ def test_agent_picker_select_clears_previous_bundle_runtime_for_plain_agent(monk
         with client.session_transaction() as session:
             session_spec = session["workflow_spec"]
             has_builder_upload_id = "builder_upload_id" in session
-            has_bundle_load = "last_aihub_bundle_load" in session
+            bundle_load = session.get("last_aihub_bundle_load")
 
     assert response.status_code == 302
     assert session_spec["workflow_name"] == "Plain Agent"
     assert has_builder_upload_id is False
-    assert has_bundle_load is False
+    # The previous agent's runtime is gone, which is what this guards. The key
+    # now holds this attempt's result instead of being dropped, so the reason a
+    # restore failed survives for whoever has to fix it.
+    assert bundle_load.get("builder_upload_id") != "old-upload"
+    assert bundle_load.get("bundle_restored") is not True
 
 
 def test_agent_picker_blocks_semantic_agent_when_bundle_restore_fails(monkeypatch):

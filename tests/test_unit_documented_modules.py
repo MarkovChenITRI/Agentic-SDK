@@ -711,3 +711,33 @@ class DocumentedModuleUnitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_both_reflect_modules_retry_once_then_stop():
+    """One Builder answer installs either module, so both must keep its promise.
+
+    Q5's "再查一次再回答" was made true for EvidenceCheckReflect only. A keyword
+    agent gets ResponseCheckReflect from the same answer, and there the retry
+    still looped back to plan every time, until the hop limit aborted the run.
+    """
+    from agentic_sdk.modules.reflect import EvidenceCheckReflect, ResponseCheckReflect
+
+    def build(module):
+        if module is ResponseCheckReflect:
+            # The model call fails and the module falls back to the action
+            # error, which is the failing path this test is about.
+            return module(on_failure="retry_plan", api_key="k", base_url="http://localhost:1", model="m")
+        return module(on_failure="retry_plan")
+
+    def verdict_after(module, reflect_visits):
+        state = WorkflowState(workflow_name="w", user_message="hi")
+        state.last_action_error = {"message": "action failed"}
+        state.visit_counts["reflect"] = reflect_visits
+        return build(module)(state)
+
+    for module in (EvidenceCheckReflect, ResponseCheckReflect):
+        first = verdict_after(module, 1)
+        second = verdict_after(module, 2)
+        assert first["payload"]["reflect_verdict"] == "fail", module.__name__
+        assert first["next_module"] == "plan", module.__name__
+        assert second["next_module"] is None, module.__name__
