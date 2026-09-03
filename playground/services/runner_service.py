@@ -1297,8 +1297,35 @@ def _plan_from_config(config: BuilderSourceConfig, endpoint_selections: dict[str
     return NextStepPlan(
         system_prompt=config.plan_system_prompt,
         retrieve_description=config.retrieve_description,
+        route_policy=_consult_the_sources_first if _has_retrievable_content(config) else None,
         **endpoint_params_for_role(_plan_endpoint_role(endpoint_selections, reachable_roles), endpoint_selections),
     )
+
+
+def _has_retrievable_content(config: BuilderSourceConfig) -> bool:
+    """Whether this agent actually has something to look things up in."""
+    if config.retrieve_module == "SemanticRetrieve":
+        return bool(config.semantic_support_files)
+    if config.retrieve_module == "KeywordRetrieve":
+        return bool(config.retrieve_items)
+    return False
+
+
+def _consult_the_sources_first(state: WorkflowState, chosen: str | None) -> str | None:
+    """Look in the agent's own documents before answering from anything else.
+
+    An agent built on uploaded documents promises answers grounded in them. The
+    planner decides per turn, and with only a vague description of the source it
+    would judge a question answerable on its own and skip the lookup — a kidney
+    education agent discussed diet limits with no document behind a word of it,
+    and the evidence check could not object because nothing had been retrieved.
+
+    So the first pass through plan always retrieves. After that the planner has
+    seen what the documents hold and its judgement is worth something.
+    """
+    if state.latest_of(ContextEntryType.RETRIEVED) is not None:
+        return chosen
+    return "retrieve"
 
 
 def _plan_endpoint_role(endpoint_selections: dict[str, str], reachable_roles: set[str]) -> str:

@@ -2314,3 +2314,36 @@ def test_a_shared_agent_says_its_documents_are_missing(monkeypatch):
 
     assert "參考文件目前沒有載入" in message
     assert "產品資料" not in message and "庫存" not in message
+
+
+def test_an_agent_with_documents_consults_them_before_answering():
+    """A document-backed agent must not answer around its documents.
+
+    腎臟科衛教chatbot has 78KB of uploaded material and no search goal, so the
+    planner saw only a generic description of its source, judged the question
+    answerable on its own, and discussed kidney diet limits with nothing behind
+    a word of it. The evidence check could not object: retrieve never ran, so
+    there was no hit count to fail.
+    """
+    spec = build_spec(
+        ("retrieve_policy", "semantic"),
+        ("retrieve", {"semantic_support_files": "guide.pdf"}),
+        ("output_format", "free_text"),
+    )
+    config = spec_to_config(spec)
+
+    assert runner_service._has_retrievable_content(config) is True
+
+    fresh = WorkflowState(workflow_name="w", user_message="hi")
+    assert runner_service._consult_the_sources_first(fresh, "action") == "retrieve"
+
+    after = WorkflowState(workflow_name="w", user_message="hi")
+    after.entries.append(ContextEntry(type=ContextEntryType.RETRIEVED, content="…", metadata={"hit_count": 2}))
+    assert runner_service._consult_the_sources_first(after, "action") == "action"
+
+
+def test_an_agent_with_nothing_to_look_up_keeps_the_planners_judgement():
+    """The policy exists to reach documents, not to force an empty lookup."""
+    empty = spec_to_config(build_spec(("retrieve_policy", "semantic"), ("output_format", "free_text")))
+
+    assert runner_service._has_retrievable_content(empty) is False
