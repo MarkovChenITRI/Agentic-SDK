@@ -1,16 +1,14 @@
 ﻿from __future__ import annotations
 
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
-
-
-_ON_FAILURE_TO_NEXT: dict[str, str | None] = {"retry_plan": "plan", "end": None}
+from agentic_sdk.modules.reflect.retry_policy import ON_FAILURE_TO_NEXT, next_after_failure
 
 
 class EvidenceCheckReflect:
     name = "reflect"
 
     def __init__(self, on_failure: str = "retry_plan") -> None:
-        if on_failure not in _ON_FAILURE_TO_NEXT:
+        if on_failure not in ON_FAILURE_TO_NEXT:
             raise ValueError(f"unsupported on_failure={on_failure!r}")
         self._on_failure = on_failure
 
@@ -24,7 +22,7 @@ class EvidenceCheckReflect:
             reason = evidence_error
         else:
             reason = "action_result ok"
-        next_module = _ON_FAILURE_TO_NEXT[self._on_failure] if verdict == "fail" else None
+        next_module = next_after_failure(self._on_failure, state) if verdict == "fail" else None
         return ModuleOutput(
             next_module=next_module,
             payload={"reflect_verdict": verdict},
@@ -39,14 +37,14 @@ class EvidenceCheckReflect:
 
 
 def _evidence_error(state: WorkflowState) -> str | None:
+    """Report an error when the workflow looked something up and found nothing.
+
+    A retrieve module that does not look anything up reports no count at all,
+    and gets no verdict: it has no claim to make about evidence.
+    """
     retrieved = state.latest_of(ContextEntryType.RETRIEVED)
-    if retrieved is None:
+    if retrieved is None or "hit_count" not in retrieved.metadata:
         return None
-    hit_counts = [
-        value
-        for key, value in retrieved.metadata.items()
-        if key == "hit_count"
-    ]
-    if hit_counts and all(int(value or 0) == 0 for value in hit_counts):
+    if int(retrieved.metadata.get("hit_count") or 0) == 0:
         return "no retrieved evidence"
     return None

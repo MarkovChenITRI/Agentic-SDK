@@ -405,6 +405,9 @@ class SemanticRetrieve:
             if results:
                 sections.append(_format_memory_hits(results))
         snippet = "\n\n".join(sections) if sections else DEFAULT_NO_RETRIEVED_CONTEXT_MESSAGE
+        # The count every retrieve module reports the same way, so a reflect
+        # module can ask "did this find anything" without knowing which module ran.
+        metadata["hit_count"] = int(metadata.get("kb_hit_count", 0)) + int(metadata.get("memory_hit_count", 0))
         metadata["source"] = "semantic_retrieve"
         return ModuleOutput(
             next_module="action",

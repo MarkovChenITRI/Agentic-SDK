@@ -6,8 +6,8 @@ from flask import session
 
 from playground.services.aihub_bundle_flow import restore_runtime_bundle
 from playground.services.aihub_client import AiHubCredentials, bridge_credentials, exchange_handoff_token, issue_credential_ticket, load_config, load_public_config
-from playground.services.source_builder import build_default_python_source, semantic_bundle_required_from_source
-from playground.services.workflow_spec import compile_python_source, default_runner_presentation
+from playground.services.session_spec import clear_spec, reset_spec, store_spec
+from playground.services.workflow_spec import default_runner_presentation, semantic_bundle_required, validate_spec
 
 
 def has_builder_bridge_query(args: Mapping[str, object]) -> bool:
@@ -29,7 +29,7 @@ def start_builder_bridge_session(args: Mapping[str, object], *, origin: str | No
         _store_bridge_context(args, credentials)
     else:
         session["mode"] = "anonymous"
-        session["python_source"] = build_default_python_source()
+        reset_spec()
         session["source_origin"] = "manual_new"
     _clear_selected_agent_state()
 
@@ -66,6 +66,14 @@ def start_runner_bridge_session(args: Mapping[str, object], *, origin: str | Non
     session["mode"] = "aihub_readonly"
     session["account_context_present"] = False
     store_loaded_agent(result)
+    # A shared agent needs its documents as much as an owned one does. Without
+    # this the read-only Runner ran every semantic agent against an empty index
+    # and answered "nothing found" to every question.
+    #
+    # Unlike the owner, a visitor who is turned away here can do nothing about
+    # it, so a failure degrades rather than closing the door: the Runner still
+    # opens and says the documents are not loaded.
+    _restore_selected_agent_bundle(str(result["agent_id"]), None, origin=origin, allow_public=True)
     session["agent_owner"] = _arg(args, "owner")
     session["source_origin"] = "aihub_shared_readonly"
     return {"started": True, "mode": "read"}
@@ -84,7 +92,7 @@ def _start_authenticated_session(credentials: AiHubCredentials) -> None:
         display_name=credentials.display_name,
         expires_at=credentials.expires_at,
     )
-    session["python_source"] = build_default_python_source()
+    reset_spec()
     session["source_origin"] = "manual_new"
 
 
@@ -112,7 +120,7 @@ def _clear_selected_agent_state() -> None:
     session.pop("builder_has_user_config", None)
     session.pop("endpoint_bindings", None)
     session.pop("builder_upload_id", None)
-    session.pop("workflow_spec", None)
+    clear_spec()
     session.pop("runner_presentation", None)
 
 
@@ -122,26 +130,25 @@ def store_loaded_agent(result: dict[str, object]) -> None:
     session["endpoint_bindings"] = result.get("endpoint_bindings") or {}
     spec = result.get("workflow_spec")
     if isinstance(spec, dict) and spec.get("version") == "2":
-        session["workflow_spec"] = spec
-        session["python_source"] = compile_python_source(spec)
+        store_spec(validate_spec(spec))
         presentation = result.get("runner_presentation")
         session["runner_presentation"] = presentation if isinstance(presentation, dict) else default_runner_presentation()
     else:
-        session["python_source"] = result["python_source"]
-        session.pop("workflow_spec", None)
+        clear_spec()
         session.pop("runner_presentation", None)
     session.pop("builder_form_state", None)
 
 
-def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials, *, origin: str | None = None) -> dict[str, object]:
+def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials | None, *, origin: str | None = None, allow_public: bool = False) -> dict[str, object]:
     _clear_bundle_runtime_state()
-    bundle_result = restore_runtime_bundle(agent_id=agent_id, credentials=credentials, origin=origin)
-    if bundle_result.get("bundle_restored"):
-        if bundle_result.get("builder_upload_id"):
-            session["builder_upload_id"] = bundle_result["builder_upload_id"]
-        session["last_aihub_bundle_load"] = bundle_result
-    else:
-        session.pop("last_aihub_bundle_load", None)
+    bundle_result = restore_runtime_bundle(agent_id=agent_id, credentials=credentials, origin=origin, allow_public=allow_public)
+    if bundle_result.get("bundle_restored") and bundle_result.get("builder_upload_id"):
+        session["builder_upload_id"] = bundle_result["builder_upload_id"]
+    # Keep the failure too. A shared agent carries on without its documents, so
+    # this is the only record of why they are missing — the API not being open,
+    # the bundle not being there, the link having expired all read the same
+    # from the outside.
+    session["last_aihub_bundle_load"] = bundle_result
     return bundle_result
 
 
@@ -151,7 +158,8 @@ def _clear_bundle_runtime_state() -> None:
 
 
 def _semantic_bundle_required_for_result(result: dict[str, object]) -> bool:
-    return semantic_bundle_required_from_source(str(result.get("python_source") or ""))
+    spec = result.get("workflow_spec")
+    return semantic_bundle_required(validate_spec(spec)) if isinstance(spec, dict) else False
 
 
 def _semantic_bundle_restore_error(bundle_result: dict[str, object]) -> str:

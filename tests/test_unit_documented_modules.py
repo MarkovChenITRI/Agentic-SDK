@@ -10,6 +10,7 @@ from unittest.mock import patch
 from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, WorkflowState
 from agentic_sdk.memory import InContextMemory, InMemoryStore
 from agentic_sdk.modules import (
+    PassThroughRetrieve,
     DirectAnswerAction,
     EvidenceCheckReflect,
     GenerativeAction,
@@ -298,6 +299,51 @@ class DocumentedModuleUnitTests(unittest.TestCase):
         self.assertIn("only report a value as a named fact", system_prompt)
         self.assertIn("Never treat an unmarked comparison chart", system_prompt)
 
+    def test_next_step_plan_follows_the_model_when_no_policy_is_supplied(self) -> None:
+        state = WorkflowState(user_message="請推薦產品編號 230619521 的價格與限制。")
+        state.append(
+            ContextEntry(
+                type=ContextEntryType.PERCEIVED,
+                content="intent=product_recommendation",
+                metadata={"intent": "product_recommendation"},
+            )
+        )
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
+            output = NextStepPlan(retrieve_description="a product catalog", **_llm_params())(state)
+
+        self.assertEqual("action", output["next_module"])
+
+    def test_next_step_plan_lets_a_route_policy_overrule_the_model(self) -> None:
+        state = WorkflowState(user_message="請推薦產品編號 230619521 的價格與限制。")
+        seen: list[str | None] = []
+
+        def always_retrieve(_state, chosen):
+            seen.append(chosen)
+            return "retrieve"
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
+            output = NextStepPlan(route_policy=always_retrieve, **_llm_params())(state)
+
+        self.assertEqual(["action"], seen)
+        self.assertEqual("retrieve", output["next_module"])
+
+    def test_next_step_plan_keeps_the_retrieve_description_when_a_prompt_is_given(self) -> None:
+        """A custom prompt used to discard the retrieve description silently."""
+        state = WorkflowState(user_message="這個型號還有貨嗎？")
+        client = FoundryOpenAILikeClient(plan_sequence=["action"])
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=client):
+            NextStepPlan(
+                system_prompt="PLAN. Answer in English.",
+                retrieve_description="a product catalog",
+                **_llm_params(),
+            )(state)
+
+        system_message = client.last_create_kwargs["messages"][0]["content"]
+        self.assertIn("PLAN. Answer in English.", system_message)
+        self.assertIn("a product catalog", system_message)
+
     def test_next_step_plan_uses_openai_decision(self) -> None:
         state = WorkflowState(user_message="TSiP 是什麼？")
         state.append(
@@ -313,51 +359,6 @@ class DocumentedModuleUnitTests(unittest.TestCase):
 
         self.assertEqual("action", output["next_module"])
         self.assertEqual("route to action", output["payload"]["plan_thought"])
-
-    def test_next_step_plan_retrieves_catalog_facts_before_action(self) -> None:
-        state = WorkflowState(user_message="請依 catalog 推薦產品編號 230619521，列出價格與限制。")
-        state.append(
-            ContextEntry(
-                type=ContextEntryType.PERCEIVED,
-                content="intent=product_recommendation",
-                metadata={"intent": "product_recommendation"},
-            )
-        )
-
-        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
-            output = NextStepPlan(retrieve_description="LaNew catalog", **_llm_params())(state)
-
-        self.assertEqual("retrieve", output["next_module"])
-
-    def test_next_step_plan_retrieves_retail_sku_and_availability_before_action(self) -> None:
-        state = WorkflowState(user_message="SKU 7037191 有現貨、展示品或調貨資訊嗎？")
-        state.append(
-            ContextEntry(
-                type=ContextEntryType.PERCEIVED,
-                content="intent=store_availability",
-                metadata={"intent": "store_availability"},
-            )
-        )
-
-        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
-            output = NextStepPlan(retrieve_description="LaNew catalog", **_llm_params())(state)
-
-        self.assertEqual("retrieve", output["next_module"])
-
-    def test_next_step_plan_retrieves_ai_hub_workshop_facts_before_action(self) -> None:
-        state = WorkflowState(user_message="AI Hub 支援哪些模型部署方式？")
-        state.append(
-            ContextEntry(
-                type=ContextEntryType.PERCEIVED,
-                content="intent=ai_hub_deployment",
-                metadata={"intent": "ai_hub_deployment"},
-            )
-        )
-
-        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=FoundryOpenAILikeClient(plan_sequence=["action"])):
-            output = NextStepPlan(retrieve_description="AI Hub workshop materials", **_llm_params())(state)
-
-        self.assertEqual("retrieve", output["next_module"])
 
     def test_keyword_retrieve_hits_expected_items(self) -> None:
         state = WorkflowState(user_message="TSiP 是什麼？")
@@ -458,6 +459,40 @@ class DocumentedModuleUnitTests(unittest.TestCase):
         self.assertEqual("第一輪問題", messages[1]["content"])
         self.assertEqual("第一輪回答", messages[2]["content"])
         self.assertEqual("第二輪追問", messages[3]["content"])
+
+    def test_generative_action_answers_openly_when_nothing_was_retrieved(self) -> None:
+        """A workflow that never retrieves must not be told to answer only from context."""
+        state = WorkflowState(user_message="用一句話說明什麼是保固。")
+        client = FoundryOpenAILikeClient()
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=client):
+            GenerativeAction(**_llm_params())(state)
+
+        system_message = client.last_create_kwargs["messages"][0]["content"]
+        self.assertNotIn("請只根據 retrieved_context 回答", system_message)
+        self.assertIn("不確定時說明不確定", system_message)
+
+    def test_generative_action_stays_grounded_when_something_was_retrieved(self) -> None:
+        state = WorkflowState(user_message="保固多久？")
+        state.append(ContextEntry(type=ContextEntryType.RETRIEVED, content="保固十二個月。"))
+        client = FoundryOpenAILikeClient()
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=client):
+            GenerativeAction(**_llm_params())(state)
+
+        system_message = client.last_create_kwargs["messages"][0]["content"]
+        self.assertIn("請只根據 retrieved_context 回答", system_message)
+
+    def test_generative_action_lets_a_caller_prompt_replace_both_defaults(self) -> None:
+        state = WorkflowState(user_message="保固多久？")
+        client = FoundryOpenAILikeClient()
+
+        with patch("agentic_sdk.llm.openai_compatible.OpenAI", return_value=client):
+            GenerativeAction(system_prompt="ACT. Answer in English.", **_llm_params())(state)
+
+        system_message = client.last_create_kwargs["messages"][0]["content"]
+        self.assertIn("ACT. Answer in English.", system_message)
+        self.assertNotIn("請只根據 retrieved_context 回答", system_message)
 
     def test_action_prompt_includes_perceived_context_with_retrieved_context(self) -> None:
         state = WorkflowState(user_message="請推薦鞋墊")
@@ -606,21 +641,47 @@ class DocumentedModuleUnitTests(unittest.TestCase):
         self.assertIsNone(evidence_output["next_module"])
         self.assertEqual("pass", evidence_output["payload"]["reflect_verdict"])
 
-    def test_evidence_check_reflect_fails_when_retrieve_reports_no_hits(self) -> None:
-        state = WorkflowState(user_message="未知問題")
-        state.last_action_result = {"content": "目前沒有找到相關參考資料。"}
-        state.append(
-            ContextEntry(
-                type=ContextEntryType.RETRIEVED,
-                content="目前沒有找到相關參考資料。",
-                metadata={"hit_count": 0},
-            )
-        )
+    def test_evidence_check_reflect_fails_after_a_real_retrieve_finds_nothing(self) -> None:
+        """Runs the retrieve modules rather than hand-building their output.
 
-        output = EvidenceCheckReflect(on_failure="end")(state)
+        The forged version of this test passed while the integration was broken:
+        SemanticRetrieve reported its count under a different key, so the check
+        never saw it and every semantic workflow passed unconditionally.
+        """
+        from agentic_sdk.modules.retrieve.semantic import SemanticRetrieve
 
-        self.assertIsNone(output["next_module"])
-        self.assertEqual("fail", output["payload"]["reflect_verdict"])
+        for label, retrieve in (
+            ("keyword", KeywordRetrieve(items=[])),
+            ("semantic", SemanticRetrieve()),
+        ):
+            with self.subTest(retrieve=label):
+                state = WorkflowState(user_message="未知問題")
+                for entry in retrieve(state).get("context_updates") or []:
+                    state.append(entry)
+                state.last_action_result = {"content": "目前沒有找到相關參考資料。"}
+
+                output = EvidenceCheckReflect(on_failure="end")(state)
+
+                self.assertIsNone(output["next_module"])
+                self.assertEqual("fail", output["payload"]["reflect_verdict"])
+
+    def test_evidence_check_reflect_passes_when_a_real_retrieve_finds_something(self) -> None:
+        state = WorkflowState(user_message="保固多久？")
+        retrieve = KeywordRetrieve(items=[{"keywords": ["保固"], "content": "保固十二個月。"}])
+        for entry in retrieve(state).get("context_updates") or []:
+            state.append(entry)
+        state.last_action_result = {"content": "保固十二個月。"}
+
+        self.assertEqual("pass", EvidenceCheckReflect()(state)["payload"]["reflect_verdict"])
+
+    def test_evidence_check_reflect_has_no_opinion_when_nothing_was_looked_up(self) -> None:
+        """PassThroughRetrieve makes no evidence claim, so the check must not fail it."""
+        state = WorkflowState(user_message="用一句話說明什麼是保固。")
+        for entry in PassThroughRetrieve()(state).get("context_updates") or []:
+            state.append(entry)
+        state.last_action_result = {"content": "保固是一種售後承諾。"}
+
+        self.assertEqual("pass", EvidenceCheckReflect()(state)["payload"]["reflect_verdict"])
 
     def test_text_perceive_writes_memory_when_memory_store_exists(self) -> None:
         store = InMemoryStore()
@@ -650,3 +711,33 @@ class DocumentedModuleUnitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_both_reflect_modules_retry_once_then_stop():
+    """One Builder answer installs either module, so both must keep its promise.
+
+    Q5's "再查一次再回答" was made true for EvidenceCheckReflect only. A keyword
+    agent gets ResponseCheckReflect from the same answer, and there the retry
+    still looped back to plan every time, until the hop limit aborted the run.
+    """
+    from agentic_sdk.modules.reflect import EvidenceCheckReflect, ResponseCheckReflect
+
+    def build(module):
+        if module is ResponseCheckReflect:
+            # The model call fails and the module falls back to the action
+            # error, which is the failing path this test is about.
+            return module(on_failure="retry_plan", api_key="k", base_url="http://localhost:1", model="m")
+        return module(on_failure="retry_plan")
+
+    def verdict_after(module, reflect_visits):
+        state = WorkflowState(workflow_name="w", user_message="hi")
+        state.last_action_error = {"message": "action failed"}
+        state.visit_counts["reflect"] = reflect_visits
+        return build(module)(state)
+
+    for module in (EvidenceCheckReflect, ResponseCheckReflect):
+        first = verdict_after(module, 1)
+        second = verdict_after(module, 2)
+        assert first["payload"]["reflect_verdict"] == "fail", module.__name__
+        assert first["next_module"] == "plan", module.__name__
+        assert second["next_module"] is None, module.__name__

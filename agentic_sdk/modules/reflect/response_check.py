@@ -3,9 +3,7 @@
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
 from agentic_sdk.llm import chat_stream_json, require_model, resolve_openai_client
 from agentic_sdk.memory.in_context import build_module_messages
-
-
-_ON_FAILURE_TO_NEXT: dict[str, str | None] = {"retry_plan": "plan", "end": None}
+from agentic_sdk.modules.reflect.retry_policy import ON_FAILURE_TO_NEXT, next_after_failure
 _SYSTEM_PROMPT = (
     "REFLECT. Check whether the action result answers the user. "
     "Return JSON with verdict ('pass' or 'fail'), reason, and suggestion."
@@ -24,7 +22,7 @@ class ResponseCheckReflect:
         base_url: str | None = None,
         model: str | None = None,
     ) -> None:
-        if on_failure not in _ON_FAILURE_TO_NEXT:
+        if on_failure not in ON_FAILURE_TO_NEXT:
             raise ValueError(f"unsupported on_failure={on_failure!r}")
         self._on_failure = on_failure
         self._model = require_model(model, self.__class__.__name__)
@@ -76,7 +74,7 @@ class ResponseCheckReflect:
             usage = None
         if verdict not in {"pass", "fail"}:
             verdict = "fail" if err else "pass"
-        next_module = _ON_FAILURE_TO_NEXT[self._on_failure] if verdict == "fail" else None
+        next_module = next_after_failure(self._on_failure, state) if verdict == "fail" else None
         metadata = {"verdict": verdict, "reason": reason, "strategy": "response_check"}
         if suggestion:
             metadata["suggestion"] = suggestion

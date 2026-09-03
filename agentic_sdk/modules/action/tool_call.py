@@ -4,7 +4,7 @@ from typing import Any
 
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
 from agentic_sdk.llm import chat_stream, require_model, resolve_openai_client
-from agentic_sdk.modules.action.generative import DEFAULT_SYSTEM_PROMPT, _build_messages, _format_openai_error
+from agentic_sdk.modules.action.generative import _build_messages, _format_openai_error
 
 
 class ToolCallAction:
@@ -23,7 +23,7 @@ class ToolCallAction:
         tool_choice: str | dict[str, Any] | None = "auto",
     ) -> None:
         self._temperature = temperature
-        self._system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        self._system_prompt = system_prompt
         self._model = require_model(model, self.__class__.__name__)
         self._client = resolve_openai_client(self.__class__.__name__, api_key=api_key, base_url=base_url)
         self._tools = list(tools or [])

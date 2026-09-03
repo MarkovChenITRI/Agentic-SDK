@@ -7,11 +7,33 @@ azure_embeddings_api_key = os.environ.get("AGENTIC_SDK_AZURE_EMBEDDINGS_API_KEY"
 if not azure_embeddings_api_key:
     raise RuntimeError("Set AGENTIC_SDK_AZURE_EMBEDDINGS_API_KEY before running this example.")
 
+# 這個案例的產品問題一定要先查目錄，不能讓模型直接回答。這條規則屬於這個
+# 應用程式——SDK 的 planner 不知道「調貨」對這門生意代表什麼。
+PRODUCT_FACT_TERMS = (
+    "試穿", "門市", "取貨", "調貨", "庫存", "現貨", "展示品", "品號",
+    "價格", "型號", "規格", "限制", "商品編號", "產品編號",
+)
+
+
+def always_retrieve_product_facts(state, chosen):
+    """模型選了直接回答，但問題牽涉到產品事實時，改成先查資料。"""
+    if chosen == "retrieve":
+        return chosen
+    message = state.latest_user_message()
+    return "retrieve" if any(term in message for term in PRODUCT_FACT_TERMS) else chosen
+
+
 workflow = Workflow(
     workflow_name="LaNew鞋墊顧問",
     description="根據使用者提供的足測報告圖片與問題，整理足部量測、足壓與腳形資訊，查找 LaNew 產品資料，推薦合適鞋墊，並詢問使用者是否購買推薦產品。",
     perceive=TextImagePerceive(api_key="local", base_url="http://localhost:8000/v1", model="gemma-4-2b"),
-    plan=NextStepPlan(api_key="local", base_url="http://localhost:8000/v1", model="gemma-4-2b", retrieve_description="優先從這批參考文件查找：查找 LaNew 產品資訊、鞋墊建議、適用條件、支撐特性、楦頭或寬腳適配、價格、商品編號與限制條件。"),
+    plan=NextStepPlan(
+        api_key="local",
+        base_url="http://localhost:8000/v1",
+        model="gemma-4-2b",
+        retrieve_description="優先從這批參考文件查找：查找 LaNew 產品資訊、鞋墊建議、適用條件、支撐特性、楦頭或寬腳適配、價格、商品編號與限制條件。",
+        route_policy=always_retrieve_product_facts,
+    ),
     retrieve=SemanticRetrieve(
         api_key=azure_embeddings_api_key,
         base_url="https://agentic-sdk-foundry.cognitiveservices.azure.com/openai/deployments/text-embedding-3-large/embeddings?api-version=2023-05-15",

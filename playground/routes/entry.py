@@ -8,7 +8,8 @@ from playground.services.aihub_bundle_flow import restore_runtime_bundle
 from playground.services.aihub_client import AiHubCredentials, credentials_for_ticket, exchange_handoff_token, issue_credential_ticket, list_agents, load_config, load_public_config, verify_credentials, verify_identity
 from playground.services.aihub_session import active_credentials
 from playground.services.deep_link import apply_aihub_deep_link
-from playground.services.source_builder import build_default_python_source, semantic_bundle_required_from_source
+from playground.services.session_spec import clear_spec, has_spec, reset_spec
+from playground.services.workflow_spec import semantic_bundle_required, validate_spec
 
 
 entry_bp = Blueprint("entry", __name__)
@@ -23,7 +24,7 @@ def index():
 @entry_bp.get("/playground/")
 def entry():
     if apply_aihub_deep_link(request.args.get("mode"), request.args.get("agent_id")):
-        if request.args.get("agent_id") and not session.get("python_source"):
+        if request.args.get("agent_id") and not has_spec():
             return redirect(url_for("entry.navigate_from_shared_agent_to_runner", agent_id=request.args.get("agent_id")))
         return redirect(url_for("runner.runner"))
 
@@ -35,7 +36,7 @@ def entry():
 def start_anonymous():
     session.clear()
     session["mode"] = "anonymous"
-    session["python_source"] = build_default_python_source()
+    reset_spec()
     session["source_origin"] = "manual_new"
     return redirect(url_for("builder.builder"))
 
@@ -117,6 +118,10 @@ def navigate_from_shared_agent_to_runner():
     session["mode"] = "aihub_readonly"
     session["account_context_present"] = False
     store_loaded_agent(result)
+    # The second door into the read-only Runner. It needs the documents for the
+    # same reason the first one does, and degrades the same way: a visitor who
+    # is turned away here can do nothing about it.
+    _restore_selected_agent_bundle(str(result["agent_id"]), None, allow_public=True)
     session["source_origin"] = "aihub_shared_readonly"
     return redirect(url_for("runner.runner"))
 
@@ -154,7 +159,7 @@ def start_new_agent():
     _clear_selected_agent_state()
     session["mode"] = "manual_auth"
     session["account_context_present"] = True
-    session["python_source"] = build_default_python_source()
+    reset_spec()
     session["source_origin"] = "manual_new"
     return redirect(url_for("builder.builder"))
 
@@ -242,7 +247,7 @@ def _start_authenticated_session(credentials: AiHubCredentials) -> None:
     session["ai_hub_username"] = credentials.username.strip()
     session["ai_hub_display_name"] = credentials.display_name.strip()
     session["ai_hub_credential_ticket"] = issue_credential_ticket(credentials.username, credentials.password, token=credentials.token, api_base_url=credentials.api_base_url, display_name=credentials.display_name, expires_at=credentials.expires_at)
-    session["python_source"] = build_default_python_source()
+    reset_spec()
     session["source_origin"] = "manual_new"
 
 
@@ -250,7 +255,7 @@ def _clear_selected_agent_state() -> None:
     session.pop("agent_id", None)
     session.pop("agent_name", None)
     session.pop("last_aihub_save", None)
-    session.pop("workflow_spec", None)
+    clear_spec()
     session.pop("runner_presentation", None)
     session.pop("builder_form_state", None)
     session.pop("last_aihub_bundle_load", None)
@@ -261,15 +266,14 @@ def _clear_selected_agent_state() -> None:
     session.pop("builder_upload_id", None)
 
 
-def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials) -> dict[str, object]:
+def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials | None, *, allow_public: bool = False) -> dict[str, object]:
     _clear_bundle_runtime_state()
-    bundle_result = restore_runtime_bundle(agent_id=agent_id, credentials=credentials, origin=request.host_url)
-    if bundle_result.get("bundle_restored"):
-        if bundle_result.get("builder_upload_id"):
-            session["builder_upload_id"] = bundle_result["builder_upload_id"]
-        session["last_aihub_bundle_load"] = bundle_result
-    else:
-        session.pop("last_aihub_bundle_load", None)
+    bundle_result = restore_runtime_bundle(agent_id=agent_id, credentials=credentials, origin=request.host_url, allow_public=allow_public)
+    if bundle_result.get("bundle_restored") and bundle_result.get("builder_upload_id"):
+        session["builder_upload_id"] = bundle_result["builder_upload_id"]
+    # Keep the failure too: it is the only record of why the documents are
+    # missing, and the chat cannot tell the causes apart.
+    session["last_aihub_bundle_load"] = bundle_result
     return bundle_result
 
 
@@ -279,7 +283,8 @@ def _clear_bundle_runtime_state() -> None:
 
 
 def _semantic_bundle_required_for_result(result: dict[str, object]) -> bool:
-    return semantic_bundle_required_from_source(str(result.get("python_source") or ""))
+    spec = result.get("workflow_spec")
+    return semantic_bundle_required(validate_spec(spec)) if isinstance(spec, dict) else False
 
 
 def _semantic_bundle_restore_error(bundle_result: dict[str, object]) -> str:

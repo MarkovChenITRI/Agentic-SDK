@@ -9,7 +9,7 @@ from urllib.parse import quote
 import httpx
 
 from playground.services.key_vault_config import KeyVaultConfigurationError, key_vault_settings
-from playground.services.source_builder import build_default_python_source
+from playground.services.workflow_spec import compile_python_source, default_spec
 
 
 _AUTH_VERIFY_PATH = "/api/playground/auth/verify"
@@ -296,7 +296,7 @@ def load_config(
         "agent_name": payload.get("workflow_name") or payload.get("agent_name") or "",
         "workflow_name": payload.get("workflow_name") or payload.get("agent_name") or "",
         "description": payload.get("description") or "",
-        "python_source": payload.get("python_source") or build_default_python_source(),
+        "python_source": payload.get("python_source") or compile_python_source(default_spec()),
         "endpoint_bindings": _endpoint_bindings_from_payload(payload),
         "exported_at": payload.get("playground_exported_at") or payload.get("exported_at") or "",
         # v2 contract fields
@@ -347,7 +347,7 @@ def load_public_config(
         "agent_name": response_payload.get("workflow_name") or response_payload.get("agent_name") or "",
         "workflow_name": response_payload.get("workflow_name") or response_payload.get("agent_name") or "",
         "description": response_payload.get("description") or "",
-        "python_source": response_payload.get("python_source") or build_default_python_source(),
+        "python_source": response_payload.get("python_source") or compile_python_source(default_spec()),
         "endpoint_bindings": _endpoint_bindings_from_payload(response_payload),
         "exported_at": response_payload.get("playground_exported_at") or response_payload.get("exported_at") or "",
         "contract_version": response_payload.get("contract_version") or "",
@@ -468,8 +468,9 @@ def request_bundle_download_url(
     *,
     credentials: AiHubCredentials | None = None,
     origin: str | None = None,
+    allow_public: bool = False,
 ) -> dict[str, object]:
-    return _request_bundle_url(agent_id, credentials=credentials, origin=origin, direction="download")
+    return _request_bundle_url(agent_id, credentials=credentials, origin=origin, direction="download", allow_public=allow_public)
 
 
 def _request_bundle_url(
@@ -478,11 +479,19 @@ def _request_bundle_url(
     credentials: AiHubCredentials | None,
     origin: str | None,
     direction: str,
+    allow_public: bool = False,
 ) -> dict[str, object]:
+    """Ask AI Hub for a short-lived bundle URL.
+
+    allow_public says this caller is the public read-only Runner, which has no
+    account to offer. It does not decide access: AI Hub still serves a download
+    only for an agent listed in the gallery. Every other caller keeps the
+    login check, so an expired session is reported as one.
+    """
     resolved_agent_id = (agent_id or "").strip()
     if not resolved_agent_id:
         return _bundle_error("Missing AI Hub agent id.", "missing_agent_id", agent_id=resolved_agent_id)
-    if not _has_aihub_auth(credentials):
+    if not allow_public and not _has_aihub_auth(credentials):
         return _bundle_error("AI Hub login is required before accessing the bundle.", "missing_credentials", agent_id=resolved_agent_id)
     base_url = _base_url_for_credentials(credentials)
     if not base_url:
@@ -553,7 +562,9 @@ def _auth_headers(credentials: AiHubCredentials, origin: str | None) -> dict[str
     return headers
 
 
-def _bundle_download_headers(credentials: AiHubCredentials, origin: str | None) -> dict[str, str]:
+def _bundle_download_headers(credentials: AiHubCredentials | None, origin: str | None) -> dict[str, str]:
+    if credentials is None:
+        return _json_headers(origin)
     headers = _auth_headers(credentials, origin)
     if not credentials.token:
         headers["X-Playground-Username"] = credentials.username

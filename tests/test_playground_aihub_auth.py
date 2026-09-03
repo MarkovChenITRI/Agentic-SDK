@@ -16,6 +16,15 @@ from playground.services import model_endpoints
 from playground.services.workflow_spec import apply_builder_step, compile_python_source, default_spec
 
 
+def _semantic_spec() -> dict:
+    """A spec whose retrieve module needs a knowledge bundle, as AI Hub stores it."""
+    return apply_builder_step(
+        apply_builder_step(default_spec(), "retrieve_policy", "semantic"),
+        "retrieve",
+        {"semantic_support_files": "knowledge.pptx"},
+    )
+
+
 def test_key_vault_settings_uses_deterministic_test_inventory():
     settings = key_vault_config.key_vault_settings()
 
@@ -241,6 +250,7 @@ def test_load_public_config_calls_ai_hub_public_load_api(monkeypatch):
         return httpx.Response(200, json={
             "agent_id": "agent 1",
             "agent_name": "Shared Agent",
+            "workflow_spec": apply_builder_step(default_spec(), "name", "Shared Agent"),
             "python_source": "print('shared')",
             "endpoint_bindings": {"perceive": "chat-fast"},
             "contract_version": "2",
@@ -362,7 +372,7 @@ def test_start_anonymous_enters_builder_with_local_source():
         with client.session_transaction(base_url="https://playground.example") as session:
             assert session["mode"] == "anonymous"
             assert session["source_origin"] == "manual_new"
-            assert "python_source" in session
+            assert "workflow_spec" in session
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/playground/builder")
@@ -513,7 +523,7 @@ def test_aihub_navigation_runner_verifies_and_loads_agent(monkeypatch):
 
     def fake_load_config(agent_id, *, credentials=None, origin=None):
         seen_load.append({"agent_id": agent_id, "credentials": credentials, "origin": origin})
-        return {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "python_source": "print('loaded')"}
+        return {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "workflow_spec": apply_builder_step(default_spec(), "name", "Agent One"), "python_source": "print('loaded')"}
 
     monkeypatch.setattr(entry_routes, "verify_credentials", fake_verify)
     monkeypatch.setattr(entry_routes, "load_config", fake_load_config)
@@ -533,7 +543,7 @@ def test_aihub_navigation_runner_verifies_and_loads_agent(monkeypatch):
             assert session["account_context_present"] is True
             assert session["agent_id"] == "agent-1"
             assert session["agent_name"] == "Agent One"
-            assert session["python_source"] == "print('loaded')"
+            assert session["workflow_spec"]["workflow_name"] == "Agent One"
             assert session["source_origin"] == "aihub_loaded"
             assert session["ai_hub_credential_ticket"]
 
@@ -565,26 +575,28 @@ workflow = Workflow(
             "loaded": True,
             "agent_id": agent_id,
             "agent_name": "Semantic Agent",
+            "workflow_spec": _semantic_spec(),
             "python_source": semantic_source,
         },
     )
     monkeypatch.setattr(
         entry_routes,
         "restore_runtime_bundle",
-        lambda *, agent_id=None, credentials=None, origin=None: {
+        lambda *, agent_id=None, credentials=None, origin=None, allow_public=False: {
             "bundle_restored": True,
             "builder_upload_id": "restored-upload",
+            "workflow_spec": _semantic_spec(),
             "python_source": semantic_source,
             "bundle_source_file_count": 1,
             "bundle_vectorstore_file_count": 2,
         },
     )
 
-    def fake_execute_python_source(python_source, **kwargs):
+    def fake_run_agent(python_source, **kwargs):
         captured.update(kwargs)
         return {"status": "ok", "final_message": "ok", "result": {}, "debug_messages": [], "process_events": []}
 
-    monkeypatch.setattr(runner_routes, "execute_python_source", fake_execute_python_source)
+    monkeypatch.setattr(runner_routes, "run_agent", fake_run_agent)
     app = create_app()
     app.config.update(TESTING=True, SECRET_KEY="test-secret")
 
@@ -598,8 +610,8 @@ workflow = Workflow(
         execute_response = client.post("/playground/run/execute", base_url="https://playground.example", json={"message": "policy?"})
 
     assert execute_response.status_code == 200
-    semantic_sources = [Path(item).as_posix() for item in captured["semantic_sources"]]
-    semantic_saved_path = Path(captured["semantic_saved_path"]).as_posix()
+    semantic_sources = [Path(item).as_posix() for item in captured["semantic_runtime"].sources]
+    semantic_saved_path = Path(captured["semantic_runtime"].saved_path).as_posix()
     assert semantic_sources[0].endswith("semantic-runtime/restored-upload/source-files")
     assert semantic_saved_path.endswith("semantic-runtime/restored-upload")
 
@@ -626,13 +638,14 @@ workflow = Workflow(
             "loaded": True,
             "agent_id": agent_id,
             "agent_name": "New Gallery Name",
+            "workflow_spec": apply_builder_step(apply_builder_step(default_spec(), "name", "New Gallery Name"), "description", "New summary from AI Hub config."),
             "python_source": latest_source,
         },
     )
     monkeypatch.setattr(
         entry_routes,
         "restore_runtime_bundle",
-        lambda *, agent_id=None, credentials=None, origin=None: {
+        lambda *, agent_id=None, credentials=None, origin=None, allow_public=False: {
             "bundle_restored": True,
             "builder_upload_id": "restored-upload",
             "python_source": stale_bundle_source,
@@ -650,13 +663,13 @@ workflow = Workflow(
             json={"username": "creator", "password": "secret", "agent_id": "agent-1"},
         )
         with client.session_transaction(base_url="https://playground.example") as session:
-            session_source = session["python_source"]
+            session_spec = session["workflow_spec"]
             builder_upload_id = session["builder_upload_id"]
 
     assert response.status_code == 302
-    assert "New Gallery Name" in session_source
-    assert "New summary from AI Hub config." in session_source
-    assert "Old Bundle Name" not in session_source
+    assert "New Gallery Name" in compile_python_source(session_spec)
+    assert "New summary from AI Hub config." in compile_python_source(session_spec)
+    assert "Old Bundle Name" not in compile_python_source(session_spec)
     assert builder_upload_id == "restored-upload"
 
 
@@ -669,6 +682,7 @@ def test_aihub_navigation_runner_accepts_json_payload(monkeypatch):
             "loaded": True,
             "agent_id": agent_id,
             "agent_name": "Agent One",
+            "workflow_spec": apply_builder_step(default_spec(), "name", "Agent One"),
             "python_source": "print('loaded')",
         },
     )
@@ -700,7 +714,7 @@ def test_aihub_navigation_runner_accepts_handoff_token(monkeypatch):
 
     def fake_load_config(agent_id, *, credentials=None, origin=None):
         seen_load.append({"agent_id": agent_id, "credentials": credentials, "origin": origin})
-        return {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "python_source": "print('loaded')"}
+        return {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "workflow_spec": apply_builder_step(default_spec(), "name", "Agent One"), "python_source": "print('loaded')"}
 
     monkeypatch.setattr(entry_routes, "exchange_handoff_token", fake_exchange)
     monkeypatch.setattr(entry_routes, "load_config", fake_load_config)
@@ -734,7 +748,7 @@ def test_bridge_runner_edit_loads_agent_with_token(monkeypatch):
 
     def fake_load_config(agent_id, *, credentials=None, origin=None):
         seen_load.append({"agent_id": agent_id, "credentials": credentials, "origin": origin})
-        return {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "python_source": "print('loaded')"}
+        return {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "workflow_spec": apply_builder_step(default_spec(), "name", "Agent One"), "python_source": "print('loaded')"}
 
     def fake_exchange_handoff_token(token, *, api_base_url=None, origin=None):
         seen_verify.append((token, api_base_url, origin))
@@ -769,16 +783,8 @@ def test_bridge_runner_edit_loads_agent_with_token(monkeypatch):
 
 
 def test_bridge_runner_read_hides_owner_only_controls(monkeypatch):
-    python_source = """
-from agentic_sdk import Workflow
-from agentic_sdk.modules import DirectAnswerAction
-
-workflow = Workflow(
-    workflow_name="Shared Chat Agent",
-    task_goal="Answer shared chat requests.",
-    action=DirectAnswerAction(),
-)
-"""
+    workflow_spec = apply_builder_step(default_spec(), "name", "Shared Chat Agent")
+    python_source = compile_python_source(workflow_spec)
 
     monkeypatch.setattr(
         aihub_bridge,
@@ -787,6 +793,7 @@ workflow = Workflow(
             "loaded": True,
             "agent_id": agent_id,
             "agent_name": "Shared Chat Agent",
+            "workflow_spec": workflow_spec,
             "python_source": python_source,
         },
     )
@@ -834,13 +841,14 @@ workflow = Workflow(
             "loaded": True,
             "agent_id": agent_id,
             "agent_name": "Bridge Fresh Name",
+            "workflow_spec": apply_builder_step(apply_builder_step(default_spec(), "name", "Bridge Fresh Name"), "description", "Bridge fresh summary."),
             "python_source": latest_source,
         },
     )
     monkeypatch.setattr(
         aihub_bridge,
         "restore_runtime_bundle",
-        lambda *, agent_id=None, credentials=None, origin=None: {
+        lambda *, agent_id=None, credentials=None, origin=None, allow_public=False: {
             "bundle_restored": True,
             "builder_upload_id": "bridge-upload",
             "python_source": stale_bundle_source,
@@ -860,13 +868,13 @@ workflow = Workflow(
             base_url="https://playground.example",
         )
         with client.session_transaction(base_url="https://playground.example") as session:
-            session_source = session["python_source"]
+            session_spec = session["workflow_spec"]
             builder_upload_id = session["builder_upload_id"]
 
     assert response.status_code == 302
-    assert "Bridge Fresh Name" in session_source
-    assert "Bridge fresh summary." in session_source
-    assert "Bridge Old Name" not in session_source
+    assert "Bridge Fresh Name" in compile_python_source(session_spec)
+    assert "Bridge fresh summary." in compile_python_source(session_spec)
+    assert "Bridge Old Name" not in compile_python_source(session_spec)
     assert builder_upload_id == "bridge-upload"
 
 
@@ -875,7 +883,7 @@ def test_playground_runner_edit_accepts_bridge_query(monkeypatch):
 
     def fake_load_config(agent_id, *, credentials=None, origin=None):
         seen_load.append({"agent_id": agent_id, "credentials": credentials, "origin": origin})
-        return {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "python_source": "print('loaded')"}
+        return {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "workflow_spec": apply_builder_step(default_spec(), "name", "Agent One"), "python_source": "print('loaded')"}
 
     monkeypatch.setattr(aihub_bridge, "load_config", fake_load_config)
     monkeypatch.setattr(
@@ -908,7 +916,7 @@ def test_bridge_runner_read_loads_public_agent(monkeypatch):
 
     def fake_load_public_config(agent_id, *, origin=None):
         seen_load.append({"agent_id": agent_id, "origin": origin})
-        return {"loaded": True, "agent_id": agent_id, "agent_name": "Shared Agent", "python_source": "print('shared')"}
+        return {"loaded": True, "agent_id": agent_id, "agent_name": "Shared Agent", "workflow_spec": apply_builder_step(default_spec(), "name", "Shared Agent"), "python_source": "print('shared')"}
 
     monkeypatch.setattr(aihub_bridge, "load_public_config", fake_load_public_config)
     app = create_app()
@@ -941,20 +949,20 @@ def test_legacy_aihub_deep_link_does_not_reuse_stale_source_for_different_agent(
             session["account_context_present"] = True
             session["agent_id"] = "agent-old"
             session["agent_name"] = "Old Agent"
-            session["python_source"] = "print('old agent source')"
+            session["workflow_spec"] = apply_builder_step(default_spec(), "name", "old agent")
             session["builder_upload_id"] = "old-upload"
             session["last_aihub_bundle_load"] = {"bundle_restored": True, "builder_upload_id": "old-upload"}
         response = client.get("/playground/run?mode=aihub_editable&agent_id=agent-new", base_url="https://playground.example")
         with client.session_transaction(base_url="https://playground.example") as session:
             agent_id = session["agent_id"]
-            has_python_source = "python_source" in session
+            has_workflow_spec = "workflow_spec" in session
             has_builder_upload_id = "builder_upload_id" in session
             has_bundle_load = "last_aihub_bundle_load" in session
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/playground/builder")
     assert agent_id == "agent-new"
-    assert has_python_source is False
+    assert has_workflow_spec is False
     assert has_builder_upload_id is False
     assert has_bundle_load is False
 
@@ -964,7 +972,7 @@ def test_playground_runner_read_accepts_bridge_query(monkeypatch):
 
     def fake_load_public_config(agent_id, *, origin=None):
         seen_load.append({"agent_id": agent_id, "origin": origin})
-        return {"loaded": True, "agent_id": agent_id, "agent_name": "Shared Agent", "python_source": "print('shared')"}
+        return {"loaded": True, "agent_id": agent_id, "agent_name": "Shared Agent", "workflow_spec": apply_builder_step(default_spec(), "name", "Shared Agent"), "python_source": "print('shared')"}
 
     monkeypatch.setattr(aihub_bridge, "load_public_config", fake_load_public_config)
     app = create_app()
@@ -1007,7 +1015,7 @@ def test_shared_runner_loads_public_agent_as_read_only(monkeypatch):
 
     def fake_load_public_config(agent_id, *, origin=None):
         seen_load.append({"agent_id": agent_id, "origin": origin})
-        return {"loaded": True, "agent_id": agent_id, "agent_name": "Shared Agent", "python_source": "print('shared')"}
+        return {"loaded": True, "agent_id": agent_id, "agent_name": "Shared Agent", "workflow_spec": apply_builder_step(default_spec(), "name", "Shared Agent"), "python_source": "print('shared')"}
 
     monkeypatch.setattr(entry_routes, "load_public_config", fake_load_public_config)
     app = create_app()
@@ -1025,7 +1033,7 @@ def test_shared_runner_loads_public_agent_as_read_only(monkeypatch):
             assert session["account_context_present"] is False
             assert session["agent_id"] == "agent-1"
             assert session["agent_name"] == "Shared Agent"
-            assert session["python_source"] == "print('shared')"
+            assert session["workflow_spec"]["workflow_name"] == "Shared Agent"
             assert session["source_origin"] == "aihub_shared_readonly"
             assert "ai_hub_credential_ticket" not in session
         runner_page = client.get("/playground/run", base_url="https://playground.example").get_data(as_text=True)
@@ -1050,7 +1058,7 @@ def test_shared_runner_accepts_post_json_payload(monkeypatch):
 
     def fake_load_public_config(agent_id, *, origin=None):
         seen_load.append({"agent_id": agent_id, "origin": origin})
-        return {"loaded": True, "agent_id": agent_id, "agent_name": "Shared Agent", "python_source": "print('shared')"}
+        return {"loaded": True, "agent_id": agent_id, "agent_name": "Shared Agent", "workflow_spec": apply_builder_step(default_spec(), "name", "Shared Agent"), "python_source": "print('shared')"}
 
     monkeypatch.setattr(entry_routes, "load_public_config", fake_load_public_config)
     app = create_app()
@@ -1080,6 +1088,7 @@ def test_shared_runner_accepts_post_form_payload(monkeypatch):
             "loaded": True,
             "agent_id": agent_id,
             "agent_name": "Shared Agent",
+            "workflow_spec": apply_builder_step(default_spec(), "name", "Shared Agent"),
             "python_source": "print('shared')",
         },
     )
@@ -1112,7 +1121,7 @@ def test_aihub_save_rejects_semantic_workflow_before_writing_config_without_know
         with client.session_transaction(base_url="https://playground.example") as current_session:
             current_session["mode"] = "manual_auth"
             current_session["workflow_spec"] = semantic_spec
-            current_session["python_source"] = compile_python_source(semantic_spec)
+            current_session["workflow_spec"] = semantic_spec
         response = client.post("/playground/aihub/config/save", base_url="https://playground.example")
 
     assert response.status_code == 409
@@ -1125,8 +1134,8 @@ def test_aihub_save_rejects_semantic_workflow_before_writing_config_without_know
 def test_agent_picker_selects_and_reloads_existing_agent(monkeypatch):
     monkeypatch.setattr(entry_routes, "verify_credentials", lambda *args, **kwargs: True)
     monkeypatch.setattr(entry_routes, "list_agents", lambda *, credentials=None, origin=None: {"loaded": True, "items": [{"agent_id": "agent-1", "agent_name": "Agent One"}]})
-    monkeypatch.setattr(aihub_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "python_source": "print('reloaded')"})
-    monkeypatch.setattr(entry_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "python_source": "print('loaded')"})
+    monkeypatch.setattr(aihub_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "workflow_spec": apply_builder_step(default_spec(), "name", "Agent One"), "python_source": "print('reloaded')"})
+    monkeypatch.setattr(entry_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Agent One", "workflow_spec": apply_builder_step(default_spec(), "name", "Agent One"), "python_source": "print('loaded')"})
     app = create_app()
     app.config.update(TESTING=True, SECRET_KEY="test-secret")
 
@@ -1136,7 +1145,7 @@ def test_agent_picker_selects_and_reloads_existing_agent(monkeypatch):
         select_response = client.post("/playground/agents/select", data={"agent_id": "agent-1"})
         reload_response = client.post("/playground/aihub/config/reload")
         with client.session_transaction() as session:
-            session_source = session["python_source"]
+            session_spec = session["workflow_spec"]
 
     assert picker_response.status_code == 200
     picker_html = picker_response.get_data(as_text=True)
@@ -1155,13 +1164,13 @@ def test_agent_picker_selects_and_reloads_existing_agent(monkeypatch):
     assert select_response.headers["Location"].endswith("/playground/run")
     assert reload_response.status_code == 200
     assert reload_response.json["loaded"] is True
-    assert session_source == "print('reloaded')"
+    assert session_spec["workflow_name"] == "Agent One"
 
 
 def test_agent_picker_select_clears_previous_bundle_runtime_for_plain_agent(monkeypatch):
     monkeypatch.setattr(entry_routes, "verify_credentials", lambda *args, **kwargs: True)
     monkeypatch.setattr(entry_routes, "list_agents", lambda *, credentials=None, origin=None: {"loaded": True, "items": [{"agent_id": "agent-plain", "agent_name": "Plain Agent"}]})
-    monkeypatch.setattr(entry_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Plain Agent", "python_source": "print('plain')"})
+    monkeypatch.setattr(entry_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Plain Agent", "workflow_spec": apply_builder_step(default_spec(), "name", "Plain Agent"), "python_source": "print('plain')"})
     monkeypatch.setattr(entry_routes, "restore_runtime_bundle", lambda **kwargs: {"bundle_restored": False, "bundle_error": "No bundle for this agent."})
     app = create_app()
     app.config.update(TESTING=True, SECRET_KEY="test-secret")
@@ -1173,14 +1182,18 @@ def test_agent_picker_select_clears_previous_bundle_runtime_for_plain_agent(monk
             session["last_aihub_bundle_load"] = {"bundle_restored": True, "builder_upload_id": "old-upload"}
         response = client.post("/playground/agents/select", data={"agent_id": "agent-plain"})
         with client.session_transaction() as session:
-            session_source = session["python_source"]
+            session_spec = session["workflow_spec"]
             has_builder_upload_id = "builder_upload_id" in session
-            has_bundle_load = "last_aihub_bundle_load" in session
+            bundle_load = session.get("last_aihub_bundle_load")
 
     assert response.status_code == 302
-    assert session_source == "print('plain')"
+    assert session_spec["workflow_name"] == "Plain Agent"
     assert has_builder_upload_id is False
-    assert has_bundle_load is False
+    # The previous agent's runtime is gone, which is what this guards. The key
+    # now holds this attempt's result instead of being dropped, so the reason a
+    # restore failed survives for whoever has to fix it.
+    assert bundle_load.get("builder_upload_id") != "old-upload"
+    assert bundle_load.get("bundle_restored") is not True
 
 
 def test_agent_picker_blocks_semantic_agent_when_bundle_restore_fails(monkeypatch):
@@ -1196,7 +1209,7 @@ workflow = Workflow(
 """
     monkeypatch.setattr(entry_routes, "verify_credentials", lambda *args, **kwargs: True)
     monkeypatch.setattr(entry_routes, "list_agents", lambda *, credentials=None, origin=None: {"loaded": True, "items": [{"agent_id": "agent-1", "agent_name": "Semantic Agent"}]})
-    monkeypatch.setattr(entry_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Semantic Agent", "python_source": semantic_source})
+    monkeypatch.setattr(entry_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Semantic Agent", "workflow_spec": _semantic_spec(), "python_source": semantic_source})
     monkeypatch.setattr(entry_routes, "restore_runtime_bundle", lambda **kwargs: {"bundle_restored": False, "bundle_error": "Bundle object was not found."})
     app = create_app()
     app.config.update(TESTING=True, SECRET_KEY="test-secret")
@@ -1223,7 +1236,7 @@ workflow = Workflow(
 )
 """
     monkeypatch.setattr(entry_routes, "verify_credentials", lambda *args, **kwargs: True)
-    monkeypatch.setattr(aihub_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Semantic Agent", "python_source": semantic_source})
+    monkeypatch.setattr(aihub_routes, "load_config", lambda agent_id, *, credentials=None, origin=None: {"loaded": True, "agent_id": agent_id, "agent_name": "Semantic Agent", "workflow_spec": _semantic_spec(), "python_source": semantic_source})
     monkeypatch.setattr(aihub_routes, "restore_runtime_bundle", lambda **kwargs: {"bundle_restored": False, "bundle_error": "Bundle object was not found."})
     app = create_app()
     app.config.update(TESTING=True, SECRET_KEY="test-secret")
@@ -1258,7 +1271,7 @@ def test_agent_picker_new_resets_selected_agent_and_enters_builder(monkeypatch):
             session["agent_id"] = "agent-1"
             session["agent_name"] = "Agent One"
             session["last_aihub_save"] = {"saved": True}
-            session["python_source"] = "print('stale')"
+            session["workflow_spec"] = apply_builder_step(default_spec(), "name", "stale")
             session["source_origin"] = "aihub_loaded"
         response = client.post("/playground/agents/new")
         with client.session_transaction() as session:
@@ -1267,7 +1280,7 @@ def test_agent_picker_new_resets_selected_agent_and_enters_builder(monkeypatch):
             assert "last_aihub_save" not in session
             assert session["mode"] == "manual_auth"
             assert session["source_origin"] == "manual_new"
-            assert session["python_source"] != "print('stale')"
+            assert session["workflow_spec"]["workflow_name"] != "stale"
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/playground/builder")
@@ -1312,7 +1325,7 @@ def test_expired_ticket_downgrades_save_without_clearing_runner_workflow(monkeyp
             current_session["account_context_present"] = True
             current_session["ai_hub_credential_ticket"] = "expired-ticket"
             current_session["ai_hub_username"] = "creator"
-            current_session["python_source"] = "print('active workflow')"
+            current_session["workflow_spec"] = apply_builder_step(default_spec(), "name", "Active workflow")
             current_session["workflow_spec"] = {"version": "2", "workflow_name": "Active workflow"}
             current_session["runner_presentation"] = {"version": "1", "starter_questions": ["Continue"]}
 
@@ -1320,7 +1333,7 @@ def test_expired_ticket_downgrades_save_without_clearing_runner_workflow(monkeyp
 
         with client.session_transaction() as current_session:
             assert current_session["mode"] == "anonymous"
-            assert current_session["python_source"] == "print('active workflow')"
+            assert current_session["workflow_spec"]["workflow_name"] == "Active workflow"
             assert current_session["workflow_spec"] == {"version": "2", "workflow_name": "Active workflow"}
             assert current_session["runner_presentation"] == {"version": "1", "starter_questions": ["Continue"]}
             assert "ai_hub_credential_ticket" not in current_session
@@ -1338,7 +1351,7 @@ def test_aihub_login_route_authenticates_without_saving(monkeypatch):
     with app.test_client() as client:
         client.post("/playground/start/anonymous", base_url="https://playground.example")
         with client.session_transaction(base_url="https://playground.example") as session:
-            session["python_source"] = "print('hello')"
+            session["workflow_spec"] = apply_builder_step(default_spec(), "name", "Draft in progress")
         response = client.post(
             "/playground/aihub/auth/login",
             base_url="https://playground.example",
@@ -1347,14 +1360,14 @@ def test_aihub_login_route_authenticates_without_saving(monkeypatch):
         with client.session_transaction(base_url="https://playground.example") as session:
             saved_mode = session["mode"]
             saved_username = session["ai_hub_username"]
-            saved_source = session["python_source"]
+            saved_spec = session["workflow_spec"]
             pending_auto_save = session.get("pending_runner_auto_save")
 
     assert response.status_code == 200
     assert response.json["authenticated"] is True
     assert saved_mode == "manual_auth"
     assert saved_username == "creator"
-    assert saved_source == "print('hello')"
+    assert saved_spec["workflow_name"] == "Draft in progress"
     assert pending_auto_save is None
 
 
@@ -1372,3 +1385,70 @@ def test_login_rejects_invalid_ai_hub_credentials(monkeypatch):
         assert "We could not verify those AI Hub credentials" in response.get_data(as_text=True)
         with client.session_transaction() as session:
             assert "mode" not in session
+
+
+def test_a_shared_agent_restores_its_documents_without_an_account(monkeypatch):
+    """The gallery's read-only Runner must get the knowledge bundle too.
+
+    It never did, so every publicly shared semantic agent searched an empty
+    index and told anonymous visitors it found nothing. AI Hub decides whether
+    to serve the bundle — it does so only for an agent listed in the gallery —
+    so the Playground asks without an account rather than not asking at all.
+    """
+    spec = {"version": "2", "workflow_name": "shared", "retrieve": {"module": "SemanticRetrieve", "params": {"support_files": ["guide.pdf"]}}}
+    asked_with = []
+
+    monkeypatch.setattr(
+        aihub_bridge,
+        "load_public_config",
+        lambda agent_id, *, origin=None: {"loaded": True, "agent_id": agent_id, "workflow_spec": spec, "endpoint_bindings": {}},
+    )
+
+    def fake_restore(*, agent_id, credentials, origin=None, allow_public=False):
+        asked_with.append((credentials, allow_public))
+        return {"bundle_restored": True, "builder_upload_id": "upload-1"}
+
+    monkeypatch.setattr(aihub_bridge, "restore_runtime_bundle", fake_restore)
+
+    app = create_app()
+    app.config.update(TESTING=True, SECRET_KEY="test-secret")
+    with app.test_client() as client:
+        client.get("/playground/run?owner=someone&agentId=agt_1", base_url="https://playground.example")
+        with client.session_transaction(base_url="https://playground.example") as session:
+            assert session["builder_upload_id"] == "upload-1"
+
+    # No account, and said so explicitly: every other caller keeps the login
+    # check, so an expired session is still reported as one.
+    assert asked_with == [(None, True)]
+
+
+def test_a_shared_agent_opens_even_when_its_documents_cannot_be_restored(monkeypatch):
+    """A visitor turned away here can do nothing about it, so do not turn them away.
+
+    The owner gets an error because the owner can fix it — re-upload, re-save.
+    A gallery visitor would just get a dead page, so the Runner opens anyway
+    and the reason is kept where whoever has to fix it can read it.
+    """
+    spec = {"version": "2", "workflow_name": "shared", "retrieve": {"module": "SemanticRetrieve", "params": {"support_files": ["guide.pdf"]}}}
+
+    monkeypatch.setattr(
+        aihub_bridge,
+        "load_public_config",
+        lambda agent_id, *, origin=None: {"loaded": True, "agent_id": agent_id, "workflow_spec": spec, "endpoint_bindings": {}},
+    )
+    monkeypatch.setattr(
+        aihub_bridge,
+        "restore_runtime_bundle",
+        lambda **kwargs: {"bundle_restored": False, "bundle_error": "Bundle object was not found."},
+    )
+
+    app = create_app()
+    app.config.update(TESTING=True, SECRET_KEY="test-secret")
+    with app.test_client() as client:
+        response = client.get("/playground/run?owner=someone&agentId=agt_1", base_url="https://playground.example")
+        with client.session_transaction(base_url="https://playground.example") as session:
+            assert session["mode"] == "aihub_readonly"
+            assert "builder_upload_id" not in session
+            assert session["last_aihub_bundle_load"]["bundle_error"] == "Bundle object was not found."
+
+    assert response.status_code == 200
