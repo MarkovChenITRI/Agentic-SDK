@@ -118,10 +118,11 @@ def navigate_from_shared_agent_to_runner():
     session["mode"] = "aihub_readonly"
     session["account_context_present"] = False
     store_loaded_agent(result)
-    # The second door into the read-only Runner. It needs the documents for the
-    # same reason the first one does, and degrades the same way: a visitor who
-    # is turned away here can do nothing about it.
-    _restore_selected_agent_bundle(str(result["agent_id"]), None, allow_public=True)
+    # The second door into the read-only Runner. Same deferral: record that the
+    # documents are owed and let the initialisation step fetch them, so the
+    # page still loads for an agent with a large bundle.
+    _clear_bundle_runtime_state()
+    session["pending_public_bundle"] = str(result["agent_id"])
     session["source_origin"] = "aihub_shared_readonly"
     return redirect(url_for("runner.runner"))
 
@@ -280,6 +281,7 @@ def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials 
 def _clear_bundle_runtime_state() -> None:
     session.pop("builder_upload_id", None)
     session.pop("last_aihub_bundle_load", None)
+    session.pop("pending_public_bundle", None)
 
 
 def _semantic_bundle_required_for_result(result: dict[str, object]) -> bool:

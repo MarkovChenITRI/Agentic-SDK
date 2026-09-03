@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 
 from playground.services.aihub_client import AiHubCredentials, request_bundle_download_url, request_bundle_upload_url
-from playground.services.bundle_store import create_agent_bundle_zip, download_bundle_zip, restore_agent_bundle_zip, upload_bundle_zip
+from playground.services.bundle_store import bundle_version, create_agent_bundle_zip, download_bundle_zip, restore_agent_bundle_zip, restored_bundle, upload_bundle_zip
 
 
 def save_runtime_bundle(
@@ -68,11 +69,27 @@ def restore_runtime_bundle(
     if not download_payload.get("ok"):
         return {"bundle_restored": False, "bundle_error": download_payload.get("error") or "Could not obtain bundle download URL.", "bundle_error_code": download_payload.get("error_code")}
 
+    # One unpacked copy per stored bundle, not per visitor. The stored version
+    # identifies it, so a bundle that has not changed is neither downloaded nor
+    # read again, and a bundle that has changed lands beside the old one.
+    upload_id = _bundle_upload_id(resolved_agent_id, bundle_version(download_payload))
+    already = restored_bundle(upload_id)
+    if already is not None:
+        return {
+            "bundle_restored": True,
+            "builder_upload_id": already.builder_upload_id,
+            "python_source": already.python_source,
+            "bundle_source_file_count": already.source_file_count,
+            "bundle_vectorstore_file_count": already.vectorstore_file_count,
+            "bundle_path": download_payload.get("bundle_path"),
+            "bundle_reused": True,
+        }
+
     download_result = download_bundle_zip(download_payload)
     if not download_result.get("downloaded"):
         return {"bundle_restored": False, "bundle_error": download_result.get("error") or "Bundle download failed."}
 
-    restored = restore_agent_bundle_zip(Path(download_result["zip_path"]))
+    restored = restore_agent_bundle_zip(Path(download_result["zip_path"]), upload_id=upload_id)
     return {
         "bundle_restored": True,
         "builder_upload_id": restored.builder_upload_id,
@@ -81,6 +98,11 @@ def restore_runtime_bundle(
         "bundle_vectorstore_file_count": restored.vectorstore_file_count,
         "bundle_path": download_result.get("bundle_path"),
     }
+
+
+def _bundle_upload_id(agent_id: str, version: str) -> str:
+    """A stable name for one stored bundle, so its unpacked copy can be reused."""
+    return hashlib.sha256(f"{agent_id}@{version}".encode("utf-8")).hexdigest()[:32]
 
 
 def _bundle_upload_attempts() -> int:

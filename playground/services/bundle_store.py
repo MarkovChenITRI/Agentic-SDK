@@ -83,8 +83,72 @@ def create_agent_bundle_zip(
     return BundleBuildResult(zip_path=zip_path, source_file_count=len(source_files), vectorstore_file_count=len(vectorstore_files))
 
 
-def restore_agent_bundle_zip(zip_path: Path) -> BundleRestoreResult:
-    upload_id = new_upload_id()
+def bundle_version(download_payload: dict[str, object]) -> str:
+    """Which stored version of the bundle a download URL points at.
+
+    Azure stamps every write with a version id, and it comes back on a HEAD of
+    the signed URL. Without it the only stable name for a bundle is the agent
+    id, which would keep serving a stale copy after the owner re-uploads.
+    """
+    url = str(download_payload.get("download_url") or "")
+    if url:
+        try:
+            response = httpx.head(url, timeout=_bundle_transfer_timeout_seconds())
+            version = response.headers.get("x-ms-version-id") or response.headers.get("etag") or ""
+            if version.strip():
+                return version.strip().strip('"')
+        except httpx.HTTPError:
+            pass
+    return str(download_payload.get("bundle_path") or "unversioned")
+
+
+def restored_bundle(upload_id: str) -> BundleRestoreResult | None:
+    """A bundle already unpacked here, if the unpacking finished.
+
+    Restoring costs a download plus text extraction from every source file.
+    That was affordable while only an owner opened an agent; a shared agent is
+    opened by anyone, so the same 67MB of PDFs was re-fetched and re-read per
+    visitor until the request timed out. The marker is written last, so a
+    half-finished directory is not mistaken for a usable one.
+    """
+    marker = _RUNTIME_ROOT / "semantic-runtime" / upload_id / "restored.json"
+    if not marker.is_file():
+        return None
+    try:
+        record = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return BundleRestoreResult(
+        restored=True,
+        builder_upload_id=upload_id,
+        python_source=record.get("python_source"),
+        source_file_count=int(record.get("source_file_count") or 0),
+        vectorstore_file_count=int(record.get("vectorstore_file_count") or 0),
+    )
+
+
+def _mark_bundle_restored(result: BundleRestoreResult) -> None:
+    marker = _RUNTIME_ROOT / "semantic-runtime" / result.builder_upload_id / "restored.json"
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            json.dumps(
+                {
+                    "python_source": result.python_source,
+                    "source_file_count": result.source_file_count,
+                    "vectorstore_file_count": result.vectorstore_file_count,
+                    "restored_at": datetime.now(timezone.utc).isoformat(),
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def restore_agent_bundle_zip(zip_path: Path, *, upload_id: str | None = None) -> BundleRestoreResult:
+    upload_id = upload_id or new_upload_id()
     source_dir = _semantic_source_files_dir(upload_id)
     vectorstore_path = _semantic_vectorstore_dir(upload_id)
     source_dir.mkdir(parents=True, exist_ok=True)
@@ -131,7 +195,7 @@ def restore_agent_bundle_zip(zip_path: Path) -> BundleRestoreResult:
         vectorstore_path.mkdir(parents=True, exist_ok=True)
         vectorstore_file_count = 0
 
-    return BundleRestoreResult(
+    result = BundleRestoreResult(
         restored=True,
         builder_upload_id=upload_id,
         python_source=python_source,
@@ -139,6 +203,8 @@ def restore_agent_bundle_zip(zip_path: Path) -> BundleRestoreResult:
         vectorstore_file_count=vectorstore_file_count,
         rejected_source_files=tuple(rejected_source_files),
     )
+    _mark_bundle_restored(result)
+    return result
 
 
 def upload_bundle_zip(upload_payload: dict[str, object], zip_path: Path) -> dict[str, object]:

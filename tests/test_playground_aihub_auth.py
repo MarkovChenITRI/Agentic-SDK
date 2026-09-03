@@ -1387,13 +1387,13 @@ def test_login_rejects_invalid_ai_hub_credentials(monkeypatch):
             assert "mode" not in session
 
 
-def test_a_shared_agent_restores_its_documents_without_an_account(monkeypatch):
-    """The gallery's read-only Runner must get the knowledge bundle too.
+def test_a_shared_agent_fetches_its_documents_when_the_runner_initialises(monkeypatch):
+    """Opening the page must not wait on the bundle; initialising must not skip it.
 
-    It never did, so every publicly shared semantic agent searched an empty
-    index and told anonymous visitors it found nothing. AI Hub decides whether
-    to serve the bundle — it does so only for an agent listed in the gallery —
-    so the Playground asks without an account rather than not asking at all.
+    Fetching a bundle costs a download plus text extraction from every source
+    file. Doing that while the page loaded gave visitors to a 67MB agent a
+    request that never returned; skipping it left every semantic agent
+    searching an empty index.
     """
     spec = {"version": "2", "workflow_name": "shared", "retrieve": {"module": "SemanticRetrieve", "params": {"support_files": ["guide.pdf"]}}}
     asked_with = []
@@ -1405,7 +1405,7 @@ def test_a_shared_agent_restores_its_documents_without_an_account(monkeypatch):
     )
 
     def fake_restore(*, agent_id, credentials, origin=None, allow_public=False):
-        asked_with.append((credentials, allow_public))
+        asked_with.append((agent_id, credentials, allow_public))
         return {"bundle_restored": True, "builder_upload_id": "upload-1"}
 
     monkeypatch.setattr(aihub_bridge, "restore_runtime_bundle", fake_restore)
@@ -1415,11 +1415,18 @@ def test_a_shared_agent_restores_its_documents_without_an_account(monkeypatch):
     with app.test_client() as client:
         client.get("/playground/run?owner=someone&agentId=agt_1", base_url="https://playground.example")
         with client.session_transaction(base_url="https://playground.example") as session:
+            assert session["pending_public_bundle"] == "agt_1"
+            assert "builder_upload_id" not in session
+        assert asked_with == []
+
+        client.post("/playground/run/initialize/stream", json={}, base_url="https://playground.example")
+        with client.session_transaction(base_url="https://playground.example") as session:
             assert session["builder_upload_id"] == "upload-1"
+            assert "pending_public_bundle" not in session
 
     # No account, and said so explicitly: every other caller keeps the login
     # check, so an expired session is still reported as one.
-    assert asked_with == [(None, True)]
+    assert asked_with == [("agt_1", None, True)]
 
 
 def test_a_shared_agent_opens_even_when_its_documents_cannot_be_restored(monkeypatch):
@@ -1446,6 +1453,7 @@ def test_a_shared_agent_opens_even_when_its_documents_cannot_be_restored(monkeyp
     app.config.update(TESTING=True, SECRET_KEY="test-secret")
     with app.test_client() as client:
         response = client.get("/playground/run?owner=someone&agentId=agt_1", base_url="https://playground.example")
+        client.post("/playground/run/initialize/stream", json={}, base_url="https://playground.example")
         with client.session_transaction(base_url="https://playground.example") as session:
             assert session["mode"] == "aihub_readonly"
             assert "builder_upload_id" not in session

@@ -5,7 +5,7 @@ from dataclasses import asdict, is_dataclass
 
 from flask import Blueprint, Response, jsonify, redirect, render_template, request, session, stream_with_context, url_for
 
-from playground.services.aihub_bridge import has_runner_bridge_query, start_runner_bridge_session
+from playground.services.aihub_bridge import has_runner_bridge_query, restore_pending_public_bundle, start_runner_bridge_session
 from playground.services.aihub_client import credentials_for_ticket, issue_credential_ticket, verify_handoff_token, verify_identity
 from playground.services.deep_link import apply_aihub_deep_link
 from playground.services.mode_context import get_mode_context
@@ -88,6 +88,9 @@ def execute_runner():
         return jsonify({"error": "No agent is available for execution."}), 400
 
     payload = request.get_json(silent=True) or {}
+    # Normally the initialisation step already did this; a client that goes
+    # straight to a message must not lose the documents because of it.
+    restore_pending_public_bundle(origin=request.host_url)
     endpoint_selections = _runner_endpoint_selections()
     semantic_runtime = _semantic_runtime()
     conversation_state = _append_normal_user_turn(payload)
@@ -112,6 +115,7 @@ def execute_runner_stream():
         return jsonify({"error": "No agent is available for execution."}), 400
 
     payload = request.get_json(silent=True) or {}
+    restore_pending_public_bundle(origin=request.host_url)
     endpoint_selections = _runner_endpoint_selections()
     semantic_runtime = _semantic_runtime()
     spec = current_spec()
@@ -169,6 +173,7 @@ def initialize_runner_stream():
     if not has_spec():
         return jsonify({"error": "No agent is available for initialization."}), 400
 
+    restore_pending_public_bundle(origin=request.host_url)
     endpoint_selections = _runner_endpoint_selections()
     semantic_runtime = _semantic_runtime()
     spec = current_spec()

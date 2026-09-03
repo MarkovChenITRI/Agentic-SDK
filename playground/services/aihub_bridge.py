@@ -70,10 +70,13 @@ def start_runner_bridge_session(args: Mapping[str, object], *, origin: str | Non
     # this the read-only Runner ran every semantic agent against an empty index
     # and answered "nothing found" to every question.
     #
-    # Unlike the owner, a visitor who is turned away here can do nothing about
-    # it, so a failure degrades rather than closing the door: the Runner still
-    # opens and says the documents are not loaded.
-    _restore_selected_agent_bundle(str(result["agent_id"]), None, origin=origin, allow_public=True)
+    # Deferred, not skipped. Fetching a bundle costs a download plus text
+    # extraction from every source file — minutes for an agent with a shelf of
+    # PDFs — and doing that while the page is still loading gave the visitor a
+    # request that never returned. The Runner has an initialisation step with a
+    # progress overlay; that is where waiting belongs.
+    _clear_bundle_runtime_state()
+    session["pending_public_bundle"] = str(result["agent_id"])
     session["agent_owner"] = _arg(args, "owner")
     session["source_origin"] = "aihub_shared_readonly"
     return {"started": True, "mode": "read"}
@@ -152,9 +155,24 @@ def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials 
     return bundle_result
 
 
+def restore_pending_public_bundle(*, origin: str | None = None) -> dict[str, object] | None:
+    """Fetch a shared agent's documents, once the Runner is ready to wait.
+
+    The read-only entry points only record that a bundle is owed; this runs
+    inside the initialisation step, where the visitor sees a progress overlay
+    instead of a page that never loads.
+    """
+    agent_id = session.get("pending_public_bundle")
+    if not isinstance(agent_id, str) or not agent_id.strip():
+        return None
+    session.pop("pending_public_bundle", None)
+    return _restore_selected_agent_bundle(agent_id.strip(), None, origin=origin, allow_public=True)
+
+
 def _clear_bundle_runtime_state() -> None:
     session.pop("builder_upload_id", None)
     session.pop("last_aihub_bundle_load", None)
+    session.pop("pending_public_bundle", None)
 
 
 def _semantic_bundle_required_for_result(result: dict[str, object]) -> bool:
