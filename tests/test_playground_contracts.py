@@ -2198,21 +2198,37 @@ def test_the_execute_route_forwards_the_failure_detail_to_the_browser():
     assert payload["detail"], "the route must forward the cause, not only the message"
 
 
-def test_a_keyword_agent_asks_for_the_planner_it_installs():
-    """Choosing a lookup adds a planner, and the Builder must say it needs a model.
+def test_a_lookup_agent_can_run_without_a_model_at_all():
+    """A key/value table needs no model, and the Builder must not add one.
 
-    It did not, so the run failed with nothing on screen to fix. Removing the
-    planner instead would have taken away the step that decides whether a turn
-    needs a lookup at all.
+    A planner earns its model call by deciding whether to search; deciding that
+    costs more than a dictionary read. And whether the table matched is a number
+    the retrieve module already reports, so checking it costs nothing either.
+    Between them they made every lookup agent pay for two model calls it had no
+    use for — and Q4 had no answer that skipped the third.
     """
     spec = build_spec(
         ("retrieve_policy", "keyword"),
         ("retrieve", {"keyword_pairs": "保固 = 本產品保固十二個月。"}),
+        ("output_format", "direct"),
+        ("failure_policy", "handoff"),
     )
 
+    assert (spec.get("plan") or {}).get("module") is None
+    assert spec["action"]["module"] == "DirectAnswerAction"
+    assert spec["reflect"]["module"] == "EvidenceCheckReflect"
+    assert model_endpoints.endpoint_state(spec, {})["requirements"] == []
+
+    answered = runner_service.run_agent(spec, message="保固多久？", endpoint_selections={})
+    assert answered["final_message"] == "本產品保固十二個月。"
+
+
+def test_retrying_still_installs_the_planner_it_routes_back_to():
+    """"再查一次" sends the workflow back to plan, so plan has to be there."""
+    spec = build_spec(("retrieve_policy", "keyword"), ("failure_policy", "retry"))
+
     assert (spec.get("plan") or {}).get("module") == "NextStepPlan"
-    roles = [r["role"] for r in model_endpoints.endpoint_state(spec, {})["requirements"]]
-    assert "plan" in roles
+    assert "plan" in [r["role"] for r in model_endpoints.endpoint_state(spec, {})["requirements"]]
 
 
 def test_the_planner_uses_its_own_binding_not_the_action_role():
@@ -2250,8 +2266,9 @@ def test_an_agent_saved_before_the_planner_binding_still_runs():
     one would stop 11 of the 15 saved agents from running at all. They keep
     borrowing the action endpoint until someone binds the planner.
     """
-    spec = build_spec(("retrieve_policy", "keyword"), ("output_format", "free_text"))
-    saved_bindings = {"perceive": "gpt-54", "action": "gpt-55"}
+    # Mirrors the saved agents: a planner in the spec, no binding for it.
+    spec = build_spec(("retrieve_policy", "semantic"), ("output_format", "free_text"))
+    saved_bindings = {"perceive": "gpt-54", "retrieve": "embedded-large", "action": "gpt-55"}
 
     borrowed = runner_service.build_workflow(spec, saved_bindings)
     own = runner_service.build_workflow(spec, {**saved_bindings, "plan": "gpt-54"})

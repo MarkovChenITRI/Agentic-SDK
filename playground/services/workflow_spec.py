@@ -354,17 +354,22 @@ def apply_builder_step(spec: dict[str, Any], step_key: str, choice_label: object
                 "retrieve": {**spec.get("retrieve", {}), "module": "PassThroughRetrieve"},
                 "plan": {"module": None, "params": {"strategy": None, "system_prompt": existing_plan.get("params", {}).get("system_prompt")}},
             }
-        elif choice in ("keyword", "semantic"):
-            retrieve_module = "KeywordRetrieve" if choice == "keyword" else "SemanticRetrieve"
+        elif choice == "semantic":
+            # A planner earns its model call by deciding whether to search, and
+            # searching here costs an embedding call. Keyword lookup is a
+            # dictionary read, so deciding whether to do it costs more than
+            # doing it — that flow goes straight to retrieve.
             current_strategy = existing_plan.get("params", {}).get("strategy")
             return {
                 **spec,
-                "retrieve": {**spec.get("retrieve", {}), "module": retrieve_module},
+                "retrieve": {**spec.get("retrieve", {}), "module": "SemanticRetrieve"},
                 "plan": {
                     "module": "NextStepPlan",
                     "params": {"strategy": current_strategy or "RouteBySupport", "system_prompt": existing_plan.get("params", {}).get("system_prompt")},
                 },
             }
+        elif choice == "keyword":
+            return {**spec, "retrieve": {**spec.get("retrieve", {}), "module": "KeywordRetrieve"}}
         return spec
 
     if step_key == "output_format":
@@ -394,7 +399,11 @@ def apply_builder_step(spec: dict[str, Any], step_key: str, choice_label: object
     if step_key == "failure_policy":
         choice = str(choice_label)
         existing_retrieve_module = spec.get("retrieve", {}).get("module", "PassThroughRetrieve")
-        if existing_retrieve_module == "SemanticRetrieve":
+        # Check the evidence when there is evidence to check. Keyword and
+        # semantic retrieval both report how many entries they matched, and
+        # reading that number costs nothing. Only an agent that looks nothing up
+        # has to pay a model to judge its own answer.
+        if existing_retrieve_module in {"SemanticRetrieve", "KeywordRetrieve"}:
             reflect_module = "EvidenceCheckReflect"
         else:
             reflect_module = "ResponseCheckReflect"
