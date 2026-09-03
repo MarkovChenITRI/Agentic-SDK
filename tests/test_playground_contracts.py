@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import sys
 from io import BytesIO
@@ -2401,3 +2402,54 @@ def test_the_finish_button_stays_shut_on_an_unanswered_wizard():
 
     assert by_title["Q4"] is False
     assert all(i["completed"] for i in items) is False
+
+
+def test_the_search_size_is_something_the_builder_can_set():
+    """SemanticRetrieve.top_k had to be changed by editing the exported .py.
+
+    Reported as R300-AI/Agentic-SDK#2: the wizard generates a module whose
+    result count is a real behaviour knob, and offered no way to turn it.
+    """
+    spec = build_spec(
+        ("retrieve_policy", "semantic"),
+        ("retrieve", {"semantic_support_files": "guide.pdf", "top_k": "8"}),
+    )
+
+    assert spec["retrieve"]["params"]["top_k"] == 8
+    assert spec_to_form_state(spec)["values"]["retrieve"]["top_k"] == "8"
+    assert spec_to_config(spec).retrieve_top_k == 8
+
+
+def test_a_typed_search_size_never_crashes_the_form():
+    """It is a text field to whoever is typing, so treat it as one."""
+    spec = build_spec(("retrieve_policy", "semantic"), ("retrieve", {"top_k": "8"}))
+
+    for typed, expected in [("0", 1), ("99", 20), ("abc", 8), ("", 8), ("  5 ", 5)]:
+        assert apply_builder_step(spec, "retrieve", {"top_k": typed})["retrieve"]["params"]["top_k"] == expected, typed
+
+
+def test_an_uploaded_document_can_be_taken_back_off(tmp_path, monkeypatch):
+    """Uploading was one-way, so a wrong file stayed in the agent for good.
+
+    Reported as R300-AI/Agentic-SDK#1: 已上傳的資料無法刪除.
+    """
+    app = create_app()
+    app.config.update(TESTING=True, SECRET_KEY="test-secret")
+
+    with app.test_client() as client:
+        client.post("/playground/start/anonymous")
+        client.post("/playground/builder/state", json={"step": "retrieve_policy", "choice": "semantic"})
+        uploaded = client.post(
+            "/playground/builder/uploads",
+            data={"files": [(io.BytesIO("保固十二個月".encode()), "a.md"), (io.BytesIO("退貨七天".encode()), "b.md")]},
+            content_type="multipart/form-data",
+        ).get_json()
+        assert uploaded["semantic_support_files"] == ["a.md", "b.md"]
+
+        removed = client.post("/playground/builder/uploads/delete", json={"name": "a.md"}).get_json()
+        assert removed["updated"] is True
+        assert removed["semantic_support_files"] == ["b.md"]
+
+        missing = client.post("/playground/builder/uploads/delete", json={"name": "never-uploaded.md"})
+        assert missing.status_code == 404
+        assert missing.get_json()["updated"] is False

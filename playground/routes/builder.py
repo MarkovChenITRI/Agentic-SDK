@@ -11,7 +11,7 @@ from playground.services.aihub_bridge import has_builder_bridge_query, start_bui
 from playground.services.mode_context import get_mode_context
 from playground.services.model_endpoints import endpoint_state, normalize_endpoint_selections
 from playground.services.session_spec import current_spec, has_spec, reset_spec, store_spec
-from playground.services.semantic_runtime import new_upload_id, runtime_root, source_files_dir
+from playground.services.semantic_runtime import new_upload_id, runtime_root, source_files_dir, vectorstore_dir
 from playground.services.semantic_ingestion import accepted_upload_extensions, ingest_semantic_upload
 from playground.services.source_builder import (
     get_builder_steps,
@@ -221,6 +221,61 @@ def upload_builder_files():
             "uploaded_files": new_names,
             "rejected_files": rejected_files,
             "semantic_support_files": stored_names,
+            "workflow_summary": {
+                "name": workflow_summary.name,
+                "input_contract": workflow_summary.input_contract,
+                "template": workflow_summary.template,
+                "output_contract": workflow_summary.output_contract,
+                "readiness": workflow_summary.readiness,
+            },
+            "builder_endpoint_state": builder_endpoint_state,
+            "builder_review_state": builder_review["items"],
+            "builder_review_ready": builder_review["ready"],
+        }
+    )
+
+
+@builder_bp.post("/uploads/delete")
+def delete_builder_upload():
+    """Take an uploaded reference document back off the agent.
+
+    Uploading was one-way: the list showed what had been added and offered no
+    way to undo it, so a wrong file stayed in the agent's knowledge for good.
+    """
+    payload = request.get_json(silent=True) or {}
+    name = Path(str(payload.get("name") or "")).name.strip()
+    stored_names = _existing_semantic_support_files()
+    if not name or name not in stored_names:
+        return jsonify({"updated": False, "error": "找不到這份參考文件。"}), 404
+
+    upload_id = session.get("builder_upload_id")
+    if isinstance(upload_id, str) and upload_id.strip():
+        target = source_files_dir(upload_id) / name
+        try:
+            if target.is_file():
+                target.unlink()
+        except OSError:
+            pass
+        # The index was built from the files that were there; leaving it behind
+        # would keep answering from the document just removed.
+        shutil.rmtree(vectorstore_dir(upload_id), ignore_errors=True)
+
+    remaining = [stored for stored in stored_names if stored != name]
+    spec = apply_builder_step(current_spec(), "retrieve", {"semantic_support_files": "\n".join(remaining)})
+    store_spec(spec)
+    session["builder_has_user_config"] = True
+    session.pop("builder_form_state", None)
+
+    steps = get_builder_steps()
+    endpoint_selections = _normalize_builder_endpoint_selections()
+    builder_endpoint_state = endpoint_state(current_spec(), endpoint_selections)
+    builder_review = _builder_review_payload(steps, _builder_form_state_from_spec(spec), builder_endpoint_state)
+    workflow_summary = get_workflow_summary(current_spec())
+    return jsonify(
+        {
+            "updated": True,
+            "removed_file": name,
+            "semantic_support_files": remaining,
             "workflow_summary": {
                 "name": workflow_summary.name,
                 "input_contract": workflow_summary.input_contract,

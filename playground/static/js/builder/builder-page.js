@@ -634,9 +634,15 @@ function syncSemanticUploadPanel(panel) {
       const row = document.createElement("li");
       const name = document.createElement("span");
       const state = document.createElement("strong");
+      const remove = document.createElement("button");
       name.textContent = item;
       state.textContent = "已上傳";
-      row.append(name, state);
+      remove.type = "button";
+      remove.className = "button button-ghost";
+      remove.textContent = "移除";
+      remove.setAttribute("aria-label", `移除 ${item}`);
+      remove.dataset.semanticUploadRemove = item;
+      row.append(name, state, remove);
       return row;
     }),
   );
@@ -645,6 +651,37 @@ function syncSemanticUploadPanel(panel) {
     ? `已上傳 ${items.length} 份參考文件。`
     : "尚未上傳參考文件。";
 }
+
+async function removeSemanticFile(panel, name) {
+  const output = panel?.querySelector("[data-semantic-upload-output]");
+  const status = panel?.querySelector("[data-semantic-upload-status]");
+  if (!output || !status || !name) {
+    return;
+  }
+  status.classList.remove("error");
+  status.textContent = `正在移除 ${name}…`;
+  try {
+    const response = await fetch("/playground/builder/uploads/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.updated) {
+      throw new Error(result.error || "移除失敗，請再試一次。");
+    }
+    output.value = (result.semantic_support_files || []).join("\n");
+    syncSemanticUploadPanel(panel);
+    status.textContent = `已移除 ${name}。`;
+    updateSummary(result.workflow_summary);
+    renderBuilderEndpointState(result.builder_endpoint_state);
+    renderBuilderReviewState(result.builder_review_state, result.builder_review_ready);
+  } catch (error) {
+    status.classList.add("error");
+    status.textContent = error.message || "移除失敗，請再試一次。";
+  }
+}
+
 
 function uploadSemanticFiles(panel) {
   const input = panel?.querySelector("[data-semantic-upload-input]");
@@ -1062,6 +1099,14 @@ document.querySelectorAll("[data-param-form]").forEach((form) => {
     if (apiField) {
       syncApiEditor(apiField.closest("[data-api-editor]"));
     }
+  });
+  form.addEventListener("click", async (event) => {
+    const removeButton = event.target.closest?.("[data-semantic-upload-remove]");
+    if (!removeButton) {
+      return;
+    }
+    event.preventDefault();
+    await removeSemanticFile(removeButton.closest("[data-semantic-upload-panel]"), removeButton.dataset.semanticUploadRemove);
   });
   form.addEventListener("change", async (event) => {
     const uploadInput = event.target.closest?.("[data-semantic-upload-input]");

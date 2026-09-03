@@ -196,6 +196,9 @@
             </div>
             <label for="v3-retrieve-semantic-search-goal">這批資料要讓 Agent 查什麼？</label>
             <textarea id="v3-retrieve-semantic-search-goal" name="semantic_search_goal" rows="3" placeholder="例如：查找規則、條件、限制或差異"></textarea>
+            <label for="v3-retrieve-semantic-top-k">每次要取幾筆最相關的內容？</label>
+            <input id="v3-retrieve-semantic-top-k" name="top_k" type="number" min="1" max="20" step="1" placeholder="3">
+            <p class="field-hint">取得越多，回答越可能涵蓋完整；取得越少，越不容易被不相關的段落干擾。留白代表沿用預設值 3。</p>
           </form>
         </details>
         <details class="advanced-disclosure step-advanced" data-visible-choices="keyword" open>

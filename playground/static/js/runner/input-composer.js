@@ -1,16 +1,27 @@
 export function bindInputComposer(form, onSubmit, { clearAttachments } = {}) {
   const messageInput = form?.querySelector("textarea[name='message']");
+  const submitButton = form?.querySelector("button[type='submit']");
+  // A disabled submit button stops the click and nothing else: requestSubmit()
+  // sends the form anyway, so Enter kept queueing questions while an answer was
+  // still being written. The button is the state; this makes every path read it.
+  const isBusy = () => Boolean(submitButton?.disabled);
 
   messageInput?.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" || event.shiftKey || event.isComposing) {
       return;
     }
     event.preventDefault();
+    if (isBusy()) {
+      return;
+    }
     form.requestSubmit();
   });
 
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (isBusy()) {
+      return;
+    }
     const formData = new FormData(form);
     const files = Array.from(formData.getAll("attachments"))
       .filter((item) => item instanceof File && item.name);

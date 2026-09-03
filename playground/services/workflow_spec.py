@@ -197,6 +197,15 @@ def _apply_perceive(spec: dict, raw: object) -> None:
         params["image_instruction"] = clean_prompt(str(p["image_instruction"] or "")) or None
 
 
+def _bounded_top_k(raw: object, fallback: int) -> int:
+    """How many entries a search returns, clamped to what the module accepts."""
+    try:
+        value = int(str(raw).strip() or fallback)
+    except (TypeError, ValueError):
+        return fallback
+    return max(1, min(20, value))
+
+
 def _apply_retrieve(spec: dict, raw: object) -> None:
     if not isinstance(raw, dict):
         return
@@ -215,7 +224,7 @@ def _apply_retrieve(spec: dict, raw: object) -> None:
     if "fallback" in p:
         params["fallback"] = clean_short_text(str(p["fallback"] or ""), "沒有命中任何條目。")
     if "top_k" in p:
-        params["top_k"] = max(1, min(20, int(p["top_k"] or 3)))
+        params["top_k"] = _bounded_top_k(p["top_k"], 3)
     if "support_files" in p and isinstance(p["support_files"], list):
         params["support_files"] = [str(f) for f in p["support_files"] if str(f).strip()][:50]
     if "search_goal" in p:
@@ -451,7 +460,9 @@ def apply_builder_step(spec: dict[str, Any], step_key: str, choice_label: object
         if "fallback" in choice_label:
             new_params["fallback"] = clean_short_text(str(choice_label["fallback"]), "沒有命中任何條目。")
         if "top_k" in choice_label:
-            new_params["top_k"] = max(1, min(20, int(choice_label["top_k"] or 3)))
+            # A field someone can type into is a field someone can type words
+            # into, and a 500 is a worse answer than keeping what was there.
+            new_params["top_k"] = _bounded_top_k(choice_label["top_k"], new_params.get("top_k") or 3)
         if "semantic_support_files" in choice_label:
             new_params["support_files"] = list(string_items_from_lines(str(choice_label["semantic_support_files"])))
         if "semantic_search_goal" in choice_label:
@@ -691,6 +702,10 @@ def spec_to_form_state(spec: dict[str, Any], runner_presentation: dict[str, Any]
         values.setdefault("retrieve", {})["semantic_support_files"] = lines_text_from_items(tuple(support_files))
     if retrieve_params.get("search_goal"):
         values.setdefault("retrieve", {})["semantic_search_goal"] = retrieve_params["search_goal"]
+    # Carried back so the field shows what the agent is actually using, not an
+    # empty box that looks like the setting was never made.
+    if retrieve_params.get("top_k"):
+        values.setdefault("retrieve", {})["top_k"] = str(retrieve_params["top_k"])
     if retrieve_params.get("description"):
         values.setdefault("retrieve", {})["retrieve_description"] = retrieve_params["description"]
 
