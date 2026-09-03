@@ -582,7 +582,7 @@ workflow = Workflow(
     monkeypatch.setattr(
         entry_routes,
         "restore_runtime_bundle",
-        lambda *, agent_id=None, credentials=None, origin=None: {
+        lambda *, agent_id=None, credentials=None, origin=None, allow_public=False: {
             "bundle_restored": True,
             "builder_upload_id": "restored-upload",
             "workflow_spec": _semantic_spec(),
@@ -645,7 +645,7 @@ workflow = Workflow(
     monkeypatch.setattr(
         entry_routes,
         "restore_runtime_bundle",
-        lambda *, agent_id=None, credentials=None, origin=None: {
+        lambda *, agent_id=None, credentials=None, origin=None, allow_public=False: {
             "bundle_restored": True,
             "builder_upload_id": "restored-upload",
             "python_source": stale_bundle_source,
@@ -848,7 +848,7 @@ workflow = Workflow(
     monkeypatch.setattr(
         aihub_bridge,
         "restore_runtime_bundle",
-        lambda *, agent_id=None, credentials=None, origin=None: {
+        lambda *, agent_id=None, credentials=None, origin=None, allow_public=False: {
             "bundle_restored": True,
             "builder_upload_id": "bridge-upload",
             "python_source": stale_bundle_source,
@@ -1400,8 +1400,8 @@ def test_a_shared_agent_restores_its_documents_without_an_account(monkeypatch):
         lambda agent_id, *, origin=None: {"loaded": True, "agent_id": agent_id, "workflow_spec": spec, "endpoint_bindings": {}},
     )
 
-    def fake_restore(*, agent_id, credentials, origin=None):
-        asked_with.append(credentials)
+    def fake_restore(*, agent_id, credentials, origin=None, allow_public=False):
+        asked_with.append((credentials, allow_public))
         return {"bundle_restored": True, "builder_upload_id": "upload-1"}
 
     monkeypatch.setattr(aihub_bridge, "restore_runtime_bundle", fake_restore)
@@ -1413,4 +1413,38 @@ def test_a_shared_agent_restores_its_documents_without_an_account(monkeypatch):
         with client.session_transaction(base_url="https://playground.example") as session:
             assert session["builder_upload_id"] == "upload-1"
 
-    assert asked_with == [None]
+    # No account, and said so explicitly: every other caller keeps the login
+    # check, so an expired session is still reported as one.
+    assert asked_with == [(None, True)]
+
+
+def test_a_shared_agent_opens_even_when_its_documents_cannot_be_restored(monkeypatch):
+    """A visitor turned away here can do nothing about it, so do not turn them away.
+
+    The owner gets an error because the owner can fix it — re-upload, re-save.
+    A gallery visitor would just get a dead page, so the Runner opens anyway
+    and the reason is kept where whoever has to fix it can read it.
+    """
+    spec = {"version": "2", "workflow_name": "shared", "retrieve": {"module": "SemanticRetrieve", "params": {"support_files": ["guide.pdf"]}}}
+
+    monkeypatch.setattr(
+        aihub_bridge,
+        "load_public_config",
+        lambda agent_id, *, origin=None: {"loaded": True, "agent_id": agent_id, "workflow_spec": spec, "endpoint_bindings": {}},
+    )
+    monkeypatch.setattr(
+        aihub_bridge,
+        "restore_runtime_bundle",
+        lambda **kwargs: {"bundle_restored": False, "bundle_error": "Bundle object was not found."},
+    )
+
+    app = create_app()
+    app.config.update(TESTING=True, SECRET_KEY="test-secret")
+    with app.test_client() as client:
+        response = client.get("/playground/run?owner=someone&agentId=agt_1", base_url="https://playground.example")
+        with client.session_transaction(base_url="https://playground.example") as session:
+            assert session["mode"] == "aihub_readonly"
+            assert "builder_upload_id" not in session
+            assert session["last_aihub_bundle_load"]["bundle_error"] == "Bundle object was not found."
+
+    assert response.status_code == 200

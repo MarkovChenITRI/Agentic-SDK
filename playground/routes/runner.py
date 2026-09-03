@@ -271,7 +271,7 @@ def _public_execution_payload(execution: dict[str, object]) -> dict[str, object]
         "final_message": execution.get("final_message"),
         "tool_calls": execution.get("tool_calls") or [],
         "tool_call_panels": execution.get("tool_call_panels") or [],
-        "debug_messages": execution.get("debug_messages") or [],
+        "debug_messages": (execution.get("debug_messages") or []) + _bundle_failure_notes(),
         "process_events": execution.get("process_events") or [],
         "result": result,
         "scene_profile": execution.get("scene_profile"),
@@ -280,6 +280,20 @@ def _public_execution_payload(execution: dict[str, object]) -> dict[str, object]
         # It was assembled in the service and dropped here.
         "detail": execution.get("detail"),
     }
+
+
+def _bundle_failure_notes() -> list[str]:
+    """Say why the documents are missing, for whoever has to fix it.
+
+    A shared agent runs on without its bundle, and every cause — the API
+    refusing the request, the bundle not being there, the link having expired —
+    looks identical from the chat. The reason belongs in the trace.
+    """
+    stored = session.get("last_aihub_bundle_load")
+    if not isinstance(stored, dict) or stored.get("bundle_restored"):
+        return []
+    reason = str(stored.get("bundle_error") or "").strip()
+    return [f"知識庫：參考文件沒有載入成功。原因：{reason}"] if reason else []
 
 
 def _semantic_runtime() -> SemanticRuntime | None:

@@ -69,9 +69,11 @@ def start_runner_bridge_session(args: Mapping[str, object], *, origin: str | Non
     # A shared agent needs its documents as much as an owned one does. Without
     # this the read-only Runner ran every semantic agent against an empty index
     # and answered "nothing found" to every question.
-    bundle_result = _restore_selected_agent_bundle(str(result["agent_id"]), None, origin=origin)
-    if _semantic_bundle_required_for_result(result) and not bundle_result.get("bundle_restored"):
-        return {"started": False, "error": _semantic_bundle_restore_error(bundle_result), "status_code": 502}
+    #
+    # Unlike the owner, a visitor who is turned away here can do nothing about
+    # it, so a failure degrades rather than closing the door: the Runner still
+    # opens and says the documents are not loaded.
+    _restore_selected_agent_bundle(str(result["agent_id"]), None, origin=origin, allow_public=True)
     session["agent_owner"] = _arg(args, "owner")
     session["source_origin"] = "aihub_shared_readonly"
     return {"started": True, "mode": "read"}
@@ -137,15 +139,16 @@ def store_loaded_agent(result: dict[str, object]) -> None:
     session.pop("builder_form_state", None)
 
 
-def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials | None, *, origin: str | None = None) -> dict[str, object]:
+def _restore_selected_agent_bundle(agent_id: str, credentials: AiHubCredentials | None, *, origin: str | None = None, allow_public: bool = False) -> dict[str, object]:
     _clear_bundle_runtime_state()
-    bundle_result = restore_runtime_bundle(agent_id=agent_id, credentials=credentials, origin=origin)
-    if bundle_result.get("bundle_restored"):
-        if bundle_result.get("builder_upload_id"):
-            session["builder_upload_id"] = bundle_result["builder_upload_id"]
-        session["last_aihub_bundle_load"] = bundle_result
-    else:
-        session.pop("last_aihub_bundle_load", None)
+    bundle_result = restore_runtime_bundle(agent_id=agent_id, credentials=credentials, origin=origin, allow_public=allow_public)
+    if bundle_result.get("bundle_restored") and bundle_result.get("builder_upload_id"):
+        session["builder_upload_id"] = bundle_result["builder_upload_id"]
+    # Keep the failure too. A shared agent carries on without its documents, so
+    # this is the only record of why they are missing — the API not being open,
+    # the bundle not being there, the link having expired all read the same
+    # from the outside.
+    session["last_aihub_bundle_load"] = bundle_result
     return bundle_result
 
 

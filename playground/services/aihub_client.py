@@ -468,8 +468,9 @@ def request_bundle_download_url(
     *,
     credentials: AiHubCredentials | None = None,
     origin: str | None = None,
+    allow_public: bool = False,
 ) -> dict[str, object]:
-    return _request_bundle_url(agent_id, credentials=credentials, origin=origin, direction="download")
+    return _request_bundle_url(agent_id, credentials=credentials, origin=origin, direction="download", allow_public=allow_public)
 
 
 def _request_bundle_url(
@@ -478,14 +479,19 @@ def _request_bundle_url(
     credentials: AiHubCredentials | None,
     origin: str | None,
     direction: str,
+    allow_public: bool = False,
 ) -> dict[str, object]:
+    """Ask AI Hub for a short-lived bundle URL.
+
+    allow_public says this caller is the public read-only Runner, which has no
+    account to offer. It does not decide access: AI Hub still serves a download
+    only for an agent listed in the gallery. Every other caller keeps the
+    login check, so an expired session is reported as one.
+    """
     resolved_agent_id = (agent_id or "").strip()
     if not resolved_agent_id:
         return _bundle_error("Missing AI Hub agent id.", "missing_agent_id", agent_id=resolved_agent_id)
-    # Downloading is also how a shared agent gets its documents, and the
-    # public read-only Runner has no account. AI Hub decides whether that is
-    # allowed: it serves a download only for an agent listed in the gallery.
-    if direction != "download" and not _has_aihub_auth(credentials):
+    if not allow_public and not _has_aihub_auth(credentials):
         return _bundle_error("AI Hub login is required before accessing the bundle.", "missing_credentials", agent_id=resolved_agent_id)
     base_url = _base_url_for_credentials(credentials)
     if not base_url:

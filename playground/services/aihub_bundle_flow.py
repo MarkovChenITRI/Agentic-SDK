@@ -58,12 +58,13 @@ def restore_runtime_bundle(
     agent_id: str | None,
     credentials: AiHubCredentials | None,
     origin: str | None,
+    allow_public: bool = False,
 ) -> dict[str, object]:
     resolved_agent_id = (agent_id or "").strip()
     if not resolved_agent_id:
         return {"bundle_restored": False, "bundle_error": "Missing AI Hub agent id."}
 
-    download_payload = request_bundle_download_url(resolved_agent_id, credentials=credentials, origin=origin)
+    download_payload = request_bundle_download_url(resolved_agent_id, credentials=credentials, origin=origin, allow_public=allow_public)
     if not download_payload.get("ok"):
         return {"bundle_restored": False, "bundle_error": download_payload.get("error") or "Could not obtain bundle download URL.", "bundle_error_code": download_payload.get("error_code")}
 
