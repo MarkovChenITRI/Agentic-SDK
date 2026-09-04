@@ -40,6 +40,10 @@ class WorkflowState:
     last_action_error: dict[str, Any] | None = None
     last_workflow_error: dict[str, str] | None = None
     attachments: list[Attachment] = field(default_factory=list)
+    # Carried on the state because that is what every module already receives.
+    # A module that streams can offer it to the transport without the workflow
+    # having to reach inside the module to wire anything up.
+    cancel: Any = None
     _token_delta_callback: Callable[[str, str, dict[str, Any]], None] | None = field(
         default=None,
         init=False,
@@ -129,6 +133,11 @@ class WorkflowState:
             return self.memory
         return None
 
+    def should_stop(self) -> bool:
+        """Whether whoever started this run has asked for it to stop."""
+        token = self.cancel
+        return bool(token is not None and token.cancelled)
+
     def set_token_delta_callback(
         self,
         callback: Callable[[str, str, dict[str, Any]], None] | None,
@@ -201,6 +210,9 @@ class WorkflowResult:
     session_id: str = "default"
     aborted: bool = False
     abort_reason: str | None = None
+    # Told apart from aborted so a caller can resume rather than apologise.
+    interrupted: bool = False
+    interrupt_payload: dict[str, Any] = field(default_factory=dict)
     entries: list[ContextEntry] = field(default_factory=list)
     visit_counts: dict[str, int] = field(default_factory=dict)
     usage: dict[str, Any] | None = None

@@ -7,6 +7,7 @@ from threading import Thread
 from typing import Any
 import uuid
 
+from agentic_sdk.core.cancellation import CancellationToken, WorkflowInterrupted
 from agentic_sdk.core.entities import ContextEntry, ContextEntryType
 from agentic_sdk.core.events import ALL_STRUCTURED_FIELDS, normalize_events_schema, resolve_events_schema
 from agentic_sdk.core.gates import Gates
@@ -163,6 +164,7 @@ class Workflow:
         memory_store: PersistentMemory | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
         events_schema: dict[str, dict[str, Any]] | None = None,
+        cancel: "CancellationToken | None" = None,
     ) -> WorkflowResult:
         active_events_schema = (
             self.events_schema
@@ -237,10 +239,16 @@ class Workflow:
         total_hops = 0
         aborted = False
         abort_reason: str | None = None
+        interrupted = False
+        interrupt_payload: dict[str, Any] = {}
+
+        state.cancel = cancel
 
         try:
             while current is not None:
                 total_hops += 1
+                if cancel is not None and cancel.cancelled:
+                    raise WorkflowInterrupted(cancel.reason or "cancelled", cancel.payload)
                 self.gates.before_visit(current, state, total_hops)
                 state.increment_visit(current)
 
@@ -286,6 +294,14 @@ class Workflow:
                     )
                     event_callback(finish_event)
                 current = next_module
+        except WorkflowInterrupted as exc:
+            # Not a failure. Someone asked for this to stop, and the result
+            # says so plainly so the caller can pick up where it left off
+            # rather than reporting a fault to the person who interrupted.
+            interrupted = True
+            aborted = True
+            abort_reason = f"interrupted: {exc.reason}"
+            interrupt_payload = exc.payload
         except WorkflowAborted as exc:
             aborted = True
             abort_reason = exc.reason
@@ -321,6 +337,8 @@ class Workflow:
             session_id=state.session_id,
             aborted=aborted,
             abort_reason=abort_reason,
+            interrupted=interrupted,
+            interrupt_payload=interrupt_payload,
             entries=list(state.entries),
             visit_counts=dict(state.visit_counts),
             usage=state.payload.get("_llm_usage"),

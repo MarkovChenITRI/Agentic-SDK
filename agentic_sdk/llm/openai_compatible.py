@@ -38,6 +38,18 @@ DeltaCallback = Callable[[str], None]
 StructuredFieldCallback = Callable[[str, Any], None]
 
 
+class StreamCancelled(Exception):
+    """The caller asked for the stream to stop before the model finished.
+
+    Carries how much text had already been produced, because whoever resumes
+    needs to know what the person had already seen or heard.
+    """
+
+    def __init__(self, produced_characters: int = 0) -> None:
+        super().__init__("stream cancelled by caller")
+        self.produced_characters = produced_characters
+
+
 class IncrementalJsonFieldParser:
     """Find configured JSON fields as soon as their values are complete.
 
@@ -263,6 +275,7 @@ def chat_stream_json(
     structured_fields: tuple[str, ...] | list[str] = (),
     on_field: StructuredFieldCallback | None = None,
     idle_timeout_sec: float = 30.0,
+    should_stop: "Callable[[], bool] | None" = None,
 ) -> OpenAIChatResponse:
     parser = (
         IncrementalJsonFieldParser(structured_fields, on_field)
@@ -286,6 +299,7 @@ def chat_stream_json(
         response_format={"type": "json_object"},
         on_delta=handle_delta,
         idle_timeout_sec=idle_timeout_sec,
+        should_stop=should_stop,
     )
 
 
@@ -302,7 +316,15 @@ def chat_stream(
     response_format: dict[str, Any] | None = None,
     on_delta: DeltaCallback | None = None,
     idle_timeout_sec: float = 30.0,
+    should_stop: "Callable[[], bool] | None" = None,
 ) -> OpenAIChatResponse:
+    """Stream a completion.
+
+    ``should_stop`` is checked once per chunk. A long answer is where a run
+    spends its time, so it is also the only place worth interrupting: checking
+    between modules would leave someone talking over a reply that keeps coming
+    for several more seconds.
+    """
     resolved_messages = messages or [
         {"role": "system", "content": system or ""},
         {"role": "user", "content": user or ""},
@@ -329,6 +351,8 @@ def chat_stream(
     tool_calls: dict[int, dict[str, Any]] = {}
     try:
         for chunk in stream:
+            if should_stop is not None and should_stop():
+                raise StreamCancelled(len("".join(chunks)))
             resolved_model = _value(chunk, "model") or resolved_model
             usage = _value(chunk, "usage")
             if usage is not None:
