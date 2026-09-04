@@ -71,6 +71,14 @@ nobody heard. This follows the same reasoning OpenAI's realtime API encodes in
 `conversation.item.truncate`, which deletes the transcript of the unplayed
 portion for exactly this reason.
 
+One thing did have to change in the core, and it is worth naming because the
+rest of this decision is about keeping voice out of it. `Workflow.run` refused
+to start without a message, which a voice agent can never supply up front —
+the words arrive when the person speaks, not when the turn begins. A module
+may now offer what it has already taken in. The hook says nothing about audio
+and any module may implement it; what it admits is that the caller is not
+always the one who knows what a turn is about.
+
 The Playground must run in one process. The interjection and the workflow it
 stops have to share memory, and adding worker processes would break that
 silently — so the startup refuses to run with more than one.

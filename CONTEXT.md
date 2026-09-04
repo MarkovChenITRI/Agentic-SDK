@@ -76,3 +76,17 @@ The two directions are independent. An agent may listen but answer in text —
 someone using their voice instead of typing. It may read out an answer to
 something that was typed — someone who just wants to listen. Neither half
 implies the other, because the two directions do not share a connection.
+
+## Pending input
+
+**Pending input** is what a module has already taken in before the workflow
+asks it for anything.
+
+Most turns begin with the caller saying what the turn is about. Speech does
+not: it arrives when the person feels like talking, not when a turn is
+started. A module holding a live session therefore knows what this turn is
+about before the workflow does, and offers it rather than waiting to be asked.
+
+It is not a second kind of input. Whatever a module offers becomes the turn's
+message in the ordinary way, so the conversation record and what the modules
+see never disagree about what was said.

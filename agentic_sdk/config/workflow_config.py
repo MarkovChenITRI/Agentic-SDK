@@ -119,6 +119,7 @@ def build_module(spec: ModuleSpec) -> Module:
         "text": modules.TextPerceive,
         "text_image": modules.TextImagePerceive,
         "tool_call_action": modules.ToolCallAction,
+        "voice_text": modules.VoiceTextPerceive,
     }
     try:
         constructor = registry[spec.kind]

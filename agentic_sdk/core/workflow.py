@@ -186,6 +186,15 @@ class Workflow:
             state_memory.append_message("user", user_message, attachments=list(attachments or []))
         latest_user_turn = state_memory.latest_user_turn()
         if latest_user_turn is None:
+            # A perceive module may already know what this turn is about. Speech
+            # arrives when the person feels like talking, not when run() is
+            # called, so demanding the words up front would mean a voice agent
+            # could never be started without typing what was just said.
+            supplied = _pending_input_from(self.perceive)
+            if supplied:
+                state_memory.append_message("user", supplied, attachments=list(attachments or []))
+                latest_user_turn = state_memory.latest_user_turn()
+        if latest_user_turn is None:
             raise ValueError("Workflow.run requires user_message or a conversation containing a user turn.")
 
         resolved_memory_store = memory_store or self.memory_store
@@ -591,6 +600,17 @@ def _normalize_output(current: str, raw_output: Any, state: WorkflowState) -> Mo
             ],
         )
     raise TypeError(f"module '{current}' returned unsupported output type: {type(raw_output).__name__}")
+
+
+def _pending_input_from(module: Any) -> str:
+    """What a module has already taken in, before the workflow asks for it.
+
+    Optional: a module without it simply has nothing waiting.
+    """
+    pending = getattr(module, "pending_input", None)
+    if not callable(pending):
+        return ""
+    return str(pending() or "").strip()
 
 
 def _next_module_after(current: str, output: ModuleOutput, modules: dict[str, Module]) -> str | None:

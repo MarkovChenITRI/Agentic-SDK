@@ -1,6 +1,6 @@
 # Perceive
 
-Perceive 模組負責把原始輸入整理成 workflow 後續節點可直接消費的感知結果。這一頁先定義 Perceive 家族處理哪些輸入型態，再依序展開目前文件採用的三個標準模組。每個模組會先列出建立物件時使用的初始化參數，再列出 workflow 執行時接收的標準輸入參數；整理後寫入 `Entities` 的欄位，會回到 [Module Family](index.md) 的中央定義理解。輸入來源包含純文字、結構化欄位與圖片檔，圖片格式支援 `image/png`、`image/jpeg`、`image/webp`。需要模型的 Perceive 模組會讀取 `MemoryStore` 的完整對話歷史；實際採用的記憶類型可以是 `InContextMemory`，也可以是同層可互換的 `PersistentMemory`，但仍以最新 user turn 當成本輪要整理的焦點。
+Perceive 模組負責把原始輸入整理成 workflow 後續節點可直接消費的感知結果。這一頁先定義 Perceive 家族處理哪些輸入型態，再依序展開目前文件採用的四個標準模組。每個模組會先列出建立物件時使用的初始化參數，再列出 workflow 執行時接收的標準輸入參數；整理後寫入 `Entities` 的欄位，會回到 [Module Family](index.md) 的中央定義理解。輸入來源包含純文字、結構化欄位與圖片檔，圖片格式支援 `image/png`、`image/jpeg`、`image/webp`。需要模型的 Perceive 模組會讀取 `MemoryStore` 的完整對話歷史；實際採用的記憶類型可以是 `InContextMemory`，也可以是同層可互換的 `PersistentMemory`，但仍以最新 user turn 當成本輪要整理的焦點。
 
 ## PassThroughPerceive
 
@@ -79,3 +79,35 @@ Perceive 模組負責把原始輸入整理成 workflow 後續節點可直接消�
 | `input_options` | `array<object>` | `[]` | 可選項目；沒有選項時固定 `[]`。 |
 | `input_fields` | `object` | `{}` | 結構化欄位；沒有欄位時固定 `{}`。 |
 | `input_images` | `array<object>` | `[{"mime_type":"image/png","name":"error-screen.png","content_ref":"blob://error-screen.png"}]` | 圖片清單；只允許 `image/png`、`image/jpeg`、`image/webp`。 |
+
+## VoiceTextPerceive
+
+參考論文：無特定 arXiv 對應；此模組是語音互動的工程化入口。
+
+`VoiceTextPerceive` 讓使用者用講的代替打字。它與其他 Perceive 模組的差別在於**輸入不是在被呼叫時才出現的**——聲音在使用者想講的時候到，不在 workflow 詢問的時候到。模組因此持有一條長連線，把聽到的話累積起來，等自己這一輪被呼叫時交出去。
+
+它只負責聽。說話屬於 Action，而且轉寫與語音合成本來就不共用連線；理由記在 [ADR 0001](../adr/0001-where-voice-lives.md)。
+
+**安靜時不會上傳任何東西。** 純靜音與說話計費相同，而且會被服務辨識成沒有人說過的字，因此模組在送出前先以音量門檻過濾。這是正確性而非最佳化：不過濾的話，安靜的房間會持續產生假的使用者輸入。
+
+### 初始化參數
+
+| 參數 | 型態 | 必填 | 預設值 | 說明 |
+| --- | --- | --- | --- | --- |
+| `api_key` | `string` | 是（除非給 `transport`） | 無 | 語音轉寫服務的金鑰。 |
+| `base_url` | `string` | 是（除非給 `transport`） | 無 | 語音轉寫服務的端點。 |
+| `model` | `string` | 是（除非給 `transport`） | 無 | 轉寫部署名稱。 |
+| `language` | `string` | 否 | `"zh"` | 轉寫語言。 |
+| `transport` | `AudioInputTransport` | 否 | 依上述端點建立 | 自備的音訊傳輸。測試以假傳輸驅動整條流程，不需網路與憑證。 |
+| `speech_threshold` | `int` | 否 | `500` | 判定為說話的音量下限（16 位元取樣的 RMS）。吵雜環境調高。 |
+| `hangover_chunks` | `int` | 否 | `3` | 說話結束後仍繼續送出的片段數，避免切掉句尾。 |
+
+### 標準輸入參數
+
+| 參數 | 型態 | 格式 | 說明 |
+| --- | --- | --- | --- |
+| `pcm16` | `bytes` | 16 位元單聲道 PCM | 透過 `hear()` 傳入的麥克風片段。低於門檻的片段不會離開程序。 |
+
+### 感知結果
+
+寫入 `PERCEIVED` context entry，`metadata.spoken` 標示這一輪的內容是講出來的還是打字的。若呼叫 `run()` 時同時傳入文字訊息，以文字為準——對話記錄與感知結果必須對同一輪說同一件事。

@@ -76,6 +76,39 @@ print(result.final_message)
 
 這段快速開始同時是 [00：跑出第一條 Agentic SDK Workflow](docs/tutorials/getting-started.md) 的可執行基準；完整的 00–07 學習順序見 [Notebook 教材總覽](docs/tutorials/index.md)。
 
+### 1-1. 用講的問問題
+
+```python
+from agentic_sdk import Workflow
+from agentic_sdk.modules import DirectAnswerAction, KeywordRetrieve, VoiceTextPerceive
+
+perceive = VoiceTextPerceive(
+    api_key="<TRANSCRIBE_API_KEY>",
+    base_url="<TRANSCRIBE_BASE_URL>",
+    model="<TRANSCRIBE_DEPLOYMENT>",
+)
+workflow = Workflow(
+    workflow_name="語音知識問答 Agent",
+    perceive=perceive,
+    retrieve=KeywordRetrieve(
+        items=[{"keywords": ["保固"], "content": "本產品保固十二個月。"}],
+    ),
+    action=DirectAnswerAction(),
+)
+
+# 把麥克風的 16 位元單聲道片段餵進來；安靜的片段不會離開這台機器。
+for chunk in microphone_chunks:
+    perceive.hear(chunk)
+
+# 使用者講完一句之後，這一輪就有內容可跑，不必再把話打一次。
+if perceive.pending_input():
+    print(workflow.run().final_message)
+```
+
+`VoiceTextPerceive` 的端點參數和其他模組一樣是三件式。**安靜時什麼都不上傳**——純靜音與說話計費相同，而且會被服務辨識成沒有人說過的字，不過濾的話安靜的房間會持續產生假的輸入。
+
+吵雜環境調高 `speech_threshold`。要在測試裡驅動整條流程，傳 `transport=FakeAudioInput()` 就不需要網路與憑證。
+
 ### 2. 使用 OpenAI-compatible 生成回覆
 
 可搭配任何 OpenAI-compatible endpoint，例如 Azure AI Foundry、Ollama 或其他相容服務。
