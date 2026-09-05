@@ -178,3 +178,17 @@ def test_a_typed_message_is_not_overruled_by_something_overheard():
     perceived = next(entry for entry in result.entries if entry.type.value == "perceived")
     assert perceived.content == "我用打的問保固"
     assert perceived.metadata["spoken"] is False
+
+
+def test_the_audio_package_exports_what_it_says_it_does():
+    """A name in __all__ that is not an attribute breaks `import *` outright.
+
+    It broke silently because nothing imported the package that way — the
+    modules all reach for the submodule directly, so the one path a developer
+    is most likely to try was the one path nobody took.
+    """
+    import agentic_sdk.audio as audio
+
+    missing = [name for name in audio.__all__ if not hasattr(audio, name)]
+
+    assert missing == [], f"__all__ 裡有不存在的名字：{missing}"
