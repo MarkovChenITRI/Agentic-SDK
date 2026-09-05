@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 import struct
 
 from agentic_sdk import Workflow
@@ -106,3 +110,45 @@ def test_interrupting_turn_after_turn_does_not_wear_the_workflow_down():
         result = workflow.run(cancel=CancellationToken())
         assert result.interrupted is True
     assert result.visit_counts.get("action", 0) == 1
+
+
+def test_a_stream_stopped_mid_answer_reports_being_stopped():
+    """The generation path itself, not a module's handling of it.
+
+    Every module used to translate this exception for itself, and the one that
+    forgot answered the person with an apology for something they did on
+    purpose. Now the stream raises what it means, so a module that does
+    nothing at all still gets it right — which is only true while this holds.
+    """
+    from agentic_sdk.core.cancellation import WorkflowInterrupted
+    from agentic_sdk.llm.openai_compatible import chat_stream
+
+    heard_enough = []
+
+    with pytest.raises(WorkflowInterrupted) as stopped:
+        chat_stream(
+            _StreamingClient("保固期是十二個月，延長保固可以再加兩年"),
+            model="m",
+            user="保固多久？",
+            should_stop=lambda: bool(heard_enough) or heard_enough.append(1),
+        )
+
+    assert stopped.value.payload["produced_characters"] > 0
+
+
+class _StreamingClient:
+    """A client that hands back one character at a time, like a real stream."""
+
+    def __init__(self, answer: str) -> None:
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+        self._answer = answer
+
+    def _create(self, **_kwargs):
+        return (
+            SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content=character, tool_calls=None), finish_reason=None)],
+                model="m",
+                usage=None,
+            )
+            for character in self._answer
+        )

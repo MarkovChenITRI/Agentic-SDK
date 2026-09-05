@@ -6,7 +6,6 @@ from typing import Any
 from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, ModuleOutput, WorkflowAborted, WorkflowState
 from agentic_sdk.llm import chat_stream_json, require_model, resolve_openai_client
 from agentic_sdk.core.cancellation import WorkflowInterrupted
-from agentic_sdk.llm.openai_compatible import StreamCancelled
 from agentic_sdk.memory import MemoryEntry
 from agentic_sdk.memory.in_context import build_module_messages
 
@@ -93,11 +92,6 @@ class TextPerceive:
                     metadata={"model": self._model, "structured": True},
                 ),
             )
-        except StreamCancelled as exc:
-            # Being stopped is not a provider failure. Letting it fall into the
-            # generic handler would file the interruption as a model error and
-            # answer the person with an apology for something they did.
-            raise WorkflowInterrupted("cancelled", {"produced_characters": exc.produced_characters}) from None
         except Exception as exc:
             _abort_for_provider_failure(state, self.name, exc)
         parsed = response.as_json()

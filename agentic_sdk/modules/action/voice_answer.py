@@ -20,7 +20,6 @@ from agentic_sdk.audio.transport import AudioOutputTransport, require_speech_end
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
 from agentic_sdk.core.cancellation import WorkflowInterrupted
 from agentic_sdk.llm import chat_stream_json
-from agentic_sdk.llm.openai_compatible import StreamCancelled
 from agentic_sdk.modules.action.generative import (
     GenerativeAction,
     _build_messages,
@@ -101,8 +100,6 @@ class VoiceAnswerAction(GenerativeAction):
                     self.name, content, metadata={"model": self._model, "structured": True}
                 ),
             )
-        except StreamCancelled:
-            raise WorkflowInterrupted("cancelled", {}) from None
         except Exception as exc:
             detail = _format_openai_error(exc)
             state.last_action_error = {"type": type(exc).__name__, "message": detail}

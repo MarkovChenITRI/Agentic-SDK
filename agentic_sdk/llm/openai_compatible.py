@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+from agentic_sdk.core.cancellation import WorkflowInterrupted
+
 import json
 import time
 from dataclasses import dataclass
@@ -36,18 +38,6 @@ class OpenAIChatResponse:
 
 DeltaCallback = Callable[[str], None]
 StructuredFieldCallback = Callable[[str, Any], None]
-
-
-class StreamCancelled(Exception):
-    """The caller asked for the stream to stop before the model finished.
-
-    Carries how much text had already been produced, because whoever resumes
-    needs to know what the person had already seen or heard.
-    """
-
-    def __init__(self, produced_characters: int = 0) -> None:
-        super().__init__("stream cancelled by caller")
-        self.produced_characters = produced_characters
 
 
 class IncrementalJsonFieldParser:
@@ -352,7 +342,14 @@ def chat_stream(
     try:
         for chunk in stream:
             if should_stop is not None and should_stop():
-                raise StreamCancelled(len("".join(chunks)))
+                # Raised as an interruption rather than a transport error, so
+                # that a module which does nothing special still reports being
+                # stopped as being stopped. Every module used to translate this
+                # itself, and any module that forgot answered the person with
+                # an apology for something they had done on purpose.
+                raise WorkflowInterrupted(
+                    "cancelled", {"produced_characters": len("".join(chunks))}
+                )
             resolved_model = _value(chunk, "model") or resolved_model
             usage = _value(chunk, "usage")
             if usage is not None:

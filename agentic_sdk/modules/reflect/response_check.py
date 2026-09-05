@@ -3,7 +3,6 @@
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
 from agentic_sdk.llm import chat_stream_json, require_model, resolve_openai_client
 from agentic_sdk.core.cancellation import WorkflowInterrupted
-from agentic_sdk.llm.openai_compatible import StreamCancelled
 from agentic_sdk.memory.in_context import build_module_messages
 from agentic_sdk.modules.reflect.retry_policy import ON_FAILURE_TO_NEXT, next_after_failure
 _SYSTEM_PROMPT = (
@@ -70,11 +69,6 @@ class ResponseCheckReflect:
             reason = str(parsed.get("reason", ""))
             suggestion = str(parsed.get("suggestion", ""))
             usage = {"model": response.model, "input_tokens": response.input_tokens, "output_tokens": response.output_tokens}
-        except StreamCancelled as exc:
-            # Being stopped is not a provider failure. Letting it fall into the
-            # generic handler would file the interruption as a model error and
-            # answer the person with an apology for something they did.
-            raise WorkflowInterrupted("cancelled", {"produced_characters": exc.produced_characters}) from None
         except Exception as exc:
             verdict = "fail" if err else "pass"
             reason = f"response check unavailable: {exc}"
