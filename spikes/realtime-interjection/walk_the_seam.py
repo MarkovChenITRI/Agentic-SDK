@@ -218,6 +218,13 @@ async def main() -> int:
                 if not seen_states or seen_states[-1] != state:
                     seen_states.append(state)
                     print(f"  {second:>2}s 語音列: {state}")
+                if second in (9, 15, 25):
+                    spectrum = await browser.evaluate(
+                        "Array.from(document.querySelectorAll('[data-voice-spectrum] i'))"
+                        ".map((bar) => Number((bar.style.transform.match(/[\\d.]+/) || [0])[0]).toFixed(2))"
+                        ".join(' ')"
+                    )
+                    print(f"  {second:>2}s 頻譜: {spectrum}")
                 if second == 9:
                     await browser.shoot("heard-the-question")
                 if second == 16:

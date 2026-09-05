@@ -980,7 +980,7 @@ bindInputComposer(form, async (payload) => {
 
 const voiceBar = document.querySelector("[data-voice-bar]");
 const voiceStateText = document.querySelector("[data-voice-state-text]");
-const voiceLevel = document.querySelector("[data-voice-level]");
+const voiceBars = document.querySelectorAll("[data-voice-spectrum] i");
 const voiceToggles = document.querySelectorAll("[data-voice-toggle]");
 
 const VOICE_STATES = {
@@ -1029,12 +1029,13 @@ const voice = bindVoiceConversation(runnerPage, {
 		}
 	},
 	onState: showVoiceState,
-	onLevel: (level) => {
-		if (voiceLevel) {
-			// Scaled so ordinary speech fills most of the bar; the point is to
-			// show that something is being heard, not to be a meter.
-			voiceLevel.style.transform = `scaleX(${Math.min(1, level * 6).toFixed(3)})`;
-		}
+	onSpectrum: (bands) => {
+		voiceBars.forEach((bar, index) => {
+			// A floor so the row never collapses into nothing: a flat line reads
+			// as broken, and silence is not the same as not working.
+			const height = Math.max(0.08, Math.min(1, (bands[index] || 0) * 1.6));
+			bar.style.transform = `scaleY(${height.toFixed(3)})`;
+		});
 	},
 });
 

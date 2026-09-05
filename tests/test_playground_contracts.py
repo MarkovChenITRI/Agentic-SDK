@@ -469,7 +469,10 @@ def test_deployment_options_follow_reachable_modules_and_require_selection():
     assert [requirement["role"] for requirement in state["requirements"]] == ["perceive", "plan", "retrieve", "action"]
     assert state["selections"] == {"perceive": "", "plan": "", "retrieve": "", "action": ""}
     assert state["binding_missing_roles"] == {"perceive": True, "plan": True, "retrieve": True, "action": True}
-    assert state["configured"] is True
+    # Nothing is bound yet, so nothing is configured. This line used to assert
+    # the opposite, which is how an agent with no deployments chosen could be
+    # finished in the Builder and then fail to start.
+    assert state["configured"] is False
     retrieve_requirement = next(r for r in state["requirements"] if r["role"] == "retrieve")
     assert {option["id"] for option in retrieve_requirement["options"]} == {"embedded-large", "embedded-small"}
 
@@ -2457,3 +2460,23 @@ def test_an_uploaded_document_can_be_taken_back_off(tmp_path, monkeypatch):
         missing = client.post("/playground/builder/uploads/delete", json={"name": "never-uploaded.md"})
         assert missing.status_code == 404
         assert missing.get_json()["updated"] is False
+
+
+def test_an_unbound_deployment_is_not_a_configured_one():
+    """The Builder said ready, the runner then died on the missing binding.
+
+    A role with no deployment chosen was reported as configured, because the
+    credential check short-circuits when nothing is bound and nothing folded
+    the binding back in. The readiness check passed, the person pressed 完成,
+    and initialisation failed with 找不到可用的 Key Vault 模型端點 — with no
+    way back to the question that would have fixed it.
+    """
+    spec = build_spec(("input_type", "voice"), ("output_format", "voice"), ("failure_policy", "retry"))
+
+    state = model_endpoints.endpoint_state(
+        spec, {"action": "gpt-54", "transcribe": "transcribe", "tts": "tts"}
+    )
+
+    assert state["binding_missing_roles"]["reflect"] is True
+    assert state["configured_roles"]["reflect"] is False
+    assert state["configured"] is False

@@ -71,7 +71,12 @@ def endpoint_state(spec: dict, selections: dict[str, str] | None) -> dict[str, o
         for requirement in requirements
     }
     configured_roles = {
+        # Bound *and* holding credentials. The credential check short-circuits
+        # when nothing is bound, so on its own it reported an unchosen
+        # deployment as configured — the Builder let the agent be finished and
+        # the runner then failed to start on the binding that was never made.
         requirement.role: not credential_missing_roles[requirement.role]
+        and not binding_missing_roles[requirement.role]
         for requirement in requirements
     }
     return {

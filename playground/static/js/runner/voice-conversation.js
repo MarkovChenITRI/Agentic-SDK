@@ -16,7 +16,9 @@ const TRANSCRIBE_SAMPLE_RATE = 16000;
 const SYNTHESIS_SAMPLE_RATE = 24000;
 const FRAME_SAMPLES = 1024;
 
-export function bindVoiceConversation(page, { onTranscript, onStatus, onState, onLevel }) {
+const SPECTRUM_BANDS = 14;
+
+export function bindVoiceConversation(page, { onTranscript, onStatus, onState, onSpectrum }) {
 	if (page?.dataset.voice !== "true") {
 		return null;
 	}
@@ -29,6 +31,8 @@ export function bindVoiceConversation(page, { onTranscript, onStatus, onState, o
 		startedSpeakingAt: 0,
 		state: "starting",
 		paused: false,
+		listenAnalyser: null,
+		speakAnalyser: null,
 		carry: new Uint8Array(0),
 	};
 
@@ -124,6 +128,19 @@ export function bindVoiceConversation(page, { onTranscript, onStatus, onState, o
 			document.addEventListener("click", () => context.resume(), { once: true });
 		}
 		const source = context.createMediaStreamSource(microphone);
+		session.listenAnalyser = analyserFor(context);
+		source.connect(session.listenAnalyser);
+		// An analyser with nothing downstream is never pulled, so it reports
+		// silence for ever. A gain of zero gives it somewhere to go without
+		// putting the microphone through the speakers.
+		const silent = context.createGain();
+		silent.gain.value = 0;
+		session.listenAnalyser.connect(silent);
+		silent.connect(context.destination);
+		// Watching the frequencies rather than one loudness number, because a
+		// bar that only rises and falls says "a sound happened" while a
+		// spectrum says "your voice is what I am hearing".
+		watchSpectrum();
 		const meter = context.createScriptProcessor(FRAME_SAMPLES, 1, 1);
 		meter.addEventListener("audioprocess", (event) => {
 			send(event.inputBuffer.getChannelData(0), context.sampleRate);
@@ -134,14 +151,19 @@ export function bindVoiceConversation(page, { onTranscript, onStatus, onState, o
 	}
 
 	function send(samples, sampleRate) {
-		// Reported whether or not it is sent, so a paused microphone still shows
-		// the person that the page can hear them — the meter is how they tell a
-		// pause from a failure.
-		onLevel?.(loudness(samples));
 		if (session.paused || session.socket?.readyState !== WebSocket.OPEN) {
 			return;
 		}
 		session.socket.send(toServiceAudio(samples, sampleRate));
+	}
+
+	function watchSpectrum() {
+		// Whichever end is making sound: the agent's own voice while it answers,
+		// the person's while it listens. Advanced voice modes do the same, and
+		// it is the difference between a decoration and a display.
+		const analyser = session.playing.length ? session.speakAnalyser : session.listenAnalyser;
+		onSpectrum?.(analyser ? bandsOf(analyser) : new Array(SPECTRUM_BANDS).fill(0));
+		requestAnimationFrame(watchSpectrum);
 	}
 
 	function pause() {
@@ -189,7 +211,11 @@ export function bindVoiceConversation(page, { onTranscript, onStatus, onState, o
 		}
 		const piece = context.createBufferSource();
 		piece.buffer = buffer;
-		piece.connect(context.destination);
+		if (!session.speakAnalyser) {
+			session.speakAnalyser = analyserFor(context);
+			session.speakAnalyser.connect(context.destination);
+		}
+		piece.connect(session.speakAnalyser);
 		// Queued against the running clock rather than played on arrival, so the
 		// pieces join up instead of overlapping each other.
 		const startAt = Math.max(context.currentTime, session.playheadAt);
@@ -235,13 +261,32 @@ export function bindVoiceConversation(page, { onTranscript, onStatus, onState, o
 	return { sessionId: session.id, speak, stopPlaying, pause, resume, enter };
 }
 
-/** How loud a frame is, on the same 0-1 scale the microphone reports. */
-export function loudness(samples) {
-	let total = 0;
-	for (let index = 0; index < samples.length; index += 1) {
-		total += samples[index] * samples[index];
+function analyserFor(context) {
+	const analyser = context.createAnalyser();
+	// Small transform, heavily smoothed: this is a thing to glance at, not a
+	// measurement, and an unsmoothed spectrum flickers into noise.
+	analyser.fftSize = 128;
+	analyser.smoothingTimeConstant = 0.75;
+	return analyser;
+}
+
+/** The spectrum folded down to the handful of bars the page draws. */
+export function bandsOf(analyser) {
+	const bins = new Uint8Array(analyser.frequencyBinCount);
+	analyser.getByteFrequencyData(bins);
+	// Only the lower half: speech lives there, and the top of the range is
+	// empty most of the time, which would leave half the bars permanently flat.
+	const usable = Math.floor(bins.length / 2);
+	const perBand = Math.max(1, Math.floor(usable / SPECTRUM_BANDS));
+	const bands = [];
+	for (let band = 0; band < SPECTRUM_BANDS; band += 1) {
+		let total = 0;
+		for (let offset = 0; offset < perBand; offset += 1) {
+			total += bins[band * perBand + offset] || 0;
+		}
+		bands.push(total / perBand / 255);
 	}
-	return samples.length ? Math.sqrt(total / samples.length) : 0;
+	return bands;
 }
 
 /** Resample to the rate the transcription service takes, as 16-bit mono. */
