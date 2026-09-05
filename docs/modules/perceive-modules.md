@@ -113,6 +113,15 @@ listening = RealtimeTranscription(api_key=..., base_url=..., model=...)
 perceive = VoiceTextPerceive(transport=listening)
 ```
 
+| 參數 | 型態 | 必填 | 預設值 | 說明 |
+| --- | --- | --- | --- | --- |
+| `model` | `string` | 是 | 無 | 轉寫模型名稱。 |
+| `api_key` | `string` | 否 | `None` | 端點金鑰。 |
+| `base_url` | `string` | 否 | `None` | 端點位址；留空時使用 OpenAI 的預設位址。 |
+| `language` | `string` | 否 | `"zh"` | 轉寫語言。 |
+| `turn_detection` | `dict` | 否 | `server_vad`，靜音 300 毫秒 | 服務判定語句結束的方式。`server_vad` 依固定的靜音長度；`semantic_vad` 由模型判斷該停頓屬於句中換氣或句末，並以 `eagerness` 調整等待長度。 |
+| `connect_timeout` | `float` | 否 | `30.0` | 等待服務接受連線的秒數上限，逾時拋出 `TimeoutError`。 |
+
 `turn_detection` 決定服務怎麼判斷一句話結束——靠固定的靜音長度，或靠模型判斷這個停頓是換氣還是句末。它是**傳輸的參數**，不是模組的：模組只管送什麼上去。
 
 **SDK 附的傳輸只會連 OpenAI**，不收 client、也不收廠商參數。端點的連線方式不同時，**覆蓋一個方法**：
@@ -125,7 +134,7 @@ class MyTranscription(RealtimeTranscription):
         return SomeClient(...).beta.realtime.connect(model=self._model)
 ```
 
-開連線之後的一切——session 設定、送音訊、事件分派——全部繼承。對模組而言，你寫的和 SDK 附的**完全沒有分別**。詳見 ADR-0003。
+開連線之後的一切——session 設定、送音訊、事件分派——全部繼承。對模組而言，自訂的實作和 SDK 附的**完全沒有分別**。詳見 ADR-0003。
 
 ### 標準輸入參數
 
@@ -225,6 +234,15 @@ from agentic_sdk.audio.realtime import RealtimeTranscription
 listening = RealtimeTranscription(api_key=..., base_url=..., model=...)
 perceive = VoiceTextPerceive(transport=listening)
 ```
+
+| 參數 | 型態 | 必填 | 預設值 | 說明 |
+| --- | --- | --- | --- | --- |
+| `model` | `string` | 是 | 無 | 轉寫模型名稱。 |
+| `api_key` | `string` | 否 | `None` | 端點金鑰。 |
+| `base_url` | `string` | 否 | `None` | 端點位址；留空時使用 OpenAI 的預設位址。 |
+| `language` | `string` | 否 | `"zh"` | 轉寫語言。 |
+| `turn_detection` | `dict` | 否 | `server_vad`，靜音 300 毫秒 | 服務判定語句結束的方式。`server_vad` 依固定的靜音長度；`semantic_vad` 由模型判斷該停頓屬於句中換氣或句末，並以 `eagerness` 調整等待長度。 |
+| `connect_timeout` | `float` | 否 | `30.0` | 等待服務接受連線的秒數上限，逾時拋出 `TimeoutError`。 |
 
 `turn_detection` 決定服務怎麼判斷一句話結束——靠固定的靜音長度，或靠模型判斷這個停頓是換氣還是句末。它是**傳輸的參數**，不是模組的：模組只管送什麼上去。
 

@@ -4,12 +4,12 @@
 
 這份教材說明應用程式如何在最後回覆產生前，知道工作流程目前進行到哪一個步驟。SDK 會透過 `event_callback` 送出階段事件，應用程式可讀取事件裡的 `label` 更新狀態。
 
-## 你會學到
+## 涵蓋內容
 
 - 不設定 `events_schema` 時，直接使用 SDK 的完整預設事件與標準 label。
 - 用 `event_callback=on_event` 顯示 stage start event。
 - 直接使用 SDK 提供的 `label`，不在 UI 自建 module-to-label mapping。
-- 將事件內容接到你的狀態顯示、執行紀錄或監測程式。
+- 將事件內容接到狀態顯示、執行紀錄或監測程式。
 
 ## 直接使用標準事件
 

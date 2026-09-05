@@ -4,7 +4,7 @@
 
 這份教材說明如何用 Python 撰寫可放進工作流程的模組。五大模組都遵循同一個基本寫法：物件提供 `name`，以 `__call__(state)` 接收目前狀態，完成後回傳 `ModuleOutput`。
 
-## 你會學到
+## 涵蓋內容
 
 - 看懂模組共同的最小寫法。
 - 分辨 `WorkflowState`、`ModuleOutput`、`payload` 與 `context_updates` 各自保存的資料。

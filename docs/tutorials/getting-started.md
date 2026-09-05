@@ -4,7 +4,7 @@
 
 這是教材共同的起點：安裝 SDK、確認 import 成功，並以 `PassThroughPerceive`、`KeywordRetrieve` 與 `DirectAnswerAction` 跑出一個可驗證的最小結果。
 
-## 你會學到
+## 涵蓋內容
 
 - 安裝或更新 Agentic SDK。
 - 確認目前環境載入的是預期的套件。

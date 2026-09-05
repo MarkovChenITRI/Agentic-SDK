@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | Perceive | PassThroughPerceive、TextPerceive、TextImagePerceive、VoiceTextPerceive | 把原始輸入整理成查詢、標籤與摘要。 |
 | Plan | NextStepPlan | 決定下一步交給 `Retrieve` 還是 `Action`。 |
-| Retrieve | KeywordRetrieve、SemanticRetrieve | 查回條目、歷史紀錄或知識內容。 |
+| Retrieve | PassThroughRetrieve、KeywordRetrieve、SemanticRetrieve | 查回條目、歷史紀錄或知識內容，或不查直接往下走。 |
 | Action | DirectAnswerAction、GenerativeAction、ToolCallAction、VoiceAnswerAction | 組成自然語言回應、固定格式文字輸出、OpenAI 標準工具呼叫，或同時說出口與顯示在畫面上的雙頻道回覆。 |
 | Reflect | ResponseCheckReflect、EvidenceCheckReflect | 檢查回應完整性與證據是否足夠。 |
 
@@ -38,4 +38,4 @@
 
 1. 先看 [工作流程](../workflow/index.md)，確認五個模組家族各自接手哪一段工作。
 2. 再看 [記憶類型](../workflow/memory-types.md)，理解流程跑動時由哪一層保存中間資料。
-3. 最後進入你要的功能頁，查標準名與標準輸入輸出格式。
+3. 最後進入對應的功能頁，查標準名與標準輸入輸出格式。

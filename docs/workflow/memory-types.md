@@ -58,10 +58,10 @@
 
 ## 什麼時候看這一頁
 
-- 當你要理解 workflow 內哪一層保存完整對話
-- 當你要判斷是否只用單輪 `run()`，還是要建立 `memory = InContextMemory()` 並交給 `Workflow(memory_type=memory)` 承接多輪對話
-- 當你要替 workflow 指定特定 `MemoryStore` 類型或物件，例如 `"in_context"`、`"persistent"`、`InContextMemory` 或自訂 memory instance
-- 當你要分清楚「workflow 節點規格」與「workflow 執行引擎」是兩個不同層次
+- 要理解 workflow 內哪一層保存完整對話時
+- 要判斷只用單輪 `run()`，或建立 `memory = InContextMemory()` 交給 `Workflow(memory_type=memory)` 承接多輪對話時
+- 要替 workflow 指定特定 `MemoryStore` 類型或物件時，例如 `"in_context"`、`"persistent"`、`InContextMemory` 或自訂 memory instance
+- 要分清楚「workflow 節點規格」與「workflow 執行引擎」兩個層次時
 
 ## 與模組頁的分工
 
@@ -69,4 +69,4 @@
 
 這一頁負責回答 `Workflow` 在執行時由哪一層提供共同記憶抽象、哪兩種記憶類型可以互換、以及哪一層保存本次 `run()` 狀態。
 
-如果你現在要先理解 workflow 如何組裝，先看 [工作流程](index.md)。如果你接下來要看節點層的規格，再進 [模組家族](../modules/index.md) 與對應模組頁。
+要先理解 workflow 如何組裝，看 [工作流程](index.md)。要看節點層的規格，進 [模組家族](../modules/index.md) 與對應模組頁。

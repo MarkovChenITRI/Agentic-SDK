@@ -1,15 +1,15 @@
 # 回覆與動作
 
-回覆與動作模組把前面步驟整理的資料轉成使用者可讀的回覆，或整理成你的程式可以執行的工具請求。前段資料主要來自 [模組家族](index.md) 所說的共用資料。
+回覆與動作模組把前面步驟整理的資料轉成使用者可讀的回覆，或整理成呼叫端可以執行的工具請求。前段資料主要來自 [模組家族](index.md) 所說的共用資料。
 
 ## 取得回覆結果
 
 每次工作流程完成後，應用程式從 `result.final_message` 取得最後回覆文字。需要讓後續步驟或周邊程式讀取本輪資料時，可從 `result.entities` 取得最新回覆、工具請求和模型用量。
 
-| 你要取得的資料 | 程式欄位 | 用途 |
+| 要取得的資料 | 程式欄位 | 用途 |
 | --- | --- | --- |
 | 最後回覆 | `result.final_message` | 顯示或傳回給使用者的文字。 |
-| 最新回覆內容 | `result.entities["latest_final_message"]` | 供後續步驟或你的程式接續處理。 |
+| 最新回覆內容 | `result.entities["latest_final_message"]` | 供後續步驟或呼叫端接續處理。 |
 | 工具請求 | `result.entities["latest_tool_calls"]` | `ToolCallAction` 整理出的工具名稱與參數。 |
 | 模型用量 | `result.entities["_llm_usage"]` | 生成回覆或工具請求時使用的模型和 token 數。 |
 
@@ -53,13 +53,13 @@
 
 ### 回覆內容與用量
 
-`GenerativeAction` 會把模型產生的文字放入 `result.final_message` 和 `result.entities["latest_final_message"]`。`result.entities["_llm_usage"]` 會記錄模型名稱、輸入 token 數與輸出 token 數。需要 JSON、表格或固定欄位時，可在 `system_prompt` 說明回覆格式，再由你的程式讀取與驗證。
+`GenerativeAction` 會把模型產生的文字放入 `result.final_message` 和 `result.entities["latest_final_message"]`。`result.entities["_llm_usage"]` 會記錄模型名稱、輸入 token 數與輸出 token 數。需要 JSON、表格或固定欄位時，可在 `system_prompt` 說明回覆格式，再由呼叫端讀取與驗證。
 
 ## VoiceAnswerAction
 
 `VoiceAnswerAction` 繼承 `GenerativeAction`，在同一次生成裡產出兩個頻道：`spoken` 是要說出口的話，口語、講判斷與理由；`displayed` 是要顯示在畫面上的內容，放型號、數字、條列或表格。兩者互相補充，不是把畫面內容唸一遍。
 
-模組會把兩頻道契約接在你的 `system_prompt` 後面，因此仍可指定自己的角色與語氣。`spoken` 欄位一寫完就送去合成，不等整段回覆結束——回覆愈長，這個提早開口愈有感；短回覆兩者只差數十毫秒。
+模組會把兩頻道契約接在傳入的 `system_prompt` 後面，呼叫端仍可指定角色與語氣。`spoken` 欄位一寫完就送去合成，不等整段回覆結束——回覆愈長，這個提早開口愈有感；短回覆兩者只差數十毫秒。
 
 此模組同時連兩個服務，兩者的形狀不同：生成用三件式（`api_key`、`base_url`、`model`），說話用一個建好的音訊來源物件（`speech`）。
 
@@ -72,7 +72,7 @@
 | `model` | `string` | 是 | 無 | 生成回覆的模型名稱。 |
 | `speech` | `AudioOutputTransport` | **是** | 無 | 說話用的音訊來源，在模組外面建好再交進來。 |
 | `temperature` | `number|null` | 否 | `null` | 生成溫度。 |
-| `system_prompt` | `string|null` | 否 | `null` | 你的系統提示；兩頻道契約會接在後面。 |
+| `system_prompt` | `string|null` | 否 | `null` | 呼叫端的系統提示；兩頻道契約會接在後面。 |
 
 生成模型是三件式、音訊來源是物件，這個不對稱是刻意的：聊天端點同構，音訊來源不同構。SDK 附的實作是 `SpeechOutput`：
 
@@ -82,6 +82,14 @@ from agentic_sdk.audio.speech import SpeechOutput
 speaking = SpeechOutput(api_key=..., base_url=..., model=..., voice="alloy")
 action = VoiceAnswerAction(speech=speaking, api_key=..., base_url=..., model=...)
 ```
+
+| 參數 | 型態 | 必填 | 預設值 | 說明 |
+| --- | --- | --- | --- | --- |
+| `model` | `string` | 是 | 無 | 語音合成模型名稱。 |
+| `api_key` | `string` | 否 | `None` | 端點金鑰。 |
+| `base_url` | `string` | 否 | `None` | 端點位址；留空時使用 OpenAI 的預設位址。 |
+| `voice` | `string` | 否 | `"alloy"` | 合成音色。 |
+| `response_format` | `string` | 否 | `"pcm"` | 音訊格式。PCM 開始輸出最快，且瀏覽器播放前不需解碼。 |
 
 `SpeechOutput` 只會連 OpenAI。端點不同時覆蓋 `_open_stream(text)`，回傳一個 `iter_bytes()` 會吐音訊的 context manager；停在句中的行為（有人插話就放棄串流）是繼承來的。詳見 ADR-0003。
 
@@ -148,7 +156,7 @@ heard_portion("保固期是十二個月，延長保固可以再加兩年", 2.0)
 
 ### 工具請求與回覆內容
 
-`ToolCallAction` 會把回覆文字放入 `result.final_message`，並將工具請求整理到 `result.entities["latest_tool_calls"]`。每一筆工具請求包含識別碼、工具名稱和參數文字；你的程式讀取後驗證參數、執行對應工作，再決定如何回覆使用者。`result.entities["_llm_usage"]` 會記錄本輪模型用量。
+`ToolCallAction` 會把回覆文字放入 `result.final_message`，並將工具請求整理到 `result.entities["latest_tool_calls"]`。每一筆工具請求包含識別碼、工具名稱和參數文字；呼叫端讀取後驗證參數、執行對應工作，再決定如何回覆使用者。`result.entities["_llm_usage"]` 會記錄本輪模型用量。
 
 ### 範例
 
