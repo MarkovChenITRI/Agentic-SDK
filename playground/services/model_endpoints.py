@@ -171,7 +171,14 @@ def _missing_endpoint_secrets(role: str, endpoint: ModelEndpoint | None) -> list
 
 def _api_key_for_role(endpoint: ModelEndpoint, role: str) -> str:
     settings = key_vault_settings()
-    for configured_endpoint in (*settings.chat_endpoints, *settings.embedding_endpoints):
+    # Every kind of endpoint, because a role that is missing from this list
+    # reports its key as absent no matter what the key vault holds — and the
+    # Builder then refuses to finish an agent nobody can fix.
+    for configured_endpoint in (
+        *settings.chat_endpoints,
+        *settings.embedding_endpoints,
+        *settings.speech_endpoints,
+    ):
         if configured_endpoint.id == endpoint.id:
             return configured_endpoint.api_key
     return ""

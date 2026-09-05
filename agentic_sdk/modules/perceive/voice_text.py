@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentic_sdk.audio.speech_gate import (
-    DEFAULT_HANGOVER_CHUNKS,
+    DEFAULT_HANGOVER_SECONDS,
     DEFAULT_SPEECH_THRESHOLD,
     SpeechGate,
 )
@@ -36,7 +36,7 @@ class VoiceTextPerceive:
         language: str = "zh",
         transport: AudioInputTransport | None = None,
         speech_threshold: int = DEFAULT_SPEECH_THRESHOLD,
-        hangover_chunks: int = DEFAULT_HANGOVER_CHUNKS,
+        hangover_seconds: float = DEFAULT_HANGOVER_SECONDS,
     ) -> None:
         """Listen on the given speech endpoint, or through a transport of your own.
 
@@ -56,7 +56,7 @@ class VoiceTextPerceive:
                 api_key=api_key, base_url=base_url, model=model, language=language
             )
         self.transport = transport
-        self._gate = SpeechGate(threshold=speech_threshold, hangover_chunks=hangover_chunks)
+        self._gate = SpeechGate(threshold=speech_threshold, hangover_seconds=hangover_seconds)
         self._heard: list[str] = []
         self._spoken = False
         self._cancel: Any = None

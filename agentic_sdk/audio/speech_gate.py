@@ -25,13 +25,22 @@ while setting it too high clips the beginning of quiet speech, and a sentence
 missing its first word is worse than a sentence with a rustle in front of it.
 """
 
-DEFAULT_HANGOVER_CHUNKS = 3
-"""How many quiet chunks to keep sending after the talking stops.
+DEFAULT_HANGOVER_SECONDS = 0.8
+"""How much quiet to keep sending after the talking stops.
 
-Speech ends softly. Cutting at the moment loudness drops takes the tail off the
-last word, and the service — which decides an utterance is over by hearing
-silence — never gets the silence it is waiting for.
+Speech ends softly, so cutting at the moment loudness drops takes the tail off
+the last word. The bigger reason is the service: it decides an utterance is
+over by hearing silence, and a gate that closes too soon means it never hears
+any. Live against the real deployment, a gate that let three chunks through —
+about 190ms — produced speech-started and then no transcript at all, because
+the sentence it was holding never ended.
+
+Measured in seconds rather than chunks because what the service is waiting for
+is a duration, and a chunk is whatever size the microphone happens to send.
 """
+
+DEFAULT_SAMPLE_RATE = 16000
+"""What the transcription service takes, and so what a chunk is measured in."""
 
 
 class SpeechGate:
@@ -41,18 +50,20 @@ class SpeechGate:
         self,
         *,
         threshold: int = DEFAULT_SPEECH_THRESHOLD,
-        hangover_chunks: int = DEFAULT_HANGOVER_CHUNKS,
+        hangover_seconds: float = DEFAULT_HANGOVER_SECONDS,
+        sample_rate: int = DEFAULT_SAMPLE_RATE,
     ) -> None:
         self._threshold = max(0, int(threshold))
-        self._hangover_chunks = max(0, int(hangover_chunks))
-        self._remaining = 0
+        self._hangover_seconds = max(0.0, float(hangover_seconds))
+        self._sample_rate = max(1, int(sample_rate))
+        self._remaining = 0.0
 
     def should_send(self, pcm16: bytes) -> bool:
         if loudness(pcm16) >= self._threshold:
-            self._remaining = self._hangover_chunks
+            self._remaining = self._hangover_seconds
             return True
         if self._remaining > 0:
-            self._remaining -= 1
+            self._remaining -= len(pcm16) / 2 / self._sample_rate
             return True
         return False
 

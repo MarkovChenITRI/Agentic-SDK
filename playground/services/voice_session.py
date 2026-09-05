@@ -14,11 +14,13 @@ is not, and nothing would report it.
 from __future__ import annotations
 
 import threading
-from typing import Callable, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
 
-from agentic_sdk.audio.transport import AudioInputTransport
 from agentic_sdk.core.cancellation import CancellationToken
-from agentic_sdk.modules.perceive.voice_text import VoiceTextPerceive
+
+if TYPE_CHECKING:  # imported lazily below — see listen()
+    from agentic_sdk.audio.transport import AudioInputTransport
+    from agentic_sdk.modules.perceive.voice_text import VoiceTextPerceive
 
 
 class VoiceSessionRegistry:
@@ -26,7 +28,7 @@ class VoiceSessionRegistry:
 
     def __init__(self) -> None:
         self._tokens: dict[str, CancellationToken] = {}
-        self._listeners: dict[str, VoiceTextPerceive] = {}
+        self._listeners: dict[str, "VoiceTextPerceive"] = {}
         self._speakers: dict[str, Callable[[str], None]] = {}
         self._lock = threading.Lock()
 
@@ -49,19 +51,26 @@ class VoiceSessionRegistry:
         speaker(text)
         return True
 
-    def listen(self, session_id: str, transport: AudioInputTransport) -> VoiceTextPerceive:
+    def listen(self, session_id: str, transport: "AudioInputTransport") -> "VoiceTextPerceive":
         """Give this session somewhere to send its microphone.
 
         The listening module rather than the raw transport, because the gate in
         front of it is the thing standing between a quiet room and a stream of
         words nobody said.
+
+        The import is here rather than at the top of the file because a
+        websocket arriving while the runner is still warming its modules
+        deadlocked the two threads on Python's import lock, and the agent
+        never finished starting.
         """
+        from agentic_sdk.modules.perceive.voice_text import VoiceTextPerceive
+
         listener = VoiceTextPerceive(transport=transport)
         with self._lock:
             self._listeners[str(session_id)] = listener
         return listener
 
-    def listener(self, session_id: str) -> VoiceTextPerceive | None:
+    def listener(self, session_id: str) -> "VoiceTextPerceive | None":
         with self._lock:
             return self._listeners.get(str(session_id))
 
@@ -131,7 +140,7 @@ class SessionSpeech:
         return iter(())
 
 
-def open_transcription() -> AudioInputTransport | None:
+def open_transcription() -> "AudioInputTransport | None":
     """Start a transcription session on the configured endpoint, if there is one.
 
     Returns nothing when no speech endpoint is configured, so the page can say

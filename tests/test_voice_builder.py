@@ -77,3 +77,20 @@ def test_listening_and_speaking_are_not_interchangeable():
 
     assert options["transcribe"] == ["transcribe"]
     assert options["tts"] == ["tts"]
+
+
+def test_a_voice_agent_can_actually_be_finished():
+    """Every voice agent was stuck: bound correctly, still reported unconfigured.
+
+    The API key lookup searched the chat and embedding endpoints only, so a
+    speech deployment that was present in the key vault came back missing its
+    key. Nothing in the Builder could be done about it — the readiness check
+    simply never passed, and the agent could not be run.
+    """
+    spec = build_spec(("input_type", "voice"), ("output_format", "voice"))
+
+    state = model_endpoints.endpoint_state(spec, {"action": "gpt-54", "transcribe": "transcribe", "tts": "tts"})
+
+    assert state["missing_secrets_by_role"]["transcribe"] == []
+    assert state["missing_secrets_by_role"]["tts"] == []
+    assert state["configured"] is True

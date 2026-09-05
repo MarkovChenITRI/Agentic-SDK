@@ -107,6 +107,9 @@
         </article>
       </div>
 
+      {% if uses_voice %}
+      <p class="runner-voice-status" data-voice-status role="status" aria-live="polite"></p>
+      {% endif %}
       <form class="input-composer chat-composer" data-input-composer>
         <label for="runner-message">輸入訊息</label>
         <div class="composer-attachment-preview" data-artifact-list aria-label="已選擇的參考資料"></div>

@@ -58,9 +58,14 @@ def test_silence_is_never_sent_to_the_service():
 
 
 def test_speech_is_sent_and_the_tail_of_it_survives():
-    """Cutting at the moment energy drops clips the end of the last word."""
+    """Cutting at the moment energy drops clips the end of the last word.
+
+    Worse, the service ends an utterance by hearing silence: a gate that closes
+    too soon means it never hears any, and the sentence is never transcribed.
+    """
     audio = FakeAudioInput()
-    perceive = VoiceTextPerceive(transport=audio, hangover_chunks=2)
+    # 1600 frames at 16 kHz is a tenth of a second, so this is two chunks' worth.
+    perceive = VoiceTextPerceive(transport=audio, hangover_seconds=0.2)
 
     perceive.hear(silence())
     perceive.hear(speech())

@@ -27,6 +27,7 @@ export function bindVoiceConversation(page, { onTranscript, onStatus }) {
 		playing: [],
 		playheadAt: 0,
 		startedSpeakingAt: 0,
+		carry: new Uint8Array(0),
 	};
 
 	const say = (message) => onStatus?.(message);
@@ -108,7 +109,19 @@ export function bindVoiceConversation(page, { onTranscript, onStatus }) {
 		if (!context) {
 			return;
 		}
-		const samples = new Int16Array(audio);
+		// A frame off the socket is a slice of a stream, not a whole number of
+		// samples: an odd byte length is normal, and the leftover byte is the
+		// first half of a sample whose other half is in the next frame.
+		const arrived = new Uint8Array(audio);
+		const joined = new Uint8Array(session.carry.length + arrived.length);
+		joined.set(session.carry);
+		joined.set(arrived, session.carry.length);
+		const whole = joined.length - (joined.length % 2);
+		session.carry = joined.slice(whole);
+		if (!whole) {
+			return;
+		}
+		const samples = new Int16Array(joined.buffer.slice(0, whole));
 		// Synthesis and transcription are different services at different
 		// rates. Playing 24 kHz audio as 16 kHz stretches it by half again —
 		// and stretches the heard duration reported back with it.
@@ -146,6 +159,7 @@ export function bindVoiceConversation(page, { onTranscript, onStatus }) {
 		}
 		session.playing = [];
 		session.playheadAt = 0;
+		session.carry = new Uint8Array(0);
 		session.socket?.send(JSON.stringify({ type: "interject", heard_seconds: heard }));
 	}
 

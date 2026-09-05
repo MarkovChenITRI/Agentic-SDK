@@ -819,6 +819,12 @@ workflowDescriptionInput?.addEventListener("blur", async () => {
 async function runWorkflow(payload, { displayMessage, showUserMessage = true } = {}) {
 	if (!runnerInitialized) {
 		showSavePanel(savePanel, "Agent 還在初始化，完成後才能開始對話。");
+		// Someone who typed can see the panel and try again. Someone who spoke
+		// gets no acknowledgement at all unless it is said on their own line.
+		const voiceStatus = document.querySelector("[data-voice-status]");
+		if (voiceStatus) {
+			voiceStatus.textContent = "Agent 還在啟動，好了再說一次。";
+		}
 		return;
 	}
 	const runId = ++activeRunId;
@@ -826,6 +832,11 @@ async function runWorkflow(payload, { displayMessage, showUserMessage = true } =
 	const submittedToolCall = payload?.tool_call_submission || null;
 	const requestMessage = prompt || (submittedToolCall ? toolSubmissionDisplay(submittedToolCall) : "");
 	const requestPayload = { message: requestMessage };
+	if (payload?.voice_session_id) {
+		// Without this the run is not registered against the listening session,
+		// so nothing can interrupt it and its answer is spoken to nobody.
+		requestPayload.voice_session_id = payload.voice_session_id;
+	}
 	if (Array.isArray(payload?.attachments) && payload.attachments.length) {
 		requestPayload.attachments = payload.attachments;
 	}
@@ -964,8 +975,12 @@ const voice = bindVoiceConversation(runnerPage, {
 		runWorkflow({ message: text, voice_session_id: voice?.sessionId || "" });
 	},
 	onStatus: (message) => {
-		if (runStatus) {
-			runStatus.textContent = message;
+		// Its own line, because the runner has no general status element: every
+		// `runStatus` in this file writes to null. A microphone that needs
+		// permission has to say so somewhere a person can read it.
+		const voiceStatus = document.querySelector("[data-voice-status]");
+		if (voiceStatus) {
+			voiceStatus.textContent = message;
 		}
 	},
 });
