@@ -160,3 +160,26 @@ def test_an_answer_nobody_interrupted_is_reported_whole():
     action._speak("保固十二個月", state)
 
     assert state.spoken_so_far == "保固十二個月"
+
+
+def test_a_reply_that_ignores_the_contract_is_still_readable():
+    """Models answer in their own JSON sometimes, and a person then sees braces.
+
+    Live against gpt-5.4 the reply to 「一加一等於多少？」 came back as
+    {"问题": "1 + 1", "答案": 2} — neither field the contract asks for. The raw
+    object went on the screen and was read out loud, brackets and quotes and
+    all. It gets flattened into lines instead: nothing is invented, and nothing
+    that was answered is thrown away.
+    """
+    from agentic_sdk.modules.action.voice_answer import _split_channels
+
+    spoken, displayed = _split_channels('{"问题": "1 + 1", "答案": 2}')
+
+    assert displayed == "问题：1 + 1\n答案：2"
+    assert spoken == displayed
+
+
+def test_an_answer_that_is_not_json_is_left_alone():
+    from agentic_sdk.modules.action.voice_answer import _split_channels
+
+    assert _split_channels("保固十二個月。") == ("保固十二個月。", "保固十二個月。")

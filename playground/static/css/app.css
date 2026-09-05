@@ -2827,32 +2827,38 @@ a { color: inherit; text-decoration: none; }
   display: none;
 }
 
+/* The same circle as the send button, because they sit side by side: a
+   different diameter reads as a different kind of control. */
 .composer-icon-button {
   flex: 0 0 auto;
   justify-self: end;
-  display: grid;
+  display: inline-grid;
   place-items: center;
-  width: 2.3rem;
-  height: 2.3rem;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  width: 2.85rem;
+  height: 2.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.82);
   border-radius: 999px;
   background: transparent;
-  color: inherit;
+  color: #ffffff;
   cursor: pointer;
-  font-size: 1rem;
   line-height: 1;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.composer-icon-button:hover,
+.composer-icon-button:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  outline: 0;
 }
 
 /* Drawn, not typed: an emoji is somebody else's glyph at somebody else's
    weight, and it sits beside icons this page draws itself. */
 .composer-icon {
-  width: 1.15rem;
-  height: 1.15rem;
+  width: 1.35rem;
+  height: 1.35rem;
 }
 
-.composer-icon-button:hover {
-  border-color: rgba(255, 255, 255, 0.4);
-}
+
 
 .voice-spectrum {
   display: flex;

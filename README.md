@@ -109,6 +109,40 @@ if perceive.pending_input():
 
 吵雜環境調高 `speech_threshold`。要在測試裡驅動整條流程，傳 `transport=FakeAudioInput()` 就不需要網路與憑證。
 
+### 1-2. 讓它講回來，而且可以被打斷
+
+```python
+from agentic_sdk import Workflow
+from agentic_sdk.audio.azure_speech import AzureSpeechOutput
+from agentic_sdk.core.cancellation import CancellationToken
+from agentic_sdk.modules import VoiceAnswerAction, VoiceTextPerceive
+
+perceive = VoiceTextPerceive(api_key=..., base_url=..., model=...)
+workflow = Workflow(
+    workflow_name="語音對話 Agent",
+    perceive=perceive,
+    action=VoiceAnswerAction(
+        api_key="<CHAT_API_KEY>",          # 產生回覆的模型
+        base_url="<CHAT_BASE_URL>",
+        model="<CHAT_DEPLOYMENT>",
+        speech=MySpeaker(AzureSpeechOutput(  # 見下方：SDK 不負責播放
+            api_key="<TTS_API_KEY>", base_url="<TTS_BASE_URL>", model="<TTS_DEPLOYMENT>",
+        )),
+    ),
+)
+
+result = workflow.run(cancel=CancellationToken())
+print(result.final_message)          # 顯示在畫面上的那一半
+if result.interrupted:
+    print(result.interrupt_payload["heard"])   # 對方實際聽到的那一段
+```
+
+`VoiceAnswerAction` 一次產生兩個頻道：`spoken` 是口語、講判斷與理由，`displayed` 是型號、價格、條列這類要用看的。**`spoken` 一寫完就送去合成**，不等整段回覆結束。
+
+**打斷靠的是那顆 `CancellationToken`。** perceive 模組在自己那一輪拿到它，之後只要偵測到有人開口就取消——不等轉寫，因為語音活動約 600ms 就測得到，轉寫要將近四秒。被打斷的那一輪 `interrupted` 為真、`aborted` 為假（那是流程自我中止才用的），而記憶裡只留對方真正聽到的部分。
+
+**SDK 不播放聲音，也不擷取麥克風。** `AzureSpeechOutput` 只把音訊產生出來；要讓人聽見，包一層在 `speak()` 裡把每一段交給你的音訊裝置再 `yield`——這樣使用者插話時放棄串流會同時停掉播放與合成。可執行的完整範例在 [`examples/voice/desktop_voice_agent.py`](examples/voice/desktop_voice_agent.py)，用一個 WAV 當麥克風，不需要音效裝置就能跑。
+
 ### 2. 使用 OpenAI-compatible 生成回覆
 
 可搭配任何 OpenAI-compatible endpoint，例如 Azure AI Foundry、Ollama 或其他相容服務。

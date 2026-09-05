@@ -182,5 +182,16 @@ def _split_channels(content: str) -> tuple[str, str]:
     displayed = str(parsed.get("displayed") or "").strip()
     spoken = str(parsed.get("spoken") or "").strip()
     if not displayed and not spoken:
-        return text, text
+        # Answered in its own shape rather than the one that was asked for.
+        # Showing the object raw puts braces and quotes on the screen and reads
+        # them out loud; flattening keeps every answer and loses the syntax.
+        return _flatten(parsed), _flatten(parsed)
     return spoken or displayed, displayed or spoken
+
+
+def _flatten(parsed: dict) -> str:
+    lines = []
+    for key, value in parsed.items():
+        rendered = value if isinstance(value, (str, int, float)) else json.dumps(value, ensure_ascii=False)
+        lines.append(f"{key}：{rendered}")
+    return "\n".join(lines)
