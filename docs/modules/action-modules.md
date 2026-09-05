@@ -107,6 +107,21 @@ class MySpeaker:
 
 `Workflow.run(cancel=...)` 收到的取消權杖被 `VoiceTextPerceive` 在偵測到有人開口時取消。此模組每合成一段就檢查一次，停下來之後回報**實際播出去的那一段**，不是已經寫好的全文。因此 `result.interrupted` 為真時，`result.interrupt_payload["delivered"]` 與記憶裡的助理回合都只有**實際交付出去**的內容。這一條不限語音——文字串流被中斷時記下的也是使用者已經讀到的那半句。
 
+### 播放時長怎麼變成文字
+
+只有正在播放的那一端知道對方聽了多久，而記憶要存的是文字。`agentic_sdk.audio.heard_portion(text, seconds)` 做這個換算，並把結果切在標點上：
+
+```python
+from agentic_sdk.audio import heard_portion
+
+heard_portion("保固期是十二個月，延長保固可以再加兩年", 2.0)
+# → "保固期是十二個月"
+```
+
+秒數是 `None` 時整段保留——**「不知道播了多少」不等於「沒播」**，把未知當成零會刪掉對方確實聽到的內容。
+
+換算用的是 `SPEAKING_CHARACTERS_PER_SECOND`（每秒 4.5 個字），那是一個**測量出來的平均值**，不是這一句話的性質。所以結果會退到最近的標點，而不是精準切在第幾個字——差幾個字沒關係，把半個詞留在紀錄裡才有關係。
+
 `result.aborted` 在被打斷時為**假**——那是流程自我中止（跳轉上限、逾時）才使用的旗標，會被當成錯誤呈現。
 
 ## ToolCallAction

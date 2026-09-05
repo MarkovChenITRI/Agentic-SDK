@@ -98,6 +98,10 @@ Perceive 模組負責把原始輸入整理成 workflow 後續節點可直接消�
 | `speech_threshold` | `int` | 否 | `500` | 判定為說話的音量下限（16 位元取樣的 RMS）。吵雜環境調高。 |
 | `hangover_seconds` | `float` | 否 | `0.8` | 說話結束後仍繼續送出的安靜長度。服務靠聽到靜音判定一句話結束，切太乾淨就永遠等不到轉寫。 |
 
+### 話比 run() 先到
+
+`VoiceTextPerceive` 實作 `pending_input()`：它把聽到的話先收著，`Workflow.run()` 不必再被告知一次。這個約定不是語音專屬，任何模組都可以實作——詳見[工作流程](../workflow/index.md)。
+
 ### 音訊來源怎麼建
 
 SDK 附的是 `RealtimeTranscription`，走 OpenAI SDK 的即時客戶端：

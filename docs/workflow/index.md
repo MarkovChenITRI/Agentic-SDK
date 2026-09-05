@@ -143,6 +143,21 @@ result = workflow.run("保固多久？", cancel=token)
 
 `result.interrupt_payload["delivered"]` 是同一份內容。這與音訊無關——螢幕會交付，喇叭也會，而核心不被允許知道是哪一種。
 
+執行途中，模組可以從 `state.delivered_so_far` 讀到目前為止交付了多少，並用 `state.report_delivered(...)` 更正它。透過 `emit_token_delta` 送出的內容會自動累積，所以**只有交付方式不是 delta 的模組**才需要自己回報——例如一個把音訊交給喇叭的模組。
+
+### 話還沒說出口就先問清楚
+
+有些模組在工作流開始前就已經拿到這一輪的輸入。語音是最明顯的例子：話什麼時候來取決於人什麼時候想講，不是取決於呼叫端什麼時候呼叫 `run()`。
+
+這種模組實作 `pending_input()`，回傳它已經收下、還沒用掉的輸入；`Workflow.run()` 因此不必再被告知一次：
+
+```python
+if perceive.pending_input():
+    result = workflow.run()          # 不必再傳一次使用者說了什麼
+```
+
+這個約定**不是語音專屬**，任何模組都可以實作它——它承認的是「呼叫端不一定是最先知道這一輪要處理什麼的人」。收下的內容用掉就沒了，不會殘留到下一輪。
+
 ## 執行事件
 
 如果呼叫 `run()` 或 `stream()` 時傳入 `event_callback`，省略 `events_schema` 的 `Workflow` 會對所有執行到的模組，在開始、完成或中止時送出 `stage` event，並送出完整的結構化 JSON 欄位。自訂 `events_schema` 時，則只對列出的模組與 `fields` 送出事件。你的應用程式可在開始時更新狀態，並在完成時讀取 SDK 依設定整理的欄位：

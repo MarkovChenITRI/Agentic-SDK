@@ -12,7 +12,7 @@ are one kind, and the fakes below are another.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterator, Protocol
+from typing import Callable, Iterator, Protocol
 
 
 class AudioInputTransport(Protocol):
@@ -124,18 +124,3 @@ class PlayedElsewhere:
     def speak(self, text: str) -> Iterator[bytes]:
         self.spoken.append(text)
         return iter(())
-
-
-def require_speech_endpoint(**settings: Any) -> None:
-    """Refuse a module that has neither a transport nor an endpoint to build one.
-
-    Without this the module would be constructed happily and then hear nothing,
-    which is the failure this project keeps finding: something that looks
-    configured and quietly does not work.
-    """
-    missing = [name for name, value in settings.items() if not str(value or "").strip()]
-    if missing:
-        raise ValueError(
-            f"{', '.join(missing)} required when no transport is given. Pass the "
-            f"speech endpoint's settings, or pass a transport of your own."
-        )
