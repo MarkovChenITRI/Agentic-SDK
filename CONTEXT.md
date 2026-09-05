@@ -90,3 +90,29 @@ about before the workflow does, and offers it rather than waiting to be asked.
 It is not a second kind of input. Whatever a module offers becomes the turn's
 message in the ordinary way, so the conversation record and what the modules
 see never disagree about what was said.
+
+## Listening session
+
+A **listening session** is one person's open microphone: the connection
+carrying their audio up and the agent's audio back down.
+
+It is named because the interruption and the answer arrive on different
+connections. The person speaks on the listening session; the answer they are
+speaking over is a separate request that started earlier. Without a name in
+common, nothing on the first can reach the second.
+
+A listening session ends when the page does. Nothing survives it — the next
+one hears nothing of the last.
+
+## Heard duration
+
+The **heard duration** is how much of an answer was actually played before the
+person interrupted, and only whatever was playing it can report one.
+
+It exists because speech lags generation: the text is finished seconds before
+it is spoken, so an interrupted turn has a written part that nobody heard.
+The record keeps the heard part and drops the rest.
+
+Unknown is not zero. Something that noticed the interruption without playing
+the audio has no heard duration to give, and treating that as nought would
+erase an answer the person did hear.
