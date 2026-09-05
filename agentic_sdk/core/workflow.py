@@ -311,6 +311,22 @@ class Workflow:
             aborted = True
             abort_reason = f"interrupted: {exc.reason}"
             interrupt_payload = exc.payload
+            # Say so on the trace, and say where. Whoever is tuning how eagerly
+            # the agent gives way needs to know it was stopped while answering,
+            # not while deciding what to look up.
+            if current is not None and self._should_emit_stage_event(current, event_callback, active_events_schema):
+                event = self._stage_event(
+                    phase="abort",
+                    status="interrupted",
+                    module_name=current,
+                    module=self.modules.get(current),
+                    state=state,
+                    visit_count=state.visit_counts.get(current, 1),
+                    events_schema=active_events_schema,
+                )
+                event["reason"] = abort_reason
+                event["interrupted"] = True
+                event_callback(event)
         except WorkflowAborted as exc:
             aborted = True
             abort_reason = exc.reason

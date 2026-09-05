@@ -13,6 +13,8 @@ never shared a connection anyway. See docs/adr/0001-where-voice-lives.md.
 
 from __future__ import annotations
 
+from typing import Any
+
 from agentic_sdk.audio.speech_gate import (
     DEFAULT_HANGOVER_CHUNKS,
     DEFAULT_SPEECH_THRESHOLD,
@@ -57,7 +59,9 @@ class VoiceTextPerceive:
         self._gate = SpeechGate(threshold=speech_threshold, hangover_chunks=hangover_chunks)
         self._heard: list[str] = []
         self._spoken = False
+        self._cancel: Any = None
         transport.on_transcript(self._remember)
+        transport.on_speech_started(self._interrupt)
 
     # ── the workflow's view ─────────────────────────────────────────────
 
@@ -66,6 +70,10 @@ class VoiceTextPerceive:
         # message, spoken or typed. Preferring what was heard over what the
         # caller passed would leave the conversation record and the perceived
         # input disagreeing about what was said.
+        # The token belongs to the run, not to this module's turn in it. Held
+        # so the listener can stop a later module — an answer being spoken over
+        # is not this module's turn any more.
+        self._cancel = state.cancel
         content = state.latest_user_message().strip()
         spoken, self._spoken = self._spoken, False
         self._heard.clear()
@@ -103,6 +111,16 @@ class VoiceTextPerceive:
         self.transport.close()
 
     # ── the transport's view ────────────────────────────────────────────
+
+    def _interrupt(self) -> None:
+        """Someone started talking. Whatever is being said is no longer wanted.
+
+        Fired on voice activity rather than on words, because the words take
+        nearly four seconds to arrive and the answer would still be going.
+        """
+        token = self._cancel
+        if token is not None and not token.cancelled:
+            token.cancel("interjection")
 
     def _remember(self, text: str) -> None:
         cleaned = str(text or "").strip()
