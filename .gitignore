@@ -68,3 +68,9 @@ node_modules/
 !.github/workflows
 !.github/workflows/**
 /ai-hub-webui
+
+# 開發期間使用的技能設定與工作紀錄，留在本地
+CLAUDE.md
+docs/agents/
+.scratch/
+spikes/

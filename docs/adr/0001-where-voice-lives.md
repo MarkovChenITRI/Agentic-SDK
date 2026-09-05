@@ -18,8 +18,8 @@ it is the module that knows when someone started speaking. Putting the spoken
 output there too would mean one module owning the microphone and the speaker,
 which reads as tidy.
 
-A spike measured what the current architecture can already do
-(`spikes/realtime-interjection/`). Three findings shaped this decision:
+A spike measured what the current architecture can already do. Three findings
+shaped this decision:
 
 - A module is an object the workflow keeps, so it outlives a turn and can hold
   a session open. The cancellation token is one object per run, so the token a
