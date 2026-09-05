@@ -224,9 +224,15 @@ async def main() -> int:
                     await browser.shoot("answering-aloud")
                 if second == 26:
                     await browser.shoot("after-the-interruption")
+                if second == 36:
+                    await browser.evaluate(
+                        "document.querySelector('[data-voice-toggle=\"voice\"]')?.click() || true"
+                    )
+                    await asyncio.sleep(1)
+                    await browser.shoot("back-to-voice")
                 if second == 32:
                     await browser.evaluate(
-                        "document.querySelector('[data-voice-switch]')?.click() || true"
+                        "document.querySelector('[data-voice-toggle=\"text\"]')?.click() || true"
                     )
                     await asyncio.sleep(1)
                     await browser.shoot("switched-to-typing")

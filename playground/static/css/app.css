@@ -2807,22 +2807,50 @@ a { color: inherit; text-decoration: none; }
   font-weight: 700;
 }
 
-.voice-bar {
-  display: flex;
+/* The voice row stands in for the typing row, in the same place and at the
+   same height, so switching modes moves nothing on the page. */
+.composer-voice-row {
+  display: none;
   align-items: center;
-  gap: 0.7rem;
-  margin: 0 0 0.5rem;
-  padding: 0.55rem 0.9rem;
-  border: 1px solid rgba(120, 170, 255, 0.35);
+  gap: 0.8rem;
+  min-height: 2.6rem;
+  padding: 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.runner-page.is-voice-live .composer-voice-row {
+  display: flex;
+}
+
+.runner-page.is-voice-live .composer-main-row,
+.runner-page.is-voice-live .composer-attachment-preview {
+  display: none;
+}
+
+.composer-icon-button {
+  flex: 0 0 auto;
+  justify-self: end;
+  display: grid;
+  place-items: center;
+  width: 2.3rem;
+  height: 2.3rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 999px;
-  background: rgba(30, 60, 110, 0.28);
-  font-size: 0.86rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.composer-icon-button:hover {
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .voice-orb {
   position: relative;
   flex: 0 0 auto;
-  width: 3.2rem;
+  width: 4rem;
   height: 0.4rem;
   overflow: hidden;
   border-radius: 999px;
@@ -2844,37 +2872,12 @@ a { color: inherit; text-decoration: none; }
   flex: 1 1 auto;
 }
 
-.voice-switch {
-  flex: 0 0 auto;
-  padding: 0.25rem 0.8rem;
-  border: 1px solid rgba(140, 180, 240, 0.5);
-  border-radius: 999px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font-size: 0.82rem;
-}
-
 /* Speaking and being interrupted are the two states a person needs to read at
    a glance, so they are the two that change colour. */
-.voice-bar[data-voice-state="speaking"] { border-color: rgba(120, 220, 180, 0.6); }
-.voice-bar[data-voice-state="interrupted"] { border-color: rgba(255, 200, 120, 0.7); }
-.voice-bar[data-voice-state="paused"] { opacity: 0.6; }
-.voice-bar[data-voice-state="denied"],
-.voice-bar[data-voice-state="unavailable"] { border-color: rgba(255, 140, 140, 0.7); }
-
-/* One input at a time: while the microphone is live the typing row is not.
-   Only that row — the voice bar sits inside the composer and its button has to
-   stay clickable, since it is the way back to the keyboard. */
-.runner-page.is-voice-live .composer-main-row,
-.runner-page.is-voice-live .composer-attachment-preview {
-  opacity: 0.4;
-  pointer-events: none;
-}
-
-.voice-bar + label {
-  margin-top: 0.1rem;
-}
+.composer-voice-row[data-voice-state="speaking"] .voice-orb i { background: #6fe0b0; }
+.composer-voice-row[data-voice-state="interrupted"] .voice-orb i { background: #ffc878; }
+.composer-voice-row[data-voice-state="denied"] .voice-state,
+.composer-voice-row[data-voice-state="unavailable"] .voice-state { color: #ff9c9c; }
 
 .runner-status {
   margin: 0 0 0.4rem;
@@ -2937,7 +2940,9 @@ a { color: inherit; text-decoration: none; }
 
 .composer-main-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  /* The microphone is a fourth column, not an extra child squeezed into three:
+     without its own track the send button wrapped onto a second line. */
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   min-height: 3.35rem;
   gap: 0.72rem;
   align-items: center;

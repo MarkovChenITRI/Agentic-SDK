@@ -981,7 +981,7 @@ bindInputComposer(form, async (payload) => {
 const voiceBar = document.querySelector("[data-voice-bar]");
 const voiceStateText = document.querySelector("[data-voice-state-text]");
 const voiceLevel = document.querySelector("[data-voice-level]");
-const voiceSwitch = document.querySelector("[data-voice-switch]");
+const voiceToggles = document.querySelectorAll("[data-voice-toggle]");
 
 const VOICE_STATES = {
 	starting: "正在開啟麥克風…",
@@ -1004,13 +1004,9 @@ function showVoiceState(state, detail) {
 	if (voiceStateText) {
 		voiceStateText.textContent = state === "heard" && detail ? `聽到了：「${detail}」` : VOICE_STATES[state] || state;
 	}
-	if (voiceSwitch) {
-		voiceSwitch.textContent = state === "paused" ? "回到語音" : "用打字的";
-		voiceSwitch.hidden = state === "denied" || state === "unavailable" || state === "closed";
-	}
-	// Exactly one input is live at a time. Two of them racing produces two
-	// turns for one question, and the agent answers something the person was
-	// still in the middle of saying.
+	// Exactly one input exists at a time: in voice mode the typing row is not
+	// dimmed, it is not there. Two inputs racing produce two turns for one
+	// question, and the agent answers something the person was still saying.
 	const typing = state === "paused" || state === "denied" || state === "unavailable" || state === "closed";
 	runnerPage?.classList.toggle("is-voice-live", !typing);
 	if (messageInput) {
@@ -1042,13 +1038,15 @@ const voice = bindVoiceConversation(runnerPage, {
 	},
 });
 
-voiceSwitch?.addEventListener("click", () => {
-	if (voiceBar?.dataset.voiceState === "paused") {
-		voice?.resume();
-		return;
-	}
-	voice?.pause();
-	messageInput?.focus();
+voiceToggles.forEach((toggle) => {
+	toggle.addEventListener("click", () => {
+		if (toggle.dataset.voiceToggle === "voice") {
+			voice?.resume();
+			return;
+		}
+		voice?.pause();
+		messageInput?.focus();
+	});
 });
 
 starterQuestions?.addEventListener("click", (event) => {

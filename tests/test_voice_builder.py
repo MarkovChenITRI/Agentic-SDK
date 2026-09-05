@@ -136,11 +136,14 @@ def test_a_voice_agent_says_on_the_page_that_it_is_listening():
         page = client.get("/playground/run").get_data(as_text=True)
 
     assert "data-voice-bar" in page
-    assert "data-voice-switch" in page
-    # Inside the composer, so the two inputs are one control and cannot drift
-    # apart on the page.
+    # Both ways between the modes, each an icon in the place the other one's
+    # control sits, so switching moves nothing on the page.
+    assert 'data-voice-toggle="voice"' in page
+    assert 'data-voice-toggle="text"' in page
+    # The voice row stands in for the typing row inside the composer rather
+    # than stacking above it.
     composer = page[page.index("data-input-composer") :]
-    assert composer.index("data-voice-bar") < composer.index("runner-message")
+    assert composer.index("runner-message") < composer.index("data-voice-bar")
 
 
 def test_a_typing_agent_gets_no_voice_bar():
