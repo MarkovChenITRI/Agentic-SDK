@@ -329,7 +329,9 @@ class Workflow:
                     visit_count=state.visit_counts.get(current, 1),
                     events_schema=active_events_schema,
                 )
-                event["reason"] = abort_reason
+                # Why, not just where. The abort reason belongs to the branch
+                # that stops the workflow itself; this branch has its own.
+                event["reason"] = exc.reason
                 event["interrupted"] = True
                 event_callback(event)
         except WorkflowAborted as exc:

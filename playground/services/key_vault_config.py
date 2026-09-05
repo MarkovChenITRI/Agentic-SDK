@@ -69,11 +69,26 @@ class EmbeddingEndpointSettings:
 
 
 @dataclass(frozen=True)
+class SpeechEndpointSettings:
+    """A listening or speaking deployment.
+
+    The same four fields as an embedding endpoint and a different thing
+    entirely: naming it after the shape it happens to share is how a speech
+    deployment ended up being looked up in the embedding list.
+    """
+
+    id: str
+    api_key: str
+    endpoint: str
+    deployment_name: str
+
+
+@dataclass(frozen=True)
 class KeyVaultSettings:
     ai_hub: AiHubSettings
     chat_endpoints: tuple[ChatEndpointSettings, ...]
     embedding_endpoints: tuple[EmbeddingEndpointSettings, ...]
-    speech_endpoints: tuple[EmbeddingEndpointSettings, ...] = ()
+    speech_endpoints: tuple[SpeechEndpointSettings, ...] = ()
 
 
 def key_vault_settings() -> KeyVaultSettings:
@@ -136,7 +151,7 @@ def _embedding_endpoint_settings(values: dict[str, str], prefix: str) -> Embeddi
     secret_names = (f"{prefix}-API-KEY", f"{prefix}-ENDPOINT", f"{prefix}-DEPLOYMENT-NAME")
     if not any(values.get(name) for name in secret_names):
         return None
-    return EmbeddingEndpointSettings(
+    return SpeechEndpointSettings(
         id=prefix.lower(),
         api_key=_required_setting(values, secret_names[0]),
         endpoint=_required_setting(values, secret_names[1]),
@@ -144,11 +159,11 @@ def _embedding_endpoint_settings(values: dict[str, str], prefix: str) -> Embeddi
     )
 
 
-def _speech_endpoint_settings(values: dict[str, str], prefix: str) -> EmbeddingEndpointSettings | None:
+def _speech_endpoint_settings(values: dict[str, str], prefix: str) -> SpeechEndpointSettings | None:
     secret_names = (f"{prefix}-API-KEY", f"{prefix}-BASE-URL", f"{prefix}-DEPLOYMENT-NAME")
     if not any(values.get(name) for name in secret_names):
         return None
-    return EmbeddingEndpointSettings(
+    return SpeechEndpointSettings(
         id=prefix.lower(),
         api_key=_required_setting(values, secret_names[0]),
         endpoint=_required_setting(values, secret_names[1]),

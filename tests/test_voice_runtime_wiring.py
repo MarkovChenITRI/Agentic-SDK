@@ -102,3 +102,23 @@ def test_a_voice_agent_still_works_for_someone_typing():
 
     assert execution["status"] == "completed"
     assert execution["final_message"] == "保固 12 個月"
+
+
+def test_a_spec_naming_a_module_with_no_parameter_table_says_so():
+    """The registry and the allowed-parameter table must name the same kinds.
+
+    voice_text reached the registry without reaching the table, so a spec that
+    named it died on a bare KeyError from a dict lookup instead of the
+    ValueError this function raises for everything it does not recognise.
+    """
+    import pytest
+
+    from agentic_sdk.config.workflow_config import _MODULE_CONFIG_PARAMS
+
+    registry_kinds = {"direct_answer", "evidence_check", "generative", "keyword", "next_step",
+                      "pass_through", "pass_through_retrieve", "response_check", "semantic",
+                      "text", "text_image", "tool_call_action", "voice_answer", "voice_text"}
+
+    assert registry_kinds - set(_MODULE_CONFIG_PARAMS) == set()
+    with pytest.raises(ValueError):
+        build_module(ModuleSpec(kind="something_nobody_registered"))

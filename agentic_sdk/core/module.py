@@ -3,9 +3,12 @@
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol, TypedDict, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypedDict, runtime_checkable
 
 from agentic_sdk.core.entities import Attachment, ContextEntry, ContextEntryType, Entities
+
+if TYPE_CHECKING:
+    from agentic_sdk.core.cancellation import CancellationToken
 from agentic_sdk.memory.in_context import InContextMemory, MemoryStore
 from agentic_sdk.memory.protocol import PersistentMemory
 
@@ -43,7 +46,7 @@ class WorkflowState:
     # Carried on the state because that is what every module already receives.
     # A module that streams can offer it to the transport without the workflow
     # having to reach inside the module to wire anything up.
-    cancel: Any = None
+    cancel: "CancellationToken | None" = None
     spoken_so_far: str = ""
     _token_delta_callback: Callable[[str, str, dict[str, Any]], None] | None = field(
         default=None,

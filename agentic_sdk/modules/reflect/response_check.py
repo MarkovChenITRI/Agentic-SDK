@@ -69,6 +69,12 @@ class ResponseCheckReflect:
             reason = str(parsed.get("reason", ""))
             suggestion = str(parsed.get("suggestion", ""))
             usage = {"model": response.model, "input_tokens": response.input_tokens, "output_tokens": response.output_tokens}
+        except WorkflowInterrupted:
+            # Being talked over is not a provider failure. Letting it fall into
+            # the handler below files the interruption as a model error and
+            # answers the person with an apology for something they did on
+            # purpose.
+            raise
         except Exception as exc:
             verdict = "fail" if err else "pass"
             reason = f"response check unavailable: {exc}"

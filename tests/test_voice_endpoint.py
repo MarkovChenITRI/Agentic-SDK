@@ -11,20 +11,13 @@ from agentic_sdk.audio import FakeAudioInput
 from playground.main import app
 from playground.services import voice_session
 from playground.services.voice_session import registry
+from support import pcm, silence, speech
 
 
-def pcm(*samples: int) -> bytes:
-    import struct
-
-    return struct.pack(f"<{len(samples)}h", *samples)
 
 
-def speech(frames: int = 1600, level: int = 8000) -> bytes:
-    return pcm(*([level, -level] * (frames // 2)))
 
 
-def silence(frames: int = 1600) -> bytes:
-    return pcm(*([0] * frames))
 
 
 @pytest.fixture
@@ -93,7 +86,7 @@ def test_a_run_registers_itself_so_it_can_be_stopped():
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "playground"))
     from playground.services import runner_service
-    from support import build_spec
+    from support import build_spec, pcm, silence, speech
 
     spec = build_spec(("retrieve_policy", "keyword"), ("output_format", "direct"))
     spec = runner_service.apply_builder_step(spec, "retrieve", {"keyword_pairs": "保固 = 十二個月"}) \

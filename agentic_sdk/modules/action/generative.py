@@ -28,6 +28,28 @@ _FINAL_RESPONSE_CONTRACT = (
 )
 
 
+def _failed_answer(state, exc: Exception) -> ModuleOutput:
+    """The result a generating action returns when the provider let it down.
+
+    Shared because the two actions that generate must report a failure the same
+    way: whoever reads `last_action_error` or the trace should not be able to
+    tell which of them was running.
+    """
+    detail = _format_openai_error(exc)
+    state.last_action_error = {"type": type(exc).__name__, "message": detail}
+    return ModuleOutput(
+        next_module=None,
+        payload={"_llm_usage": None},
+        context_updates=[
+            ContextEntry(
+                type=ContextEntryType.ACTION_RESULT,
+                content=f"error:{type(exc).__name__}",
+                metadata={"ok": False, "error": detail},
+            )
+        ],
+    )
+
+
 class GenerativeAction:
     name = "action"
     gen_ai_system = "openai_compatible"
@@ -74,20 +96,14 @@ class GenerativeAction:
                     metadata={"model": self._model, "structured": False},
                 ),
             )
+        except WorkflowInterrupted:
+            # Being talked over is not a provider failure. Letting it fall into
+            # the handler below files the interruption as a model error and
+            # answers the person with an apology for something they did on
+            # purpose.
+            raise
         except Exception as exc:
-            detail = _format_openai_error(exc)
-            state.last_action_error = {"type": type(exc).__name__, "message": detail}
-            return ModuleOutput(
-                next_module=None,
-                payload={"_llm_usage": None},
-                context_updates=[
-                    ContextEntry(
-                        type=ContextEntryType.ACTION_RESULT,
-                        content=f"error:{type(exc).__name__}",
-                        metadata={"ok": False, "error": detail},
-                    )
-                ],
-            )
+            return _failed_answer(state, exc)
 
         content = response.content
         response_model = response.model or self._model

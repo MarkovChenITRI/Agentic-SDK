@@ -22,6 +22,10 @@ export function bindVoiceConversation(page, { onTranscript, onStatus, onState, o
 	if (page?.dataset.voice !== "true") {
 		return null;
 	}
+	// Wanting to hear the answer is not wanting to be listened to. An agent
+	// that only speaks opens the connection to play through and never asks for
+	// a microphone.
+	const listens = page.dataset.voiceInput === "true";
 	const session = {
 		id: `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 		socket: null,
@@ -29,7 +33,6 @@ export function bindVoiceConversation(page, { onTranscript, onStatus, onState, o
 		playing: [],
 		playheadAt: 0,
 		startedSpeakingAt: 0,
-		state: "starting",
 		paused: false,
 		listenAnalyser: null,
 		speakAnalyser: null,
@@ -47,7 +50,6 @@ export function bindVoiceConversation(page, { onTranscript, onStatus, onState, o
 		// One place decides what the page is showing, because a voice agent
 		// with no visible state is indistinguishable from one that is broken:
 		// the person talks, nothing happens, and nothing says why.
-		session.state = state;
 		onState?.(state, detail);
 	};
 
@@ -122,7 +124,6 @@ export function bindVoiceConversation(page, { onTranscript, onStatus, onState, o
 		if (context.state === "suspended") {
 			await context.resume().catch(() => {});
 		}
-		window.__voiceContextState = context.state;
 		if (context.state !== "running") {
 			say("瀏覽器還沒允許這個頁面播放與擷取聲音。點一下頁面任何地方就可以開始說話。");
 			document.addEventListener("click", () => context.resume(), { once: true });
@@ -182,6 +183,10 @@ export function bindVoiceConversation(page, { onTranscript, onStatus, onState, o
 	}
 
 	function play(audio) {
+		// An agent that only speaks has no microphone and so no context yet.
+		if (!session.context) {
+			session.context = new AudioContext();
+		}
 		const context = session.context;
 		// Paused means paused in both directions. An answer that keeps talking
 		// after someone switched to the keyboard is the agent ignoring them.
@@ -247,18 +252,15 @@ export function bindVoiceConversation(page, { onTranscript, onStatus, onState, o
 		session.socket?.send(JSON.stringify({ type: "interject", heard_seconds: heard }));
 	}
 
-	function speak(text) {
-		if (!text || session.socket?.readyState !== WebSocket.OPEN) {
-			return;
-		}
-		session.socket.send(JSON.stringify({ type: "speak", text }));
+	if (listens) {
+		// No button: a voice agent that has to be switched on is a form with a
+		// microphone attached.
+		listen();
+	} else {
+		open();
 	}
 
-	// No button: a voice agent that has to be switched on is a form with a
-	// microphone attached.
-	listen();
-
-	return { sessionId: session.id, speak, stopPlaying, pause, resume, enter };
+	return { sessionId: session.id, pause, resume, enter };
 }
 
 function analyserFor(context) {

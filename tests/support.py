@@ -212,3 +212,21 @@ def build_spec(*steps: tuple[str, object]) -> dict:
     for step_key, choice in steps:
         spec = apply_builder_step(spec, step_key, choice)
     return spec
+
+
+# ── 語音測試共用的音訊 ───────────────────────────────────────────────
+
+def pcm(*samples: int) -> bytes:
+    """One channel of 16-bit audio, the format the transcription service takes."""
+    import struct
+
+    return struct.pack(f"<{len(samples)}h", *samples)
+
+
+def silence(frames: int = 1600) -> bytes:
+    return pcm(*([0] * frames))
+
+
+def speech(frames: int = 1600, level: int = 8000) -> bytes:
+    """Alternating, so the frames carry energy rather than a constant offset."""
+    return pcm(*([level, -level] * (frames // 2)))

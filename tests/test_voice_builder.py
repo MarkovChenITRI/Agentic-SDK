@@ -157,3 +157,59 @@ def test_a_typing_agent_gets_no_voice_bar():
         page = client.get("/playground/run").get_data(as_text=True)
 
     assert "data-voice-bar" not in page
+
+
+def test_an_agent_that_only_speaks_does_not_ask_for_a_microphone():
+    """Wanting to hear the answer is not wanting to be listened to.
+
+    Both halves set the same flag, so choosing only 語音回覆 opened the
+    microphone, asked for permission, and disabled the keyboard — turning a
+    typing agent that talks back into a full voice conversation.
+    """
+    from playground.app import create_app
+
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    with app.test_client() as client:
+        client.post("/playground/builder/state", json={"step": "output_format", "choice": "voice"})
+        page = client.get("/playground/run").get_data(as_text=True)
+
+    assert 'data-voice-output="true"' in page
+    assert 'data-voice-input="true"' not in page
+    # No microphone means no mode to switch into: the composer stays a
+    # composer, and the answer simply plays.
+    assert "data-voice-bar" not in page
+    assert "data-voice-toggle" not in page
+
+
+def test_an_agent_that_only_listens_says_so_too():
+    from playground.app import create_app
+
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    with app.test_client() as client:
+        client.post("/playground/builder/state", json={"step": "input_type", "choice": "voice"})
+        page = client.get("/playground/run").get_data(as_text=True)
+
+    assert 'data-voice-input="true"' in page
+    assert 'data-voice-output="true"' not in page
+
+
+def test_choosing_voice_does_not_answer_the_other_questions():
+    """A voice choice must not tick a box the person never filled in.
+
+    The readiness list is the last place the Builder could be honest about an
+    unfinished agent, and a question with no answer has to keep saying so no
+    matter what the neighbouring questions were set to.
+    """
+    spec = build_spec(("input_type", "voice"), ("output_format", "voice"))
+    state = spec_to_form_state(spec)
+
+    assert state["choices"]["input_type"] == "voice"
+    assert state["choices"]["output_format"] == "voice"
+    # Never asked, so still unanswered. (memory_type, input_type and
+    # retrieve_policy report a default on an untouched spec too, which is
+    # older behaviour and not something a voice choice changes.)
+    assert state["choices"]["failure_policy"] == ""

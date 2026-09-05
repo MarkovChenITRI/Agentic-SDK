@@ -152,3 +152,62 @@ class _StreamingClient:
             )
             for character in self._answer
         )
+
+
+class _CancelsMidStream:
+    """A client that stops being wanted while it is still answering."""
+
+    def __init__(self, answer: str, token) -> None:
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+        self._answer = answer
+        self._token = token
+
+    def _create(self, **_kwargs):
+        def chunks():
+            for index, character in enumerate(self._answer):
+                if index == 3:
+                    self._token.cancel("interjection")
+                yield SimpleNamespace(
+                    choices=[SimpleNamespace(delta=SimpleNamespace(content=character, tool_calls=None), finish_reason=None)],
+                    model="m",
+                    usage=None,
+                )
+        return chunks()
+
+
+def test_an_interjection_inside_a_module_is_not_reported_as_a_model_error():
+    """Being talked over must not come back as something going wrong.
+
+    The module's broad `except Exception` sits around the generation call, and
+    an interruption raised inside it is an Exception like any other — so it was
+    caught, written out as an action error, and the person who deliberately
+    interrupted was shown '[workflow ended with error] cancelled'.
+    """
+    from agentic_sdk.modules import GenerativeAction, PassThroughPerceive
+
+    token = CancellationToken()
+    action = GenerativeAction(api_key="k", base_url="https://example.test/v1", model="m")
+    action._client = _CancelsMidStream("保固期是十二個月，延長保固可以再加兩年", token)
+    workflow = Workflow(workflow_name="w", perceive=PassThroughPerceive(), action=action)
+
+    result = workflow.run("保固多久？", cancel=token)
+
+    assert result.interrupted is True
+    assert result.aborted is False
+    assert "error" not in (result.final_message or "")
+    assert [entry for entry in result.entries if entry.content.startswith("error:")] == []
+
+
+def test_the_trace_says_why_the_turn_was_cut_short():
+    """The module and the flag were right; the reason was always blank."""
+    audio = FakeAudioInput()
+    workflow = voice_workflow(audio, SlowAnswer(audio))
+    events = []
+
+    audio.transcribe("保固多久？")
+    workflow.run(cancel=CancellationToken(), event_callback=events.append)
+
+    aborts = [event for event in events if event.get("phase") == "abort"]
+    assert aborts, "追蹤上沒有中止事件"
+    assert aborts[-1]["reason"] == "interjection"
+    assert aborts[-1]["interrupted"] is True

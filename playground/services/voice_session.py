@@ -132,11 +132,14 @@ class SessionSpeech:
 
     def __init__(self, session_id: str) -> None:
         self._session_id = session_id
+        self.reached_someone = False
 
     def speak(self, text: str) -> Iterator[bytes]:
         # A page that closed mid-answer is not a failure. The run finishes,
-        # and there is simply nobody left to hear the rest of it.
-        registry.say(self._session_id, text)
+        # and there is simply nobody left to hear the rest of it — recorded
+        # rather than dropped, because "nobody heard this" is the difference
+        # between a quiet answer and a broken one.
+        self.reached_someone = registry.say(self._session_id, text)
         return iter(())
 
 

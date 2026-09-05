@@ -92,6 +92,12 @@ class TextPerceive:
                     metadata={"model": self._model, "structured": True},
                 ),
             )
+        except WorkflowInterrupted:
+            # Being talked over is not a provider failure. Letting it fall into
+            # the handler below files the interruption as a model error and
+            # answers the person with an apology for something they did on
+            # purpose.
+            raise
         except Exception as exc:
             _abort_for_provider_failure(state, self.name, exc)
         parsed = response.as_json()

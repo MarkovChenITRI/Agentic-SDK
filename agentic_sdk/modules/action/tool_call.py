@@ -51,6 +51,12 @@ class ToolCallAction:
                     metadata={"model": self._model, "structured": False},
                 ),
             )
+        except WorkflowInterrupted:
+            # Being talked over is not a provider failure. Letting it fall into
+            # the handler below files the interruption as a model error and
+            # answers the person with an apology for something they did on
+            # purpose.
+            raise
         except Exception as exc:
             detail = _format_openai_error(exc)
             state.last_action_error = {"type": type(exc).__name__, "message": detail}

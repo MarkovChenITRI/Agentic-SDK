@@ -3,7 +3,7 @@
 {% block title %}試跑 Agent - AI Hub Agent 建立工具{% endblock %}
 
 {% block body %}
-<main class="runner-page layout-{{ scene_profile.layout_variant }}" data-page="runner" data-archetype="{{ scene_profile.task_archetype }}" data-layout-variant="{{ scene_profile.layout_variant }}" data-save-requires-login="{{ 'true' if not mode_context.can_save and mode_context.can_edit else 'false' }}" data-auto-save-after-login="{{ 'true' if auto_save_after_login else 'false' }}" data-semantic-retrieve="{{ 'true' if uses_semantic_retrieve else 'false' }}" data-voice="{{ 'true' if uses_voice else 'false' }}">
+<main class="runner-page layout-{{ scene_profile.layout_variant }}" data-page="runner" data-archetype="{{ scene_profile.task_archetype }}" data-layout-variant="{{ scene_profile.layout_variant }}" data-save-requires-login="{{ 'true' if not mode_context.can_save and mode_context.can_edit else 'false' }}" data-auto-save-after-login="{{ 'true' if auto_save_after_login else 'false' }}" data-semantic-retrieve="{{ 'true' if uses_semantic_retrieve else 'false' }}" data-voice="{{ 'true' if uses_voice else 'false' }}" data-voice-input="{{ 'true' if voice_input else 'false' }}" data-voice-output="{{ 'true' if voice_output else 'false' }}">
   <section class="runner-initialization-overlay" role="status" aria-live="polite" aria-label="準備對話環境" data-initialization-overlay>
     <div class="runner-initialization-card">
       <div class="runner-initialization-status-row">
@@ -119,12 +119,12 @@
             <input class="visually-hidden" id="runner-attachments" name="attachments" type="file" multiple data-attachment-input>
           </div>
           <textarea id="runner-message" name="message" rows="1" placeholder="問問 Agent"></textarea>
-          {% if uses_voice %}
+          {% if voice_input %}
           <button class="composer-icon-button" type="button" data-voice-toggle="voice" aria-label="改用語音" title="改用語音"><svg class="composer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></button>
           {% endif %}
           <button class="composer-submit-button" type="submit" aria-label="送出訊息"><span aria-hidden="true">›</span><span class="visually-hidden">產生回覆</span></button>
         </div>
-        {% if uses_voice %}
+        {% if voice_input %}
         <div class="composer-voice-row" data-voice-bar data-voice-state="starting">
           <span class="voice-spectrum" data-voice-spectrum aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
           <span class="voice-state" data-voice-state-text role="status" aria-live="polite">正在開啟麥克風…</span>

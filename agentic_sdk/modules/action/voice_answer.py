@@ -23,7 +23,7 @@ from agentic_sdk.llm import chat_stream_json
 from agentic_sdk.modules.action.generative import (
     GenerativeAction,
     _build_messages,
-    _format_openai_error,
+    _failed_answer,
 )
 
 
@@ -100,20 +100,14 @@ class VoiceAnswerAction(GenerativeAction):
                     self.name, content, metadata={"model": self._model, "structured": True}
                 ),
             )
+        except WorkflowInterrupted:
+            # Being talked over is not a provider failure. Letting it fall into
+            # the handler below files the interruption as a model error and
+            # answers the person with an apology for something they did on
+            # purpose.
+            raise
         except Exception as exc:
-            detail = _format_openai_error(exc)
-            state.last_action_error = {"type": type(exc).__name__, "message": detail}
-            return ModuleOutput(
-                next_module=None,
-                payload={"_llm_usage": None},
-                context_updates=[
-                    ContextEntry(
-                        type=ContextEntryType.ACTION_RESULT,
-                        content=f"error:{type(exc).__name__}",
-                        metadata={"ok": False, "error": detail},
-                    )
-                ],
-            )
+            return _failed_answer(state, exc)
 
         spoken, displayed = _split_channels(response.content)
         state.last_action_error = None

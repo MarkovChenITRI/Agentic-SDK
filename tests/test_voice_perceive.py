@@ -1,26 +1,18 @@
 from __future__ import annotations
 
-import struct
-
 import pytest
 
 from agentic_sdk import Workflow
 from agentic_sdk.audio import FakeAudioInput
 from agentic_sdk.modules import DirectAnswerAction, PassThroughRetrieve, VoiceTextPerceive
 
-
-def pcm(*samples: int) -> bytes:
-    """One channel of 16-bit audio, the format the transcription service takes."""
-    return struct.pack(f"<{len(samples)}h", *samples)
+from support import pcm, silence, speech
 
 
-def silence(frames: int = 1600) -> bytes:
-    return pcm(*([0] * frames))
 
 
-def speech(frames: int = 1600, level: int = 8000) -> bytes:
-    # Alternating so the frames have energy rather than a constant offset.
-    return pcm(*([level, -level] * (frames // 2)))
+
+
 
 
 def test_a_spoken_question_reaches_the_workflow():

@@ -61,6 +61,14 @@ _MODULE_CONFIG_PARAMS: dict[str, set[str]] = {
         "vision_query",
     },
     "text": {"welcome_message", "options", "importance", "api_key", "base_url", "model"},
+    "voice_text": {
+        "api_key",
+        "base_url",
+        "model",
+        "language",
+        "speech_threshold",
+        "hangover_seconds",
+    },
     "voice_answer": {
         "api_key",
         "base_url",
