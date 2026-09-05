@@ -55,6 +55,7 @@ def runner():
         runner_greeting=_runner_greeting(),
         starter_questions=starter_questions,
         uses_semantic_retrieve=config.retrieve_module == "SemanticRetrieve",
+        uses_voice=config.perceive_module == "VoiceTextPerceive",
         last_aihub_save=session.get("last_aihub_save"),
         has_ai_hub_agent=bool(session.get("agent_id")),
         auto_save_after_login=auto_save_after_login,
@@ -102,6 +103,7 @@ def execute_runner():
         endpoint_selections=endpoint_selections,
         semantic_runtime=semantic_runtime,
         tool_call_submission=payload.get("tool_call_submission") if isinstance(payload.get("tool_call_submission"), dict) else None,
+        voice_session_id=str(payload.get("voice_session_id") or ""),
     )
     response_payload = _public_execution_payload(execution)
     if execution.get("error"):
@@ -130,6 +132,7 @@ def execute_runner_stream():
             endpoint_selections=endpoint_selections,
             semantic_runtime=semantic_runtime,
             tool_call_submission=payload.get("tool_call_submission") if isinstance(payload.get("tool_call_submission"), dict) else None,
+            voice_session_id=str(payload.get("voice_session_id") or ""),
         ):
             if item.get("type") == "final":
                 execution = item.get("execution") or {}
@@ -274,6 +277,7 @@ def _public_execution_payload(execution: dict[str, object]) -> dict[str, object]
     return {
         "status": execution.get("status"),
         "final_message": execution.get("final_message"),
+        "spoken": execution.get("spoken") or "",
         "tool_calls": execution.get("tool_calls") or [],
         "tool_call_panels": execution.get("tool_call_panels") or [],
         "debug_messages": (execution.get("debug_messages") or []) + _bundle_failure_notes(),

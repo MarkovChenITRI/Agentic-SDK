@@ -3,7 +3,7 @@
 {% block title %}試跑 Agent - AI Hub Agent 建立工具{% endblock %}
 
 {% block body %}
-<main class="runner-page layout-{{ scene_profile.layout_variant }}" data-page="runner" data-archetype="{{ scene_profile.task_archetype }}" data-layout-variant="{{ scene_profile.layout_variant }}" data-save-requires-login="{{ 'true' if not mode_context.can_save and mode_context.can_edit else 'false' }}" data-auto-save-after-login="{{ 'true' if auto_save_after_login else 'false' }}" data-semantic-retrieve="{{ 'true' if uses_semantic_retrieve else 'false' }}">
+<main class="runner-page layout-{{ scene_profile.layout_variant }}" data-page="runner" data-archetype="{{ scene_profile.task_archetype }}" data-layout-variant="{{ scene_profile.layout_variant }}" data-save-requires-login="{{ 'true' if not mode_context.can_save and mode_context.can_edit else 'false' }}" data-auto-save-after-login="{{ 'true' if auto_save_after_login else 'false' }}" data-semantic-retrieve="{{ 'true' if uses_semantic_retrieve else 'false' }}" data-voice="{{ 'true' if uses_voice else 'false' }}">
   <section class="runner-initialization-overlay" role="status" aria-live="polite" aria-label="準備對話環境" data-initialization-overlay>
     <div class="runner-initialization-card">
       <div class="runner-initialization-status-row">

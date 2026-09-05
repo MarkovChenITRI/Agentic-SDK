@@ -1,0 +1,202 @@
+from __future__ import annotations
+
+import json
+
+from starlette.testclient import TestClient
+
+import pytest
+
+from agentic_sdk.audio import FakeAudioInput
+from playground.main import app
+from playground.services import voice_session
+from playground.services.voice_session import registry
+
+
+def pcm(*samples: int) -> bytes:
+    import struct
+
+    return struct.pack(f"<{len(samples)}h", *samples)
+
+
+def speech(frames: int = 1600, level: int = 8000) -> bytes:
+    return pcm(*([level, -level] * (frames // 2)))
+
+
+def silence(frames: int = 1600) -> bytes:
+    return pcm(*([0] * frames))
+
+
+@pytest.fixture
+def speaker(monkeypatch):
+    """Stand in for the synthesis service, so playback needs no credential."""
+    from agentic_sdk.audio import FakeAudioOutput
+
+    voice = FakeAudioOutput()
+    monkeypatch.setattr(voice_session, "open_synthesis", lambda: voice)
+    return voice
+
+
+@pytest.fixture
+def microphone(monkeypatch):
+    """Stand in for the transcription service the endpoint would otherwise open."""
+    audio = FakeAudioInput()
+    monkeypatch.setattr(voice_session, "open_transcription", lambda: audio)
+    return audio
+
+
+def test_the_browser_never_receives_a_credential():
+    """The gallery is public. A key handed to the page is a key given away."""
+    with TestClient(app).websocket_connect("/playground/voice/session-a") as socket:
+        opened = socket.receive_json()
+
+    assert opened["type"] == "session.opened"
+    body = json.dumps(opened)
+    assert "api_key" not in body and "api-key" not in body
+
+
+def test_speaking_over_the_answer_reaches_the_running_workflow():
+    """The audio arrives here; the answer it interrupts is on another request."""
+    token = registry.open("session-b")
+    with TestClient(app).websocket_connect("/playground/voice/session-b") as socket:
+        socket.receive_json()
+        socket.send_json({"type": "interject", "heard_seconds": 1.75})
+        acknowledged = socket.receive_json()
+
+    assert acknowledged["type"] == "interjected"
+    assert token.cancelled is True
+    assert token.payload["heard_seconds"] == 1.75
+
+
+def test_interrupting_an_answer_that_already_finished_is_explained():
+    with TestClient(app).websocket_connect("/playground/voice/session-c") as socket:
+        socket.receive_json()
+        socket.send_json({"type": "interject", "heard_seconds": 0.5})
+        answer = socket.receive_json()
+
+    assert answer["type"] == "nothing_to_interrupt"
+    assert "已經結束" in answer["message"]
+
+
+def test_leaving_the_page_forgets_the_session():
+    registry.open("session-d")
+    with TestClient(app).websocket_connect("/playground/voice/session-d") as socket:
+        socket.receive_json()
+
+    assert registry.token("session-d") is None
+
+
+def test_a_run_registers_itself_so_it_can_be_stopped():
+    """Without this the endpoint has a name but nothing answering to it."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "playground"))
+    from playground.services import runner_service
+    from support import build_spec
+
+    spec = build_spec(("retrieve_policy", "keyword"), ("output_format", "direct"))
+    spec = runner_service.apply_builder_step(spec, "retrieve", {"keyword_pairs": "保固 = 十二個月"}) \
+        if hasattr(runner_service, "apply_builder_step") else spec
+
+    runner_service.run_agent(spec, message="保固多久？", endpoint_selections={}, voice_session_id="session-e")
+
+    assert registry.token("session-e") is not None
+
+
+def test_the_microphone_reaches_the_transcription_service(microphone):
+    with TestClient(app).websocket_connect("/playground/voice/session-f") as socket:
+        socket.receive_json()
+        socket.send_bytes(speech())
+
+        assert socket.receive_json()["type"] == "listening"
+
+    assert microphone.sent == [speech()]
+
+
+def test_a_quiet_room_is_not_transcribed(microphone):
+    """Silence bills like speech and comes back as words nobody said."""
+    with TestClient(app).websocket_connect("/playground/voice/session-g") as socket:
+        socket.receive_json()
+        socket.send_bytes(silence())
+        socket.send_json({"type": "close"})
+
+    assert microphone.sent == []
+
+
+def test_what_was_said_comes_back_to_the_page(microphone):
+    with TestClient(app).websocket_connect("/playground/voice/session-h") as socket:
+        socket.receive_json()
+        socket.send_bytes(speech())
+        socket.receive_json()
+        microphone.transcribe("保固多久？")
+        heard = socket.receive_json()
+
+    assert heard == {"type": "transcript", "text": "保固多久？"}
+
+
+def test_starting_to_speak_stops_the_answer_without_waiting_for_words(microphone):
+    """Speech starts at ~600ms and a transcript lands near four seconds.
+
+    Waiting for the words means talking over the person for three more.
+    """
+    token = registry.open("session-i")
+    with TestClient(app).websocket_connect("/playground/voice/session-i") as socket:
+        socket.receive_json()
+        socket.send_bytes(speech())
+        socket.receive_json()
+        microphone.start_speaking()
+        warned = socket.receive_json()
+
+    assert warned["type"] == "speech_started"
+    assert token.cancelled is True
+    # Nothing here played the audio, so nothing here knows how much was heard.
+    # Claiming nought was would delete an answer the person did hear.
+    assert token.payload["heard_seconds"] is None
+
+
+def test_a_page_without_a_speech_endpoint_is_told_so(monkeypatch):
+    """Silence would be indistinguishable from a broken microphone."""
+    monkeypatch.setattr(voice_session, "open_transcription", lambda: None)
+    with TestClient(app).websocket_connect("/playground/voice/session-j") as socket:
+        socket.receive_json()
+        socket.send_bytes(speech())
+        answer = socket.receive_json()
+
+    assert answer["type"] == "unavailable"
+    assert "語音" in answer["message"]
+
+
+def test_the_answer_is_played_in_the_browser(speaker):
+    """The key stays here; the audio goes there."""
+    with TestClient(app).websocket_connect("/playground/voice/session-k") as socket:
+        socket.receive_json()
+        socket.send_json({"type": "speak", "text": "保固十二個月"})
+        played = []
+        while (frame := socket.receive()).get("bytes") is not None:
+            played.append(frame["bytes"])
+        finished = json.loads(frame["text"])
+
+    assert speaker.spoken == ["保固十二個月"]
+    assert played != [] and finished["type"] == "spoken"
+
+
+def test_speaking_over_it_stops_the_synthesis_mid_sentence(speaker):
+    """Not just the playback: the rest of the sentence is never synthesised."""
+    token = registry.open("session-l")
+    token.cancel("interjection", heard_seconds=0.4)
+    with TestClient(app).websocket_connect("/playground/voice/session-l") as socket:
+        socket.receive_json()
+        socket.send_json({"type": "speak", "text": "保固十二個月"})
+        stopped = socket.receive_json()
+
+    assert stopped["type"] == "spoken"
+    assert speaker.abandoned == ["保固十二個月"]
+
+
+def test_a_page_without_a_speech_endpoint_cannot_speak_either(monkeypatch):
+    monkeypatch.setattr(voice_session, "open_synthesis", lambda: None)
+    with TestClient(app).websocket_connect("/playground/voice/session-m") as socket:
+        socket.receive_json()
+        socket.send_json({"type": "speak", "text": "保固十二個月"})
+
+        assert socket.receive_json()["type"] == "unavailable"

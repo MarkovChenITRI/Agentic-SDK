@@ -102,10 +102,17 @@ class VoiceTextPerceive:
             self._spoken = True
         return waiting
 
-    def hear(self, pcm16: bytes) -> None:
-        """Offer a chunk of microphone audio. Quiet chunks go no further."""
-        if self._gate.should_send(pcm16):
-            self.transport.send(pcm16)
+    def hear(self, pcm16: bytes) -> bool:
+        """Offer a chunk of microphone audio. Quiet chunks go no further.
+
+        Reports whether the chunk was passed on, so a caller holding the
+        microphone can show that something is being heard — the difference
+        between a gate doing its job and a microphone that is not working.
+        """
+        if not self._gate.should_send(pcm16):
+            return False
+        self.transport.send(pcm16)
+        return True
 
     def close(self) -> None:
         self.transport.close()

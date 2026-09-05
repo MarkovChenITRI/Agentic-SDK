@@ -4,7 +4,9 @@ import argparse
 import os
 
 import uvicorn
-from fastapi import FastAPI
+import json
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from starlette.middleware.wsgi import WSGIMiddleware
 
 from playground.app import create_app
@@ -42,6 +44,102 @@ def require_single_process(environment: "dict[str, str] | None" = None) -> None:
 
 
 app = FastAPI(title="Agentic SDK Playground")
+
+
+@app.websocket("/playground/voice/{session_id}")
+async def voice_session(socket: WebSocket, session_id: str) -> None:
+    """Carry microphone audio, and carry interjections back the other way.
+
+    Mounted here rather than inside the Flask app because this is the layer
+    that speaks websocket. The browser never sees a credential: it talks to
+    this endpoint, and this endpoint talks to the speech service.
+    """
+    import asyncio
+
+    from playground.services import voice_session
+    from playground.services.voice_session import registry, unknown_session_message
+
+    await socket.accept()
+    await socket.send_json({"type": "session.opened", "session_id": session_id})
+
+    loop = asyncio.get_running_loop()
+    listener = None
+
+    def announce(payload: dict) -> None:
+        # Called from the transcription session's own thread, which is not the
+        # one the socket belongs to.
+        asyncio.run_coroutine_threadsafe(socket.send_json(payload), loop)
+
+    def began_speaking() -> None:
+        # The interruption signal. Waiting for the words instead would mean
+        # talking over the person for the three seconds a transcript takes.
+        registry.interject(session_id, heard_seconds=None)
+        announce({"type": "speech_started"})
+
+    try:
+        while True:
+            message = await socket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            if (audio := message.get("bytes")) is not None:
+                if listener is None:
+                    transport = voice_session.open_transcription()
+                    if transport is None:
+                        await socket.send_json(
+                            {
+                                "type": "unavailable",
+                                "message": voice_session.speech_unavailable_message(),
+                            }
+                        )
+                        continue
+                    listener = registry.listen(session_id, transport)
+                    transport.on_speech_started(began_speaking)
+                    transport.on_transcript(
+                        lambda text: announce({"type": "transcript", "text": text})
+                    )
+                if listener.hear(audio):
+                    await socket.send_json({"type": "listening"})
+                continue
+            message = json.loads(message.get("text") or "{}")
+            kind = str(message.get("type") or "")
+            if kind == "interject":
+                # The browser is the only place that knows how long the person
+                # actually listened, because it is the thing that was playing.
+                reported = message.get("heard_seconds")
+                heard = None if reported is None else float(reported)
+                if registry.interject(session_id, heard_seconds=heard):
+                    await socket.send_json({"type": "interjected", "heard_seconds": heard})
+                else:
+                    await socket.send_json(
+                        {"type": "nothing_to_interrupt", "message": unknown_session_message()}
+                    )
+            elif kind == "speak":
+                voice = voice_session.open_synthesis()
+                if voice is None:
+                    await socket.send_json(
+                        {
+                            "type": "unavailable",
+                            "message": voice_session.speech_unavailable_message(),
+                        }
+                    )
+                    continue
+                token = registry.token(session_id)
+                for piece in voice.speak(str(message.get("text") or "")):
+                    if token is not None and token.cancelled:
+                        # Abandoning the iterator stops the synthesis too: the
+                        # rest of a sentence nobody will hear is not worth
+                        # generating, let alone paying for.
+                        break
+                    await socket.send_bytes(piece)
+                await socket.send_json({"type": "spoken"})
+            elif kind == "close":
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # Leaving the page ends the session. A registry that only grows is a
+        # leak in a process that is meant to stay up.
+        registry.close(session_id)
 
 
 @app.get("/healthz")

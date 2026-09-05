@@ -2,6 +2,7 @@ import { postJson, postJsonStream } from "../shared/api-client.js";
 import { bindAttachmentPicker } from "./artifact-panel.js";
 import { bindCodePreview } from "./code-preview.js?v=delegated-trigger-v1";
 import { bindInputComposer } from "./input-composer.js";
+import { bindVoiceConversation } from "./voice-conversation.js";
 import { clearProcessEvents, setProcessEvents, setResultMessage, setToolCallPanels, showLiveProcessEvent, showResultSurface, streamResultMarkdown } from "./result-surface.js?v=generated-choice-stepper-v1";
 import { showSavePanel } from "./save-panel.js";
 
@@ -943,6 +944,9 @@ async function runWorkflow(payload, { displayMessage, showUserMessage = true } =
 	if (runStatus) {
 		runStatus.textContent = executionStatusFrom(result);
 	}
+	// The two channels: the screen already has the reply, so this is the half
+	// that is only ever said.
+	voice?.speak(result.spoken || "");
 	assistant.bubble?.classList.remove("is-running");
 	setSurfaceBusy(assistant.surface, false);
 	if (submitButton && runId === activeRunId) {
@@ -951,8 +955,19 @@ async function runWorkflow(payload, { displayMessage, showUserMessage = true } =
 }
 
 bindInputComposer(form, async (payload) => {
-	await runWorkflow(payload);
+	await runWorkflow({ ...payload, voice_session_id: voice?.sessionId || "" });
 }, { clearAttachments: () => attachmentPicker?.clear() });
+
+const voice = bindVoiceConversation(runnerPage, {
+	onTranscript: (text) => {
+		runWorkflow({ message: text, voice_session_id: voice?.sessionId || "" });
+	},
+	onStatus: (message) => {
+		if (runStatus) {
+			runStatus.textContent = message;
+		}
+	},
+});
 
 starterQuestions?.addEventListener("click", (event) => {
 	const button = event.target.closest?.("[data-starter-question-button]");

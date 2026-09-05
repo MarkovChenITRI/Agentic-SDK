@@ -75,6 +75,7 @@ def run_agent(
     semantic_runtime: SemanticRuntime | None = None,
     tool_call_submission: dict[str, object] | None = None,
     process_observer: Callable[[dict[str, object]], None] | None = None,
+    voice_session_id: str | None = None,
 ) -> dict[str, object]:
     scene_profile = get_default_scene_profile()
     execution_workflow_name = str(spec.get("workflow_name") or "default")
@@ -144,7 +145,11 @@ def run_agent(
                 execution_workflow_name,
                 parsed_attachments,
             )
+            # Registered under the listening session so that someone speaking
+            # over the answer, on an entirely different connection, can stop it.
+            cancel = _register_voice_session(voice_session_id)
             workflow_result = workflow.run(
+                cancel=cancel,
                 user_message=None if execution_memory else user_message,
                 memory=execution_memory,
                 session_id=conversation_state.conversation_id if conversation_state else None,
@@ -248,6 +253,7 @@ def run_agent(
     return {
         "status": "aborted" if workflow_result.aborted or handoff_reason else "completed",
         "final_message": final_message,
+        "spoken": _spoken_channel(workflow_result.entries),
         "tool_calls": tool_calls,
         "tool_call_panels": tool_call_panels,
         "panel_decision": panel_decision,
@@ -304,6 +310,7 @@ def stream_agent_run(
     endpoint_selections: dict[str, str] | None = None,
     semantic_runtime: SemanticRuntime | None = None,
     tool_call_submission: dict[str, object] | None = None,
+    voice_session_id: str | None = None,
 ) -> Iterator[dict[str, object]]:
     queue: Queue[dict[str, object] | None] = Queue()
 
@@ -321,6 +328,7 @@ def stream_agent_run(
                 semantic_runtime=semantic_runtime,
                 tool_call_submission=tool_call_submission,
                 process_observer=publish_process_event,
+                voice_session_id=voice_session_id,
             )
             queue.put({"type": "final", "execution": execution})
         except Exception as exc:
@@ -1340,6 +1348,27 @@ def _consult_the_sources_first(state: WorkflowState, chosen: str | None) -> str 
     if state.latest_of(ContextEntryType.RETRIEVED) is not None:
         return chosen
     return "retrieve"
+
+
+def _spoken_channel(entries) -> str:
+    """What to say aloud, which is not what is on the screen.
+
+    Empty for every workflow that does not answer in two channels — those have
+    nothing to say that the screen is not already showing.
+    """
+    for entry in reversed(list(entries)):
+        spoken = str((entry.metadata or {}).get("spoken") or "").strip()
+        if spoken:
+            return spoken
+    return ""
+
+
+def _register_voice_session(voice_session_id: str | None):
+    if not voice_session_id:
+        return None
+    from playground.services.voice_session import registry
+
+    return registry.open(str(voice_session_id))
 
 
 def _plan_endpoint_role(endpoint_selections: dict[str, str], reachable_roles: set[str]) -> str:

@@ -310,7 +310,8 @@ class Workflow:
             interrupted = True
             aborted = True
             abort_reason = f"interrupted: {exc.reason}"
-            interrupt_payload = {**exc.payload, "heard": state.spoken_so_far}
+            heard_text = _heard_portion(state.spoken_so_far, exc.payload.get("heard_seconds"))
+            interrupt_payload = {**exc.payload, "heard": heard_text}
             # Say so on the trace, and say where. Whoever is tuning how eagerly
             # the agent gives way needs to know it was stopped while answering,
             # not while deciding what to look up.
@@ -348,7 +349,7 @@ class Workflow:
         if interrupted:
             # What the person heard is the only part of this turn that happened
             # to them. The rest was written and never spoken.
-            final_message = state.spoken_so_far
+            final_message = interrupt_payload.get("heard", state.spoken_so_far)
         if final_message and state.memory is not None:
             latest_assistant = state.memory.latest_assistant_turn()
             if latest_assistant is None or latest_assistant.content != final_message:
@@ -646,6 +647,36 @@ def _next_module_after(current: str, output: ModuleOutput, modules: dict[str, Mo
     if current == "action" and "reflect" in modules and next_module is None:
         return "reflect"
     return next_module
+
+
+SPEAKING_CHARACTERS_PER_SECOND = 4.5
+"""How much text a synthesised voice gets through in a second.
+
+Only whatever is playing the audio knows the real timing, and all it reports
+is a duration — so the duration has to be turned back into a position in the
+text. The rate is a measured average rather than a property of this sentence,
+which is why the result is trimmed at a punctuation mark rather than a
+character: being a few characters out either way should not leave half a word
+in the transcript.
+"""
+
+
+def _heard_portion(spoken: str, heard_seconds: float | None) -> str:
+    """The part of the answer that was actually played before it was cut off.
+
+    Without a reported duration the whole thing stands: the SDK path has no
+    player, and guessing that less was heard would delete something that was.
+    """
+    if heard_seconds is None or not spoken:
+        return spoken
+    played = int(float(heard_seconds) * SPEAKING_CHARACTERS_PER_SECOND)
+    if played >= len(spoken):
+        return spoken
+    cut = max(
+        (spoken.rfind(mark, 0, played + 1) for mark in "，。！？；、,.!?;"),
+        default=-1,
+    )
+    return spoken[: cut if cut > 0 else played].strip()
 
 
 def _final_message_from(state: WorkflowState) -> str:
