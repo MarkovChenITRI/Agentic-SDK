@@ -1,26 +1,25 @@
 """Choosing voice in the Builder has to produce an agent that actually speaks.
 
-The Builder writes the choice into the spec and the readiness check accepts it;
-whether the runtime honours it is a separate question, and the answer used to
-be no. This is the seam where the two meet.
+Tested at the two seams the spec names — `build_spec`/`spec_to_config` for the
+Builder's answers, and `run_agent` for everything from a spec to behaviour —
+because the failure this file exists to catch is precisely a spec that says
+voice and a runtime that quietly does something else.
 """
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
+from agentic_sdk.audio import FakeAudioInput
 from agentic_sdk.config.workflow_config import ModuleSpec, build_module
 from agentic_sdk.modules.action.voice_answer import VoiceAnswerAction
-from agentic_sdk.modules.perceive.voice_text import VoiceTextPerceive
-from playground.services.runner_service import _action_from_config, _perceive_from_config
-from playground.services.source_builder import BuilderSourceConfig
+from playground.services.runner_service import run_agent, spec_to_config
+from playground.services.voice_session import registry
+from support import FoundryOpenAILikeClient, build_spec
 
 
-def voice_config(**overrides) -> BuilderSourceConfig:
-    return BuilderSourceConfig(
-        workflow_name="voice",
-        perceive_module="VoiceTextPerceive",
-        action_module="VoiceAnswerAction",
-        **overrides,
-    )
+def voice_spec() -> dict:
+    return build_spec(("input_type", "voice"), ("output_format", "voice"))
 
 
 def test_the_spec_can_name_the_speaking_action():
@@ -42,27 +41,64 @@ def test_the_spec_can_name_the_speaking_action():
     assert isinstance(module, VoiceAnswerAction)
 
 
-def test_a_voice_agent_answers_on_two_channels():
-    action = _action_from_config(voice_config(), {"action": "gpt-54"}, {"action"})
+def test_the_builder_answers_name_the_voice_modules():
+    config = spec_to_config(voice_spec())
 
-    assert isinstance(action, VoiceAnswerAction)
+    assert config.perceive_module == "VoiceTextPerceive"
+    assert config.action_module == "VoiceAnswerAction"
 
 
-def test_a_voice_agent_listens_on_the_session_that_is_listening():
-    """The audio is already arriving somewhere. The workflow uses that one."""
-    from agentic_sdk.audio import FakeAudioInput
-    from playground.services.voice_session import registry
+def test_a_voice_agent_answers_the_question_it_was_asked():
+    """The whole path: a voice spec, run, and a reply that came out of it.
 
-    listening = registry.listen("wired-session", FakeAudioInput())
+    The spec said this seam covers 「語音 spec 建得起來」. It did not, and a
+    voice agent ran as a pass-through that could neither hear nor speak.
+    """
+    with patch(
+        "agentic_sdk.llm.openai_compatible.OpenAI",
+        side_effect=[FoundryOpenAILikeClient(action_text='{"spoken": "十二個月", "displayed": "保固 12 個月"}')],
+    ):
+        execution = run_agent(voice_spec(), message="保固多久？", endpoint_selections={"action": "gpt-54"})
 
-    perceive = _perceive_from_config(voice_config(), {}, {"perceive"}, voice_session_id="wired-session")
+    assert execution["status"] == "completed"
+    assert execution["final_message"] == "保固 12 個月"
+    # The half that is only ever said, never shown.
+    assert execution["spoken"] == "十二個月"
 
-    assert perceive is listening
+
+def test_a_voice_agent_speaks_into_the_session_that_is_listening():
+    """Speaking somewhere nobody is listening is the failure that has no symptom."""
+    registry.listen("run-seam", FakeAudioInput())
+    registry.open("run-seam")
+    handed_over: list[str] = []
+    registry.attach_speaker("run-seam", handed_over.append)
+
+    with patch(
+        "agentic_sdk.llm.openai_compatible.OpenAI",
+        side_effect=[FoundryOpenAILikeClient(action_text='{"spoken": "十二個月", "displayed": "保固 12 個月"}')],
+    ):
+        run_agent(
+            voice_spec(),
+            message="保固多久？",
+            endpoint_selections={"action": "gpt-54"},
+            voice_session_id="run-seam",
+        )
+
+    assert handed_over == ["十二個月"]
 
 
 def test_a_voice_agent_still_works_for_someone_typing():
     """No microphone open is not a broken agent — it is someone using the keyboard."""
-    perceive = _perceive_from_config(voice_config(), {}, {"perceive"}, voice_session_id="")
+    with patch(
+        "agentic_sdk.llm.openai_compatible.OpenAI",
+        side_effect=[FoundryOpenAILikeClient(action_text='{"spoken": "十二個月", "displayed": "保固 12 個月"}')],
+    ):
+        execution = run_agent(
+            voice_spec(),
+            message="我用打的問保固",
+            endpoint_selections={"action": "gpt-54"},
+            voice_session_id="",
+        )
 
-    assert not isinstance(perceive, VoiceTextPerceive)
-    assert perceive is not None
+    assert execution["status"] == "completed"
+    assert execution["final_message"] == "保固 12 個月"

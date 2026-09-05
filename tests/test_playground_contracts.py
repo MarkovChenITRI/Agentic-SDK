@@ -415,6 +415,7 @@ def test_builder_choices_map_to_runtime_modules():
         "pass_through": "PassThroughPerceive",
         "text": "TextPerceive",
         "text_image": "TextImagePerceive",
+        "voice": "VoiceTextPerceive",
     }.items():
         config = spec_to_config(build_spec(("input_type", choice)))
         assert config.perceive_module == expected_module
@@ -431,11 +432,14 @@ def test_builder_choices_map_to_runtime_modules():
 
     free_text = spec_to_config(build_spec(("output_format", "free_text")))
     interactive = spec_to_config(build_spec(("output_format", "interactive")))
+    voice = spec_to_config(build_spec(("output_format", "voice")))
 
     assert free_text.action_module == "GenerativeAction"
     assert interactive.action_module == "ToolCallAction"
+    assert voice.action_module == "VoiceAnswerAction"
     assert "action" in reachable_workflow_roles(free_text)
     assert "action" in reachable_workflow_roles(interactive)
+    assert "action" in reachable_workflow_roles(voice)
 
 
 def test_key_vault_model_endpoint_requires_explicit_deployment_selection():

@@ -1053,19 +1053,7 @@ def _action_process_name(config: BuilderSourceConfig) -> str:
     if config.action_module == "ToolCallAction":
         return "工具呼叫回覆器"
     if config.action_module == "VoiceAnswerAction":
-        from agentic_sdk.audio.transport import PlayedElsewhere
-        from agentic_sdk.modules.action.voice_answer import VoiceAnswerAction
-        from playground.services.voice_session import SessionSpeech, registry
-
-        # Speak into the session that is listening, so the words start playing
-        # as they are written. With nobody listening the module still needs a
-        # transport, and there is nowhere for the audio to go.
-        speech = SessionSpeech(voice_session_id) if registry.token(voice_session_id or "") else PlayedElsewhere()
-        return VoiceAnswerAction(
-            system_prompt=config.action_prompt,
-            speech=speech,
-            **endpoint_params_for_role("action", endpoint_selections),
-        )
+        return "語音回覆器"
     if config.action_module == "CustomAction":
         return "自訂回覆器"
     return "直接回覆器"
@@ -1169,19 +1157,7 @@ def _action_debug_name(config: BuilderSourceConfig) -> str:
     if config.action_module == "ToolCallAction":
         return "ToolCallAction"
     if config.action_module == "VoiceAnswerAction":
-        from agentic_sdk.audio.transport import PlayedElsewhere
-        from agentic_sdk.modules.action.voice_answer import VoiceAnswerAction
-        from playground.services.voice_session import SessionSpeech, registry
-
-        # Speak into the session that is listening, so the words start playing
-        # as they are written. With nobody listening the module still needs a
-        # transport, and there is nowhere for the audio to go.
-        speech = SessionSpeech(voice_session_id) if registry.token(voice_session_id or "") else PlayedElsewhere()
-        return VoiceAnswerAction(
-            system_prompt=config.action_prompt,
-            speech=speech,
-            **endpoint_params_for_role("action", endpoint_selections),
-        )
+        return "VoiceAnswerAction"
     if config.action_module == "CustomAction":
         return config.custom_action_class or "CustomAction"
     return "DirectAnswerAction"
