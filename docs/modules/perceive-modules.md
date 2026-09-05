@@ -113,7 +113,15 @@ listening = RealtimeTranscription(api_key=..., base_url=..., model=...)
 perceive = VoiceTextPerceive(transport=listening)
 ```
 
-端點需要 OpenAI 形狀以外的東西時，用 `extra_query` 與 `extra_headers` 帶進去；也可以直接傳一個自己建好的 `client`（例如 `AzureOpenAI`），讓 OpenAI SDK 處理該廠商的差異。連這樣都表達不了的，就自己寫一個實作 `AudioInputTransport` 的類別——對模組而言，你寫的和 SDK 附的沒有分別。詳見 ADR-0003。
+`turn_detection` 決定服務怎麼判斷一句話結束——靠固定的靜音長度，或靠模型判斷這個停頓是換氣還是句末。它是**傳輸的參數**，不是模組的：模組只管送什麼上去。
+
+端點不是 OpenAI 形狀時，由淺到深有三層處理方式，而 **SDK 不為任何一家廠商內建整合**：
+
+1. `extra_query` / `extra_headers`——多帶幾個參數就好。
+2. 傳一個你自己建好的 `client`——認證或位址規則不同時。任何 OpenAI SDK 的客戶端物件都可以，SDK 分辨不出它是哪一家。
+3. 自己寫一個實作 `AudioInputTransport` 的類別——連上面兩層都表達不了時。**對模組而言，你寫的和 SDK 附的完全沒有分別**。
+
+詳見 ADR-0003。
 
 ### 標準輸入參數
 

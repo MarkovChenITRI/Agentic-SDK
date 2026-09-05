@@ -85,9 +85,9 @@ def microphone_from(path: Path) -> Iterator[bytes]:
 def _vendor_query(env) -> dict[str, str]:
     """Whatever this endpoint wants beyond the OpenAI shape.
 
-    Azure's realtime transcription needs three of these and refuses every
-    message without ``intent``. They belong to whoever chose the deployment,
-    not to the SDK.
+    Some transcription endpoints need extra query parameters and refuse every
+    message without them. They belong to whoever chose the endpoint, not to the
+    SDK, which ships no integration with any particular provider.
     """
     if not env.get("REALTIME_API_VERSION"):
         return {}
