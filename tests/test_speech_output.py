@@ -20,63 +20,48 @@ class _Streamed:
         return False
 
 
-class _Client:
-    """Stands in for an OpenAI client, recording what it was asked for."""
+class _Elsewhere(SpeechOutput):
+    """Audio fetched some other way — the one method a subclass replaces."""
 
-    def __init__(self, pieces=(b"one", b"two", b"three")):
+    def __init__(self, pieces=(b"one", b"two", b"three"), **kwargs):
         self.asked = None
         self.events = []
-        self.audio = SimpleNamespace(
-            speech=SimpleNamespace(
-                with_streaming_response=SimpleNamespace(create=self._create)
-            )
-        )
         self._pieces = pieces
+        super().__init__(**kwargs)
 
-    def _create(self, **kwargs):
-        self.asked = kwargs
+    def _open_stream(self, text):
+        self.asked = {"input": text, "model": self._model, "voice": self._voice,
+                      "response_format": self._response_format}
         return _Streamed(self._pieces, self.events)
 
 
-def test_it_asks_the_endpoint_the_way_the_openai_sdk_does():
-    """Not a hand-rolled request: the same client the rest of the SDK uses.
-
-    The previous transport assembled its own URL and its own vendor header,
-    which is how one vendor's product details ended up inside a library that
-    claims to be vendor-neutral.
-    """
-    client = _Client()
-    voice = SpeechOutput(client=client, model="tts-1", voice="alloy")
+def test_it_asks_for_what_the_answer_needs():
+    voice = _Elsewhere(model="tts-1", voice="alloy")
 
     list(voice.speak("保固十二個月"))
 
-    assert client.asked["model"] == "tts-1"
-    assert client.asked["voice"] == "alloy"
-    assert client.asked["input"] == "保固十二個月"
-    assert client.asked["response_format"] == "pcm"
+    assert voice.asked == {"input": "保固十二個月", "model": "tts-1",
+                           "voice": "alloy", "response_format": "pcm"}
 
 
 def test_the_audio_arrives_in_pieces():
-    client = _Client()
-
-    assert list(SpeechOutput(client=client, model="m").speak("嗨")) == [b"one", b"two", b"three"]
+    assert list(_Elsewhere(model="m").speak("嗨")) == [b"one", b"two", b"three"]
 
 
 def test_abandoning_it_closes_the_response():
     """An interjection stops the synthesis, not just the listening to it."""
-    client = _Client()
-    stream = SpeechOutput(client=client, model="m").speak("嗨")
+    voice = _Elsewhere(model="m")
+    stream = voice.speak("嗨")
     next(stream)
     stream.close()
 
-    assert client.events == ["closed"]
+    assert voice.events == ["closed"]
 
 
-def test_a_vendor_that_needs_more_than_three_settings_can_have_it():
-    """Vendor differences travel as parameters, not as branches in the module."""
-    client = _Client()
-    voice = SpeechOutput(client=client, model="m", extra_query={"api-version": "2025-03-01-preview"})
+def test_the_shipped_transport_talks_to_openai_and_says_so():
+    import inspect
 
-    list(voice.speak("嗨"))
+    accepted = set(inspect.signature(SpeechOutput.__init__).parameters)
 
-    assert client.asked["extra_query"] == {"api-version": "2025-03-01-preview"}
+    assert "client" not in accepted
+    assert "extra_query" not in accepted

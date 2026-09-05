@@ -82,22 +82,6 @@ def microphone_from(path: Path) -> Iterator[bytes]:
         yield resampled[start : start + CHUNK_SAMPLES].tobytes()
 
 
-def _vendor_query(env) -> dict[str, str]:
-    """Whatever this endpoint wants beyond the OpenAI shape.
-
-    Some transcription endpoints need extra query parameters and refuse every
-    message without them. They belong to whoever chose the endpoint, not to the
-    SDK, which ships no integration with any particular provider.
-    """
-    if not env.get("REALTIME_API_VERSION"):
-        return {}
-    return {
-        "api-version": env["REALTIME_API_VERSION"],
-        "deployment": env["TRANSCRIBE_DEPLOYMENT"],
-        "intent": "transcription",
-    }
-
-
 def main() -> int:
     if len(sys.argv) < 2:
         raise SystemExit(__doc__)
@@ -106,18 +90,17 @@ def main() -> int:
     # The three endpoint settings are the same shape on every module.
     # Audio sources are built here and handed in. The modules hold no way to
     # build one, which is what keeps a second vendor from meaning a code change.
+    # An endpoint reached differently is a subclass of these, written here in
+    # your own code — see the notebook's last section.
     listening = RealtimeTranscription(
         api_key=os.environ["TRANSCRIBE_API_KEY"],
-        base_url=os.environ["TRANSCRIBE_BASE_URL"],
-        model=os.environ["TRANSCRIBE_DEPLOYMENT"],
-        extra_query=_vendor_query(os.environ),
-        extra_headers={"api-key": os.environ["TRANSCRIBE_API_KEY"]},
+        base_url=os.environ.get("TRANSCRIBE_BASE_URL") or None,
+        model=os.environ["TRANSCRIBE_MODEL"],
     )
     speaking = SpeechOutput(
         api_key=os.environ["TTS_API_KEY"],
-        base_url=os.environ["TTS_BASE_URL"],
-        model=os.environ["TTS_DEPLOYMENT"],
-        extra_headers={"api-key": os.environ["TTS_API_KEY"]},
+        base_url=os.environ.get("TTS_BASE_URL") or None,
+        model=os.environ["TTS_MODEL"],
     )
 
     perceive = VoiceTextPerceive(transport=listening)

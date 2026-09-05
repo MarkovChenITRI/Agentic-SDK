@@ -29,9 +29,17 @@ doing, including Azure's non-standard query parameters, goes through it.
 
 ## Decision
 
-**Endpoints are defined through the OpenAI SDK.** Vendor differences travel as
-`extra_query` and `extra_headers`, not as branches inside a module. What the
-SDK cannot express takes the custom form instead.
+**The transports the SDK ships talk to OpenAI and to nothing else.** They take
+no client and no vendor parameters: there is nothing to point somewhere else,
+and so nothing that reads as an integration with a provider this project does
+not test against and cannot promise to keep working.
+
+**An endpoint reached differently is a subclass, written where it is chosen.**
+Only opening the connection varies; the session settings, the audio frames and
+the events are the same standard protocol wherever the connection came from. So
+one method is overridden — `_open` for listening, `_open_stream` for speaking —
+and everything else is inherited. The subclass is the caller's, and reads as
+theirs.
 
 **Resources that are not uniform are injected as objects; modules carry no list
 of sources.** A chat endpoint is uniform — every OpenAI-compatible endpoint is
@@ -49,13 +57,17 @@ with them the vendor list that lived inside the modules.
 
 A custom audio source is not a special case; it is the only case. The
 implementations the SDK ships are simply the ones it happens to include, and a
-module cannot tell them apart from anything a caller writes — which is already
-true in practice, since the Playground passes its own browser-playback
-transport and the tests pass fakes.
+module cannot tell them apart from anything a caller writes.
 
-The Playground needs no change: it already constructs its transports outside
-the modules and passes them in. Its Builder bindings also stand, because
-choosing a deployment is a Playground concern.
+An earlier draft of this decision let a caller hand over their own client
+instead. It was wrong twice over. The arguments were not uniform — one client
+needed a query parameter another rejected, so the caller had to know which
+vendor they held — and the documentation had to name a vendor to show it, which
+reads as support. Passing a client looks smaller than a subclass and is not.
+
+The Playground now carries its own two subclasses, because choosing that
+provider was its decision and not the SDK's. Its Builder bindings stand for the
+same reason.
 
 The Playground's stored endpoint settings do not change. The key vault holds
 the endpoints that Playground offers, in whatever shape they arrive, and they

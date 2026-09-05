@@ -16,6 +16,8 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, Callable, Iterator
 
+from agentic_sdk.audio.realtime import RealtimeTranscription
+from agentic_sdk.audio.speech import SpeechOutput
 from agentic_sdk.core.cancellation import CancellationToken
 
 if TYPE_CHECKING:  # imported lazily below — see listen()
@@ -166,15 +168,7 @@ def open_transcription() -> "AudioInputTransport | None":
         from agentic_sdk.audio import FakeAudioInput
 
         return FakeAudioInput()
-    from agentic_sdk.audio.realtime import RealtimeTranscription
-
-    return RealtimeTranscription(
-        client=_azure_client(endpoint, AZURE_REALTIME_API_VERSION),
-        model=endpoint.deployment_name,
-        # Not optional: without it the socket opens and then answers every
-        # message with an error.
-        extra_query={"intent": "transcription"},
-    )
+    return AzureRealtimeTranscription(endpoint=endpoint)
 
 
 def _test_mode() -> bool:
@@ -197,12 +191,7 @@ def open_synthesis():
         from agentic_sdk.audio import FakeAudioOutput
 
         return FakeAudioOutput()
-    from agentic_sdk.audio.speech import SpeechOutput
-
-    return SpeechOutput(
-        client=_azure_client(endpoint, AZURE_SPEECH_API_VERSION),
-        model=endpoint.deployment_name,
-    )
+    return AzureSpeechOutput(endpoint=endpoint)
 
 
 AZURE_REALTIME_API_VERSION = "2025-04-01-preview"
@@ -216,10 +205,6 @@ AZURE_SPEECH_API_VERSION = "2025-03-01-preview"
 def _azure_client(endpoint, api_version: str):
     """The OpenAI SDK's own Azure client, built from what the key vault holds.
 
-    Knowing that these deployments are Azure is a Playground concern: the SDK
-    takes a client and cannot tell one vendor's from another's. The SDK ships
-    Azure support of its own, so nothing here reimplements a handshake.
-
     The key vault holds the endpoints this Playground offers, in whatever shape
     they arrive — a complete operation URL here, a resource root elsewhere.
     Turning that into a client is this layer's job and always will be: the
@@ -230,6 +215,43 @@ def _azure_client(endpoint, api_version: str):
 
     root = str(endpoint.endpoint).split("/openai/")[0].rstrip("/")
     return AzureOpenAI(azure_endpoint=root, api_key=endpoint.api_key, api_version=api_version)
+
+
+class AzureRealtimeTranscription(RealtimeTranscription):
+    """This Playground's own endpoint, reached the way that endpoint wants.
+
+    The SDK talks to OpenAI and to nothing else; choosing Azure is a decision
+    this layer made, so this class lives here rather than there. Only opening
+    the connection differs — the session settings, the audio frames and the
+    events are all inherited. See ADR-0003.
+    """
+
+    def __init__(self, *, endpoint, **rest) -> None:
+        self._endpoint = endpoint
+        super().__init__(model=endpoint.deployment_name, **rest)
+
+    def _open(self):
+        return _azure_client(self._endpoint, AZURE_REALTIME_API_VERSION).beta.realtime.connect(
+            model=self._model,
+            # Not optional here: without it the socket opens and then answers
+            # every message with an error.
+            extra_query={"intent": "transcription"},
+        )
+
+
+class AzureSpeechOutput(SpeechOutput):
+    """The speaking half of the same decision."""
+
+    def __init__(self, *, endpoint, **rest) -> None:
+        self._endpoint = endpoint
+        super().__init__(model=endpoint.deployment_name, **rest)
+
+    def _open_stream(self, text: str):
+        client = _azure_client(self._endpoint, AZURE_SPEECH_API_VERSION)
+        return client.audio.speech.with_streaming_response.create(
+            model=self._model, voice=self._voice, input=text,
+            response_format=self._response_format,
+        )
 
 
 def speech_unavailable_message() -> str:

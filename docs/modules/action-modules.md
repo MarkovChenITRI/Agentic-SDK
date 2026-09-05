@@ -83,7 +83,7 @@ speaking = SpeechOutput(api_key=..., base_url=..., model=..., voice="alloy")
 action = VoiceAnswerAction(speech=speaking, api_key=..., base_url=..., model=...)
 ```
 
-需要廠商差異時用 `extra_query` / `extra_headers`，或直接傳一個建好的 `client`。詳見 ADR-0003。
+`SpeechOutput` 只會連 OpenAI。端點不同時覆蓋 `_open_stream(text)`，回傳一個 `iter_bytes()` 會吐音訊的 context manager；停在句中的行為（有人插話就放棄串流）是繼承來的。詳見 ADR-0003。
 
 ### 回覆內容
 

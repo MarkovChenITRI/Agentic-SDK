@@ -9,9 +9,12 @@ that stops dead never finishes, and looks exactly like a hung connection. A
 caller that gates on loudness must let the quiet tail through, which is what
 the speech gate's hangover is for.
 
-Nothing here names a vendor. What one endpoint needs and another does not — a
-deployment name in the query string, an api-version, a header — travels as
-``extra_query`` and ``extra_headers``. See ADR-0003.
+This talks to OpenAI and to nothing else. An endpoint that opens its
+connections differently is reached by subclassing and overriding ``_open`` —
+everything after the connection is the same standard protocol, so a subclass
+writes one method and inherits the rest. Accepting somebody else's client here
+instead would read as an integration with whatever they passed, which is a
+promise this project does not make. See ADR-0003.
 """
 
 from __future__ import annotations
@@ -41,25 +44,17 @@ class RealtimeTranscription:
         self,
         *,
         model: str,
-        client: Any = None,
         api_key: str | None = None,
         base_url: str | None = None,
         language: str = "zh",
         turn_detection: Mapping[str, Any] | None = None,
-        extra_query: Mapping[str, Any] | None = None,
-        extra_headers: Mapping[str, str] | None = None,
         connect_timeout: float = 30.0,
     ) -> None:
-        if client is None:
-            from openai import OpenAI
-
-            client = OpenAI(api_key=api_key, base_url=base_url)
-        self._client = client
+        self._api_key = api_key
+        self._base_url = base_url
         self._model = model
         self._language = language
         self._turn_detection = dict(turn_detection or DEFAULT_TURN_DETECTION)
-        self._extra_query = dict(extra_query or {})
-        self._extra_headers = dict(extra_headers or {})
 
         self._speech_started: list[Callable[[], None]] = []
         self._transcript: list[Callable[[str], None]] = []
@@ -78,6 +73,26 @@ class RealtimeTranscription:
             raise TimeoutError("speech service did not accept the connection in time")
         if self._failure is not None:
             raise self._failure
+
+    def _open(self) -> Any:
+        """Open a live transcription connection, and nothing else.
+
+        The one method a different endpoint has to replace. Everything after
+        this — the session settings, the audio frames, the events — is the same
+        wherever the connection came from, so a subclass inherits all of it:
+
+            class MyTranscription(RealtimeTranscription):
+                def _open(self):
+                    return SomeClient(...).beta.realtime.connect(model=self._model)
+        """
+        from openai import OpenAI
+
+        return OpenAI(api_key=self._api_key, base_url=self._base_url).beta.realtime.connect(
+            model=self._model,
+            # What this connection is for, rather than a vendor's quirk: this
+            # transport only ever opens transcription sessions.
+            extra_query={"intent": "transcription"},
+        )
 
     # ── AudioInputTransport ─────────────────────────────────────────────
 
@@ -107,12 +122,7 @@ class RealtimeTranscription:
 
     def _run(self) -> None:
         try:
-            request: dict[str, Any] = {"model": self._model}
-            if self._extra_query:
-                request["extra_query"] = self._extra_query
-            if self._extra_headers:
-                request["extra_headers"] = self._extra_headers
-            with self._client.beta.realtime.connect(**request) as connection:
+            with self._open() as connection:
                 self._connection = connection
                 connection.send(
                     {

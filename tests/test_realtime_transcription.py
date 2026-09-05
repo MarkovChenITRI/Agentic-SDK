@@ -40,46 +40,57 @@ class _Manager:
         return False
 
 
-class _Client:
-    """Stands in for an OpenAI client holding a realtime connection."""
+class _Elsewhere(RealtimeTranscription):
+    """An endpoint reached some other way — the one method a subclass replaces.
 
-    def __init__(self):
+    This is exactly what a caller writes for an endpoint the SDK knows nothing
+    about, so the test drives the same seam they would.
+    """
+
+    def __init__(self, **kwargs):
         self.incoming = queue.Queue()
         self.connection = _Connection(self.incoming)
-        self.asked = None
-        self.beta = SimpleNamespace(realtime=SimpleNamespace(connect=self._connect))
+        self.opened = False
+        super().__init__(**kwargs)
 
-    def _connect(self, **kwargs):
-        self.asked = kwargs
+    def _open(self):
+        self.opened = True
         return _Manager(self.connection)
 
 
 def open_session(**kwargs):
-    client = _Client()
-    return client, RealtimeTranscription(client=client, model="transcribe-1", **kwargs)
+    session = _Elsewhere(model="transcribe-1", **kwargs)
+    return session, session
 
 
 def settle():
     time.sleep(0.05)
 
 
-def test_it_connects_the_way_the_openai_sdk_does():
+def test_an_endpoint_reached_some_other_way_replaces_one_method():
+    """Everything after the connection is the same, so a subclass inherits it.
+
+    The transport talks to OpenAI and to nothing else. Taking somebody else's
+    client instead would read as an integration with whatever was passed, which
+    is a promise this project does not make.
+    """
     client, session = open_session()
 
-    assert client.asked["model"] == "transcribe-1"
+    assert client.opened is True
+    # The protocol came with the base class: the subclass wrote no part of it.
+    assert client.connection.sent[0]["type"] == "transcription_session.update"
     session.close()
 
 
-def test_a_vendor_that_needs_extra_parameters_can_have_them():
-    """Vendor differences are parameters, not branches inside the transport."""
-    client, session = open_session(
-        extra_query={"intent": "transcription", "api-version": "2025-04-01-preview"},
-        extra_headers={"api-key": "k"},
-    )
+def test_the_shipped_transport_talks_to_openai_and_says_so():
+    """No client argument, no vendor parameters: there is nothing to point elsewhere."""
+    import inspect
 
-    assert client.asked["extra_query"]["intent"] == "transcription"
-    assert client.asked["extra_headers"] == {"api-key": "k"}
-    session.close()
+    accepted = set(inspect.signature(RealtimeTranscription.__init__).parameters)
+
+    assert "client" not in accepted
+    assert "extra_query" not in accepted
+    assert "extra_headers" not in accepted
 
 
 def test_it_asks_the_service_to_decide_where_an_utterance_ends():
