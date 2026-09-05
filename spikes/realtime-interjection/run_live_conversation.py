@@ -167,7 +167,7 @@ async def main() -> int:
         stderr=subprocess.DEVNULL,
     )
     try:
-        time.sleep(6)
+        time.sleep(10)
         targets = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{CHROME_PORT}/json").read())
         page = next(target for target in targets if target["type"] == "page")
 
@@ -235,7 +235,7 @@ async def main() -> int:
             traffic = await browser.evaluate(
                 "({seen: window.__seen || [], audioIn: (window.__audioIn||[]).length,"
                 " audioOut: (window.__audioOut||[]).reduce((a,b)=>a+b,0),"
-                " status: document.querySelector('[data-voice-status]')?.textContent || '',"
+                " status: document.querySelector('[data-run-status]')?.textContent || '',"
                 " reply: document.querySelector('[data-result-thread]')?.innerText?.slice(0,400) || '',"
                 " fetches: window.__fetches || [], errors: (window.__errors||[]).slice(0,6)})"
             )

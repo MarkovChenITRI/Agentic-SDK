@@ -64,6 +64,7 @@ let workflowDescriptionRequest = null;
 const workflowDescriptionPlaceholder = workflowDescriptionInput?.getAttribute("placeholder") || workflowDescriptionDisplay?.dataset.placeholder || "";
 let lastSaveTrigger = null;
 let runnerInitialized = !initializationOverlay;
+let heldUntilReady = null;
 const initialSaveStatusText = saveStatus?.textContent?.trim() || "";
 let savedWorkflowName = initialSaveStatusText === "尚未儲存" ? null : workflowName;
 let savedWorkflowDescription = initialSaveStatusText === "尚未儲存" ? null : workflowDescription;
@@ -154,6 +155,11 @@ function updateInitializationProgress(event) {
 function finishInitialization() {
 	runnerInitialized = true;
 	setRunnerChatEnabled(true);
+	if (heldUntilReady) {
+		const held = heldUntilReady;
+		heldUntilReady = null;
+		runWorkflow(held.payload, held.options);
+	}
 	if (initializationOverlay) {
 		initializationOverlay.classList.add("is-complete");
 		window.setTimeout(() => {
@@ -818,12 +824,14 @@ workflowDescriptionInput?.addEventListener("blur", async () => {
 
 async function runWorkflow(payload, { displayMessage, showUserMessage = true } = {}) {
 	if (!runnerInitialized) {
+		// Held rather than refused. A voice agent opens its microphone the
+		// moment the page loads, so the first thing anyone says arrives before
+		// the modules have finished warming — telling them to say it again is
+		// asking them to wait for something they cannot see.
+		heldUntilReady = { payload, options: { displayMessage, showUserMessage } };
 		showSavePanel(savePanel, "Agent 還在初始化，完成後才能開始對話。");
-		// Someone who typed can see the panel and try again. Someone who spoke
-		// gets no acknowledgement at all unless it is said on their own line.
-		const voiceStatus = document.querySelector("[data-voice-status]");
-		if (voiceStatus) {
-			voiceStatus.textContent = "Agent 還在啟動，好了再說一次。";
+		if (runStatus) {
+			runStatus.textContent = "聽到了，Agent 正在啟動，好了就回答你。";
 		}
 		return;
 	}
@@ -975,12 +983,8 @@ const voice = bindVoiceConversation(runnerPage, {
 		runWorkflow({ message: text, voice_session_id: voice?.sessionId || "" });
 	},
 	onStatus: (message) => {
-		// Its own line, because the runner has no general status element: every
-		// `runStatus` in this file writes to null. A microphone that needs
-		// permission has to say so somewhere a person can read it.
-		const voiceStatus = document.querySelector("[data-voice-status]");
-		if (voiceStatus) {
-			voiceStatus.textContent = message;
+		if (runStatus) {
+			runStatus.textContent = message;
 		}
 	},
 });
