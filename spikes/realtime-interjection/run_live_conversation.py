@@ -176,7 +176,7 @@ async def main() -> int:
             await browser.call("Page.enable")
             await browser.call("Runtime.enable")
 
-            await browser.call("Page.navigate", url=f"http://127.0.0.1:{PORT}/playground/build")
+            await browser.call("Page.navigate", url=f"http://127.0.0.1:{PORT}/playground/builder")
             await asyncio.sleep(4)
             built = await browser.evaluate(BUILD_A_VOICE_AGENT)
             print("── 建一個語音 agent ──")

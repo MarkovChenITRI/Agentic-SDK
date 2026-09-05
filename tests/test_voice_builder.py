@@ -94,3 +94,25 @@ def test_a_voice_agent_can_actually_be_finished():
     assert state["missing_secrets_by_role"]["transcribe"] == []
     assert state["missing_secrets_by_role"]["tts"] == []
     assert state["configured"] is True
+
+
+def test_every_deployment_a_voice_agent_needs_is_offered_on_the_page():
+    """A role missing from the page's table is dropped without a word.
+
+    The Builder asked for a speech deployment, the readiness check counted it,
+    and the page rendered no control for it — so there was nothing a person
+    could click. Nobody could bind it, and nothing said why.
+    """
+    from pathlib import Path
+
+    spec = build_spec(("input_type", "voice"), ("output_format", "voice"))
+    needed = {
+        requirement["role"]
+        for requirement in model_endpoints.endpoint_state(spec, {})["requirements"]
+    }
+    page = Path(__file__).resolve().parents[1] / "playground/static/js/builder/builder-page.js"
+    offered = page.read_text(encoding="utf-8")
+    table = offered[offered.index("reviewEndpointStepByRole") : offered.index("const dependencyRules")]
+
+    missing = sorted(role for role in needed if f"{role}:" not in table)
+    assert missing == [], f"這些角色在畫面上沒有對應的選單：{missing}"
