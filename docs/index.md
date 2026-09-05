@@ -47,7 +47,7 @@
   </thead>
   <tbody>
     <tr>
-      <td rowspan="2">Perceive</td>
+      <td rowspan="3">Perceive</td>
       <td><a href="modules/perceive-modules.md#passthroughperceive">PassThroughPerceive</a></td>
       <td>no</td>
       <td>--</td>
@@ -60,6 +60,12 @@
       <td>根據完整對話歷史整理最新需求，必要時也把圖片一併納入理解。</td>
     </tr>
     <tr>
+      <td><a href="modules/perceive-modules.md#voicetextperceive">VoiceTextPerceive</a></td>
+      <td>yes</td>
+      <td>OpenAI</td>
+      <td>把說出來的話轉成這一輪的輸入，安靜時不上傳；偵測到使用者開口時中止進行中的回答。</td>
+    </tr>
+    <tr>
       <td>Plan</td>
       <td><a href="modules/plan-modules.md#nextstepplan">NextStepPlan</a></td>
       <td>yes</td>
@@ -67,7 +73,13 @@
       <td>根據完整對話與目前中繼結果，決定下一步要 Retrieve 還是 Action。</td>
     </tr>
     <tr>
-      <td rowspan="2">Retrieve</td>
+      <td rowspan="3">Retrieve</td>
+      <td><a href="modules/retrieve-modules.md#passthroughretrieve">PassThroughRetrieve</a></td>
+      <td>no</td>
+      <td>--</td>
+      <td>不查任何資料，直接把前一步的結果往下送。</td>
+    </tr>
+    <tr>
       <td><a href="modules/retrieve-modules.md#keywordretrieve">KeywordRetrieve</a></td>
       <td>no</td>
       <td>--</td>
@@ -80,7 +92,7 @@
       <td>用語意相似度找出相關內容，適合需要提高召回率與理解能力的情境。</td>
     </tr>
     <tr>
-      <td rowspan="3">Action</td>
+      <td rowspan="4">Action</td>
       <td><a href="modules/action-modules.md#directansweraction">DirectAnswerAction</a></td>
       <td>no</td>
       <td>--</td>
@@ -97,6 +109,12 @@
       <td>yes</td>
       <td>OpenAI</td>
       <td>使用 OpenAI 標準 tools schema 讓模型產生 tool calls，適合外部 API 或後端函式由應用層執行的情境。</td>
+    </tr>
+    <tr>
+      <td><a href="modules/action-modules.md#voiceansweraction">VoiceAnswerAction</a></td>
+      <td>yes</td>
+      <td>OpenAI</td>
+      <td>同時產出說出口與顯示在畫面上的兩個頻道，前者一寫完就送去合成，不等整段回覆結束。</td>
     </tr>
     <tr>
       <td rowspan="2">Reflect</td>
