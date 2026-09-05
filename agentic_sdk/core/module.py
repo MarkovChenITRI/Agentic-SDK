@@ -44,6 +44,7 @@ class WorkflowState:
     # A module that streams can offer it to the transport without the workflow
     # having to reach inside the module to wire anything up.
     cancel: Any = None
+    spoken_so_far: str = ""
     _token_delta_callback: Callable[[str, str, dict[str, Any]], None] | None = field(
         default=None,
         init=False,
@@ -132,6 +133,17 @@ class WorkflowState:
         if isinstance(self.memory, PersistentMemory):
             return self.memory
         return None
+
+    def report_spoken_progress(self, spoken_so_far: str) -> None:
+        """Record how much of the answer has actually been said out loud.
+
+        Only whatever is playing the audio knows this, and it is not the same
+        as how much the model has written: speech lags generation, so an
+        interrupted answer has a tail that exists only on paper. Carrying that
+        tail forward would let the next turn refer back to a sentence nobody
+        heard.
+        """
+        self.spoken_so_far = str(spoken_so_far or "")
 
     def should_stop(self) -> bool:
         """Whether whoever started this run has asked for it to stop."""

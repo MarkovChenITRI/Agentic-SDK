@@ -310,7 +310,7 @@ class Workflow:
             interrupted = True
             aborted = True
             abort_reason = f"interrupted: {exc.reason}"
-            interrupt_payload = exc.payload
+            interrupt_payload = {**exc.payload, "heard": state.spoken_so_far}
             # Say so on the trace, and say where. Whoever is tuning how eagerly
             # the agent gives way needs to know it was stopped while answering,
             # not while deciding what to look up.
@@ -345,10 +345,18 @@ class Workflow:
                 event_callback(abort_event)
 
         final_message = _final_message_from(state)
+        if interrupted:
+            # What the person heard is the only part of this turn that happened
+            # to them. The rest was written and never spoken.
+            final_message = state.spoken_so_far
         if final_message and state.memory is not None:
             latest_assistant = state.memory.latest_assistant_turn()
             if latest_assistant is None or latest_assistant.content != final_message:
-                state.memory.append_message("assistant", final_message, metadata={"source": "workflow.run"})
+                state.memory.append_message(
+                    "assistant",
+                    final_message,
+                    metadata={"source": "workflow.run", "interrupted": True} if interrupted else {"source": "workflow.run"},
+                )
         if state.memory is not None:
             self.memory = state.memory
             if memory is not None or _is_memory_store(self.memory_type):

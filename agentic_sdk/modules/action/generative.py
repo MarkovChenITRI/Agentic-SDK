@@ -119,9 +119,36 @@ class GenerativeAction:
         )
 
 
+def _interrupted_answer(state: WorkflowState) -> dict[str, str]:
+    """Tell the model it was cut off, and what the person actually heard.
+
+    Left to itself with only the transcript, it answered 「沒有足夠資料指出前一段
+    具體停在哪裡」 — it could see the words but not that they had been said out
+    loud and abandoned. Continuing from something is a different job from
+    answering it again, and the model cannot tell which is wanted unless the
+    difference is stated.
+    """
+    memory = getattr(state, "memory", None)
+    turns = list(getattr(memory, "turns", []) or [])
+    for turn in reversed(turns):
+        if turn.role != "assistant":
+            continue
+        if not (getattr(turn, "metadata", None) or {}).get("interrupted"):
+            return {}
+        return {
+            "interrupted_answer_instruction": (
+                "上一輪你講到一半被使用者打斷。interrupted_answer 是他實際聽到的內容，"
+                "後面沒講出口的部分他沒有聽到。請承接著往下講，不要從頭重述他已經聽過的話。"
+            ),
+            "interrupted_answer": turn.content,
+        }
+    return {}
+
+
 def _build_messages(state: WorkflowState, system_prompt: str | None) -> list[dict[str, str]]:
     retrieved = state.lookup("latest_retrieved_content") or state.lookup("retrieved_snippet") or ""
     perceived = _perceived_context(state)
+    cut_off = _interrupted_answer(state)
     resolved_prompt = system_prompt or (GROUNDED_SYSTEM_PROMPT if str(retrieved).strip() else OPEN_SYSTEM_PROMPT)
     return build_module_messages(
         state.memory,
@@ -132,6 +159,7 @@ def _build_messages(state: WorkflowState, system_prompt: str | None) -> list[dic
             "perceived_context": perceived,
             "retrieved_context_instruction": "retrieved_context 是已檢索到的可靠資料；如果它不是空白，請優先依據它回答。",
             "retrieved_context": retrieved,
+            **cut_off,
         },
         latest_user_message=state.latest_user_message(),
     )
