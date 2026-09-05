@@ -86,6 +86,29 @@ class FakeAudioInput:
             callback(text)
 
 
+class FakeAudioOutput:
+    """An output transport that records what it was asked to say.
+
+    ``abandoned`` is how a test sees an interruption reach the synthesis: the
+    caller stops consuming, so the generator is closed before it finishes.
+    """
+
+    def __init__(self) -> None:
+        self.spoken: list[str] = []
+        self.abandoned: list[str] = []
+
+    def speak(self, text: str) -> Iterator[bytes]:
+        self.spoken.append(text)
+        finished = False
+        try:
+            for index in range(3):
+                yield f"{text}:{index}".encode("utf-8")
+            finished = True
+        finally:
+            if not finished:
+                self.abandoned.append(text)
+
+
 def require_speech_endpoint(**settings: Any) -> None:
     """Refuse a module that has neither a transport nor an endpoint to build one.
 
