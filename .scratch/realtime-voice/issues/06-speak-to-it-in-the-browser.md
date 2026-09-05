@@ -21,8 +21,20 @@
 
 沿這條線切成兩張：**瀏覽器聽得到**（端點 + 麥克風 + 權限）與**瀏覽器講得出來**（播放 + 打斷處理 + 截斷）。切點在「音訊進」與「音訊出」之間。
 
-## 交付時的兩項落差
+## 瀏覽器那半怎麼驗的
 
-**瀏覽器行為未經真實瀏覽器驗證。** 這台機器沒有瀏覽器自動化，麥克風擷取、播放、權限被拒的訊息都只做到語法檢查與人工閱讀。伺服器那一半（端點、轉發、閘門、插話、合成串流）有 13 個測試涵蓋。
+這台機器沒有裝 playwright，但 playwright 快取的 chromium 還在，Chrome 和 Firefox 也在。
+`spikes/realtime-interjection/verify_in_browser.py` 直接用 DevTools Protocol 開一個帶假麥克風的
+無頭 Chrome，從跑著的 Playground 載入**真正的模組**，四件事都是實跑出來的：
 
-**Playground 的語音比 SDK 晚開口。** SDK 路徑在 `spoken` 欄位一寫完就送去合成（票 04）；Playground 是等回覆結束後，頁面再要求把 `spoken` 念出來。原因是動作模組的合成通道是建構時綁定的，而 Playground 的模組由規格組出來，要把通道穿進去是另一條線。以 POC 而言可接受，但這是「進階語音感」最明顯的一段延遲。
+- 麥克風不用按按鈕就開起來，狀態顯示「可以開始說話了。」
+- 2.5 秒內送出 **104 個音框、70,928 bytes** 的 16 kHz PCM——閘門讓聲音過、擷取與降取樣都是通的
+- 丟一段合成音訊再送 `speech_started`，頁面立刻停播並回報 `heard_seconds: 0.2987`
+- 把 `getUserMedia` 改成拒絕，畫面說明它要麥克風權限，不是靜靜地不動
+
+驗的過程中真的抓到一個 bug：session id 長成 `voice-...-.4vfok`，因為
+`Math.random().toString(36).slice(1, 7)` 把 `0.` 的小數點一起切進去了。
+
+另外補了一段 `AudioContext` 的處理：瀏覽器會讓 AudioContext 停在 suspended，
+這時頁面看起來在聽、實際上一個音訊事件都不會有。現在會先 resume，還是不行就請使用者點一下畫面。
+（這不是 0 音框的原因——那次是檢測腳本自己包 WebSocket 時漏了 `WebSocket.OPEN` 常數。）

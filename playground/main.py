@@ -65,6 +65,30 @@ async def voice_session(socket: WebSocket, session_id: str) -> None:
     loop = asyncio.get_running_loop()
     listener = None
 
+    async def stream_speech(text: str) -> None:
+        voice = voice_session.open_synthesis()
+        if voice is None:
+            await socket.send_json(
+                {"type": "unavailable", "message": voice_session.speech_unavailable_message()}
+            )
+            return
+        token = registry.token(session_id)
+        for piece in voice.speak(text):
+            if token is not None and token.cancelled:
+                # Abandoning the iterator stops the synthesis too: the rest of
+                # a sentence nobody will hear is not worth generating, let
+                # alone paying for.
+                break
+            await socket.send_bytes(piece)
+        await socket.send_json({"type": "spoken"})
+
+    # Registered so the running answer can start playing the moment its spoken
+    # half exists, instead of waiting for the page to ask once it is finished.
+    registry.attach_speaker(
+        session_id,
+        lambda text: asyncio.run_coroutine_threadsafe(stream_speech(text), loop),
+    )
+
     def announce(payload: dict) -> None:
         # Called from the transcription session's own thread, which is not the
         # one the socket belongs to.
@@ -119,24 +143,7 @@ async def voice_session(socket: WebSocket, session_id: str) -> None:
                         {"type": "nothing_to_interrupt", "message": unknown_session_message()}
                     )
             elif kind == "speak":
-                voice = voice_session.open_synthesis()
-                if voice is None:
-                    await socket.send_json(
-                        {
-                            "type": "unavailable",
-                            "message": voice_session.speech_unavailable_message(),
-                        }
-                    )
-                    continue
-                token = registry.token(session_id)
-                for piece in voice.speak(str(message.get("text") or "")):
-                    if token is not None and token.cancelled:
-                        # Abandoning the iterator stops the synthesis too: the
-                        # rest of a sentence nobody will hear is not worth
-                        # generating, let alone paying for.
-                        break
-                    await socket.send_bytes(piece)
-                await socket.send_json({"type": "spoken"})
+                await stream_speech(str(message.get("text") or ""))
             elif kind == "close":
                 break
     except WebSocketDisconnect:

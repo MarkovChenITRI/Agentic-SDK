@@ -214,3 +214,32 @@ def test_the_person_who_interrupted_is_not_shown_an_error():
     assert _execution_status(hop_limit, handoff_reason="") == "aborted"
     assert "插話" in _interruption_note(interrupted)
     assert _interruption_note(hop_limit) == ""
+
+
+def test_the_answer_starts_playing_before_it_is_finished():
+    """The pause before a reply is what makes an agent feel like a form.
+
+    The spoken half is handed over the moment that field closes, while the
+    displayed half is still being written — so the page is playing something
+    without ever having asked for it. Waiting for the finished answer would
+    put that pause in front of every reply.
+    """
+    from agentic_sdk.audio.transport import AudioOutputTransport
+    from playground.services.voice_session import SessionSpeech, registry
+
+    handed_over = []
+    registry.attach_speaker("session-n", handed_over.append)
+
+    # What the action module holds: a transport like any other, whose audio
+    # happens to come out somewhere else entirely.
+    transport: AudioOutputTransport = SessionSpeech("session-n")
+
+    assert list(transport.speak("保固十二個月")) == []
+    assert handed_over == ["保固十二個月"]
+
+
+def test_speaking_into_a_session_that_has_gone_away_is_not_an_error():
+    """The page can close mid-answer. The run finishes either way."""
+    from playground.services.voice_session import SessionSpeech
+
+    assert list(SessionSpeech("never-opened").speak("保固十二個月")) == []

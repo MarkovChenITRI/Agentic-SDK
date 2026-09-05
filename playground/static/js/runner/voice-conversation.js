@@ -21,7 +21,7 @@ export function bindVoiceConversation(page, { onTranscript, onStatus }) {
 		return null;
 	}
 	const session = {
-		id: `voice-${Date.now()}-${Math.random().toString(36).slice(1, 7)}`,
+		id: `voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 		socket: null,
 		context: null,
 		playing: [],
@@ -74,6 +74,18 @@ export function bindVoiceConversation(page, { onTranscript, onStatus }) {
 		open();
 		const context = new AudioContext();
 		session.context = context;
+		// Browsers start an AudioContext suspended until the page has had a
+		// user gesture. Granting microphone permission usually counts as one,
+		// but not always, and a suspended context produces no audio events at
+		// all — the page looks like it is listening and hears nothing.
+		if (context.state === "suspended") {
+			await context.resume().catch(() => {});
+		}
+		window.__voiceContextState = context.state;
+		if (context.state !== "running") {
+			say("瀏覽器還沒允許這個頁面播放與擷取聲音。點一下頁面任何地方就可以開始說話。");
+			document.addEventListener("click", () => context.resume(), { once: true });
+		}
 		const source = context.createMediaStreamSource(microphone);
 		const meter = context.createScriptProcessor(FRAME_SAMPLES, 1, 1);
 		meter.addEventListener("audioprocess", (event) => {

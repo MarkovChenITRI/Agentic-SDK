@@ -948,9 +948,6 @@ async function runWorkflow(payload, { displayMessage, showUserMessage = true } =
 	if (runStatus) {
 		runStatus.textContent = executionStatusFrom(result);
 	}
-	// The two channels: the screen already has the reply, so this is the half
-	// that is only ever said.
-	voice?.speak(result.spoken || "");
 	assistant.bubble?.classList.remove("is-running");
 	setSurfaceBusy(assistant.surface, false);
 	if (submitButton && runId === activeRunId) {

@@ -14,6 +14,7 @@ is not, and nothing would report it.
 from __future__ import annotations
 
 import threading
+from typing import Callable, Iterator
 
 from agentic_sdk.audio.transport import AudioInputTransport
 from agentic_sdk.core.cancellation import CancellationToken
@@ -26,7 +27,27 @@ class VoiceSessionRegistry:
     def __init__(self) -> None:
         self._tokens: dict[str, CancellationToken] = {}
         self._listeners: dict[str, VoiceTextPerceive] = {}
+        self._speakers: dict[str, Callable[[str], None]] = {}
         self._lock = threading.Lock()
+
+    def attach_speaker(self, session_id: str, speaker: Callable[[str], None]) -> None:
+        """Register how this session gets audio to whoever is listening."""
+        with self._lock:
+            self._speakers[str(session_id)] = speaker
+
+    def say(self, session_id: str, text: str) -> bool:
+        """Start playing this out now. False if nobody is listening any more.
+
+        Called the moment the spoken half of an answer is written, while the
+        displayed half is still being generated — the pause before a reply is
+        what makes an agent feel like a form rather than a conversation.
+        """
+        with self._lock:
+            speaker = self._speakers.get(str(session_id))
+        if speaker is None:
+            return False
+        speaker(text)
+        return True
 
     def listen(self, session_id: str, transport: AudioInputTransport) -> VoiceTextPerceive:
         """Give this session somewhere to send its microphone.
@@ -79,6 +100,7 @@ class VoiceSessionRegistry:
         with self._lock:
             self._tokens.pop(str(session_id), None)
             listener = self._listeners.pop(str(session_id), None)
+            self._speakers.pop(str(session_id), None)
         if listener is not None:
             # The transcription session bills for as long as it is open, and
             # nobody is on the other end of this one any more.
@@ -87,6 +109,26 @@ class VoiceSessionRegistry:
     def token(self, session_id: str) -> CancellationToken | None:
         with self._lock:
             return self._tokens.get(str(session_id))
+
+
+class SessionSpeech:
+    """The action module's speaker, when the speaker is in a browser.
+
+    Handing the words to the page as soon as they exist is the whole point: it
+    synthesises and plays them while the rest of the answer is still being
+    written. Nothing comes back through here, because the audio never passes
+    through the module — which is why yielding nothing is the honest answer
+    rather than an omission.
+    """
+
+    def __init__(self, session_id: str) -> None:
+        self._session_id = session_id
+
+    def speak(self, text: str) -> Iterator[bytes]:
+        # A page that closed mid-answer is not a failure. The run finishes,
+        # and there is simply nobody left to hear the rest of it.
+        registry.say(self._session_id, text)
+        return iter(())
 
 
 def open_transcription() -> AudioInputTransport | None:
@@ -104,6 +146,14 @@ def open_transcription() -> AudioInputTransport | None:
     )
     if endpoint is None:
         return None
+    if _test_mode():
+        # The test key vault holds an endpoint that does not exist. Opening a
+        # transcription session against it would fail on connect, which would
+        # make the whole socket untestable — including from a browser, which
+        # is the only place the microphone half can be exercised at all.
+        from agentic_sdk.audio import FakeAudioInput
+
+        return FakeAudioInput()
     from agentic_sdk.audio.azure_realtime import AzureRealtimeInput
 
     return AzureRealtimeInput(
@@ -111,6 +161,12 @@ def open_transcription() -> AudioInputTransport | None:
         base_url=endpoint.endpoint,
         model=endpoint.deployment_name,
     )
+
+
+def _test_mode() -> bool:
+    from playground.services.key_vault_config import _test_mode_enabled
+
+    return _test_mode_enabled()
 
 
 def open_synthesis():
@@ -123,6 +179,10 @@ def open_synthesis():
     )
     if endpoint is None:
         return None
+    if _test_mode():
+        from agentic_sdk.audio import FakeAudioOutput
+
+        return FakeAudioOutput()
     from agentic_sdk.audio.azure_speech import AzureSpeechOutput
 
     return AzureSpeechOutput(

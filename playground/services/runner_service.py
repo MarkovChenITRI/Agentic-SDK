@@ -1055,10 +1055,15 @@ def _action_process_name(config: BuilderSourceConfig) -> str:
     if config.action_module == "VoiceAnswerAction":
         from agentic_sdk.audio.transport import PlayedElsewhere
         from agentic_sdk.modules.action.voice_answer import VoiceAnswerAction
+        from playground.services.voice_session import SessionSpeech, registry
 
+        # Speak into the session that is listening, so the words start playing
+        # as they are written. With nobody listening the module still needs a
+        # transport, and there is nowhere for the audio to go.
+        speech = SessionSpeech(voice_session_id) if registry.token(voice_session_id or "") else PlayedElsewhere()
         return VoiceAnswerAction(
             system_prompt=config.action_prompt,
-            speech=PlayedElsewhere(),
+            speech=speech,
             **endpoint_params_for_role("action", endpoint_selections),
         )
     if config.action_module == "CustomAction":
@@ -1166,10 +1171,15 @@ def _action_debug_name(config: BuilderSourceConfig) -> str:
     if config.action_module == "VoiceAnswerAction":
         from agentic_sdk.audio.transport import PlayedElsewhere
         from agentic_sdk.modules.action.voice_answer import VoiceAnswerAction
+        from playground.services.voice_session import SessionSpeech, registry
 
+        # Speak into the session that is listening, so the words start playing
+        # as they are written. With nobody listening the module still needs a
+        # transport, and there is nowhere for the audio to go.
+        speech = SessionSpeech(voice_session_id) if registry.token(voice_session_id or "") else PlayedElsewhere()
         return VoiceAnswerAction(
             system_prompt=config.action_prompt,
-            speech=PlayedElsewhere(),
+            speech=speech,
             **endpoint_params_for_role("action", endpoint_selections),
         )
     if config.action_module == "CustomAction":
@@ -1240,7 +1250,7 @@ def build_workflow(
         perceive=_perceive_from_config(config, endpoint_selections, reachable_roles, voice_session_id),
         plan=_plan_from_config(config, endpoint_selections, reachable_roles),
         retrieve=_retrieve_from_config(config, endpoint_selections, reachable_roles, runtime.source_list, runtime.saved_path),
-        action=_action_from_config(config, endpoint_selections, reachable_roles),
+        action=_action_from_config(config, endpoint_selections, reachable_roles, voice_session_id),
         reflect=_reflect_from_config(config, endpoint_selections, reachable_roles),
     )
 
@@ -1488,7 +1498,12 @@ class UnansweredBuilderQuestion(Exception):
         self.question = question
 
 
-def _action_from_config(config: BuilderSourceConfig, endpoint_selections: dict[str, str], reachable_roles: set[str]):
+def _action_from_config(
+    config: BuilderSourceConfig,
+    endpoint_selections: dict[str, str],
+    reachable_roles: set[str],
+    voice_session_id: str | None = None,
+):
     from agentic_sdk.modules.action import DirectAnswerAction, GenerativeAction, ToolCallAction
 
     if "action" not in reachable_roles:
@@ -1500,10 +1515,15 @@ def _action_from_config(config: BuilderSourceConfig, endpoint_selections: dict[s
     if config.action_module == "VoiceAnswerAction":
         from agentic_sdk.audio.transport import PlayedElsewhere
         from agentic_sdk.modules.action.voice_answer import VoiceAnswerAction
+        from playground.services.voice_session import SessionSpeech, registry
 
+        # Speak into the session that is listening, so the words start playing
+        # as they are written. With nobody listening the module still needs a
+        # transport, and there is nowhere for the audio to go.
+        speech = SessionSpeech(voice_session_id) if registry.token(voice_session_id or "") else PlayedElsewhere()
         return VoiceAnswerAction(
             system_prompt=config.action_prompt,
-            speech=PlayedElsewhere(),
+            speech=speech,
             **endpoint_params_for_role("action", endpoint_selections),
         )
     if config.action_module == "CustomAction":
