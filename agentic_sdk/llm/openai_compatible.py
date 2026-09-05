@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+from agentic_sdk.core.cancellation import WorkflowInterrupted
+
 import json
 import time
 from dataclasses import dataclass
@@ -263,6 +265,7 @@ def chat_stream_json(
     structured_fields: tuple[str, ...] | list[str] = (),
     on_field: StructuredFieldCallback | None = None,
     idle_timeout_sec: float = 30.0,
+    should_stop: "Callable[[], bool] | None" = None,
 ) -> OpenAIChatResponse:
     parser = (
         IncrementalJsonFieldParser(structured_fields, on_field)
@@ -286,6 +289,7 @@ def chat_stream_json(
         response_format={"type": "json_object"},
         on_delta=handle_delta,
         idle_timeout_sec=idle_timeout_sec,
+        should_stop=should_stop,
     )
 
 
@@ -302,7 +306,15 @@ def chat_stream(
     response_format: dict[str, Any] | None = None,
     on_delta: DeltaCallback | None = None,
     idle_timeout_sec: float = 30.0,
+    should_stop: "Callable[[], bool] | None" = None,
 ) -> OpenAIChatResponse:
+    """Stream a completion.
+
+    ``should_stop`` is checked once per chunk. A long answer is where a run
+    spends its time, so it is also the only place worth interrupting: checking
+    between modules would leave someone talking over a reply that keeps coming
+    for several more seconds.
+    """
     resolved_messages = messages or [
         {"role": "system", "content": system or ""},
         {"role": "user", "content": user or ""},
@@ -329,6 +341,15 @@ def chat_stream(
     tool_calls: dict[int, dict[str, Any]] = {}
     try:
         for chunk in stream:
+            if should_stop is not None and should_stop():
+                # Raised as an interruption rather than a transport error, so
+                # that a module which does nothing special still reports being
+                # stopped as being stopped. Every module used to translate this
+                # itself, and any module that forgot answered the person with
+                # an apology for something they had done on purpose.
+                raise WorkflowInterrupted(
+                    "cancelled", {"produced_characters": len("".join(chunks))}
+                )
             resolved_model = _value(chunk, "model") or resolved_model
             usage = _value(chunk, "usage")
             if usage is not None:

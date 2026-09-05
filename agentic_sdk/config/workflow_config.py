@@ -61,6 +61,22 @@ _MODULE_CONFIG_PARAMS: dict[str, set[str]] = {
         "vision_query",
     },
     "text": {"welcome_message", "options", "importance", "api_key", "base_url", "model"},
+    # The transport is an object, like semantic retrieve's embedder: an audio
+    # source cannot be described by settings, so a spec that names a voice
+    # module is completed by whoever builds it. See ADR-0003.
+    "voice_text": {
+        "transport",
+        "speech_threshold",
+        "hangover_seconds",
+    },
+    "voice_answer": {
+        "api_key",
+        "base_url",
+        "model",
+        "temperature",
+        "system_prompt",
+        "speech",
+    },
     "text_image": {
         "welcome_message",
         "options",
@@ -119,6 +135,8 @@ def build_module(spec: ModuleSpec) -> Module:
         "text": modules.TextPerceive,
         "text_image": modules.TextImagePerceive,
         "tool_call_action": modules.ToolCallAction,
+        "voice_answer": modules.VoiceAnswerAction,
+        "voice_text": modules.VoiceTextPerceive,
     }
     try:
         constructor = registry[spec.kind]

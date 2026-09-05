@@ -415,6 +415,7 @@ def test_builder_choices_map_to_runtime_modules():
         "pass_through": "PassThroughPerceive",
         "text": "TextPerceive",
         "text_image": "TextImagePerceive",
+        "voice": "VoiceTextPerceive",
     }.items():
         config = spec_to_config(build_spec(("input_type", choice)))
         assert config.perceive_module == expected_module
@@ -431,11 +432,14 @@ def test_builder_choices_map_to_runtime_modules():
 
     free_text = spec_to_config(build_spec(("output_format", "free_text")))
     interactive = spec_to_config(build_spec(("output_format", "interactive")))
+    voice = spec_to_config(build_spec(("output_format", "voice")))
 
     assert free_text.action_module == "GenerativeAction"
     assert interactive.action_module == "ToolCallAction"
+    assert voice.action_module == "VoiceAnswerAction"
     assert "action" in reachable_workflow_roles(free_text)
     assert "action" in reachable_workflow_roles(interactive)
+    assert "action" in reachable_workflow_roles(voice)
 
 
 def test_key_vault_model_endpoint_requires_explicit_deployment_selection():
@@ -460,12 +464,18 @@ def test_deployment_options_follow_reachable_modules_and_require_selection():
 
     state = model_endpoints.endpoint_state(spec, {})
 
-    # The planner needs a model too, and the Builder must ask for it: leaving it
-    # off the list is what made a keyword or semantic agent fail at run time.
-    assert [requirement["role"] for requirement in state["requirements"]] == ["perceive", "plan", "retrieve", "action"]
-    assert state["selections"] == {"perceive": "", "plan": "", "retrieve": "", "action": ""}
-    assert state["binding_missing_roles"] == {"perceive": True, "plan": True, "retrieve": True, "action": True}
-    assert state["configured"] is True
+    # A keyword or semantic agent used to fail at run time for want of a
+    # planner's model. It is answered by sharing the answering step's, not by
+    # adding a question nobody could map to anything they chose.
+    # No planner here: the step exists, but nobody is asked to choose a model
+    # for something they did not pick.
+    assert [requirement["role"] for requirement in state["requirements"]] == ["perceive", "retrieve", "action"]
+    assert state["selections"] == {"perceive": "", "retrieve": "", "action": ""}
+    assert state["binding_missing_roles"] == {"perceive": True, "retrieve": True, "action": True}
+    # Nothing is bound yet, so nothing is configured. This line used to assert
+    # the opposite, which is how an agent with no deployments chosen could be
+    # finished in the Builder and then fail to start.
+    assert state["configured"] is False
     retrieve_requirement = next(r for r in state["requirements"] if r["role"] == "retrieve")
     assert {option["id"] for option in retrieve_requirement["options"]} == {"embedded-large", "embedded-small"}
 
@@ -2229,17 +2239,26 @@ def test_retrying_still_installs_the_planner_it_routes_back_to():
     spec = build_spec(("retrieve_policy", "keyword"), ("failure_policy", "retry"))
 
     assert (spec.get("plan") or {}).get("module") == "NextStepPlan"
-    assert "plan" in [r["role"] for r in model_endpoints.endpoint_state(spec, {})["requirements"]]
+    # The step is installed; the person is not asked which model it runs on.
+    # It uses the one they chose for the answer — see the planning-step test
+    # below.
+    assert "plan" not in [r["role"] for r in model_endpoints.endpoint_state(spec, {})["requirements"]]
 
 
-def test_the_planner_uses_its_own_binding_not_the_action_role():
-    """It borrowed the action role's endpoint, so binding reflect did not help."""
+def test_the_planner_runs_without_a_binding_of_its_own():
+    """Asked for nothing, and still there when the agent runs.
+
+    A person who chose 再查一次再回答 answered a question about behaviour, not
+    about models. Requiring a binding for the step that answer installed meant
+    a review page with five ticks, a lit 完成, and a runner that stopped on a
+    deployment nobody had been offered.
+    """
     spec = build_spec(("failure_policy", "retry"))
 
     roles = [r["role"] for r in model_endpoints.endpoint_state(spec, {})["requirements"]]
-    assert "plan" in roles
+    assert "plan" not in roles
 
-    workflow = runner_service.build_workflow(spec, {"plan": "gpt-54", "reflect": "gpt-54"})
+    workflow = runner_service.build_workflow(spec, {"action": "gpt-54", "reflect": "gpt-54"})
 
     assert workflow.plan is not None
 
@@ -2453,3 +2472,52 @@ def test_an_uploaded_document_can_be_taken_back_off(tmp_path, monkeypatch):
         missing = client.post("/playground/builder/uploads/delete", json={"name": "never-uploaded.md"})
         assert missing.status_code == 404
         assert missing.get_json()["updated"] is False
+
+
+def test_an_unbound_deployment_is_not_a_configured_one():
+    """The Builder said ready, the runner then died on the missing binding.
+
+    A role with no deployment chosen was reported as configured, because the
+    credential check short-circuits when nothing is bound and nothing folded
+    the binding back in. The readiness check passed, the person pressed 完成,
+    and initialisation failed with 找不到可用的 Key Vault 模型端點 — with no
+    way back to the question that would have fixed it.
+    """
+    spec = build_spec(("input_type", "voice"), ("output_format", "voice"), ("failure_policy", "retry"))
+
+    state = model_endpoints.endpoint_state(
+        spec, {"action": "gpt-54", "transcribe": "transcribe", "tts": "tts"}
+    )
+
+    assert state["binding_missing_roles"]["reflect"] is True
+    assert state["configured_roles"]["reflect"] is False
+    assert state["configured"] is False
+
+
+def test_the_planning_step_is_never_a_question_of_its_own():
+    """It is a step the agent gained, not a choice the person made.
+
+    Choosing 再查一次再回答 or 語意查詢 gives the agent a step that works out
+    what to look up next, and that step needs a model. Nobody was ever asked
+    which one: it belongs to no question, so the review page — where every
+    deployment is chosen — had nowhere to put it. Five ticks, a lit 完成
+    button, and then the runner could not start.
+
+    It runs on the model chosen for the answer instead. The person sees the
+    same five questions they always saw.
+    """
+    spec = build_spec(("retrieve_policy", "semantic"), ("output_format", "free_text"))
+
+    state = model_endpoints.endpoint_state(
+        spec, {"perceive": "gpt-54", "retrieve": "embedded-large", "action": "gpt-54"}
+    )
+
+    assert "plan" not in [requirement["role"] for requirement in state["requirements"]]
+    assert state["configured"] is True
+
+
+def test_the_planning_step_runs_on_the_model_that_answers():
+    """Not the search model: that one turns text into vectors and cannot plan."""
+    from playground.services.runner_service import _plan_endpoint_role
+
+    assert _plan_endpoint_role({"action": "gpt-54", "retrieve": "embedded-large"}, {"action", "retrieve"}) == "action"

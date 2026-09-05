@@ -4,12 +4,18 @@
 
 這份教材說明如何用 Python 撰寫可放進工作流程的模組。五大模組都遵循同一個基本寫法：物件提供 `name`，以 `__call__(state)` 接收目前狀態，完成後回傳 `ModuleOutput`。
 
-## 你會學到
+## 涵蓋內容
 
 - 看懂模組共同的最小寫法。
 - 分辨 `WorkflowState`、`ModuleOutput`、`payload` 與 `context_updates` 各自保存的資料。
 - 知道 `next_module` 如何指定下一個步驟。
 - 用一個小型回覆步驟確認模組是否能放入工作流程。
+
+## 會跑很久的模組要看得懂停止訊號
+
+`WorkflowState` 上有 `cancel`（一個 `CancellationToken` 或 `None`）與 `should_stop()`。工作流會在模組之間檢查，但**一個模組內部跑很久就必須自己看**——否則有人請它停下來時，它會把整件事做完才發現。
+
+會逐步把內容送給使用者的模組，另外用 `state.report_delivered(...)` 說明實際交付了多少。透過 `emit_token_delta` 送出的內容會自動累積，所以只有「交付方式不是 delta」的模組才需要自己回報。
 
 ## 相關文件
 

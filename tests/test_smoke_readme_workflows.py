@@ -4,7 +4,8 @@ import unittest
 from unittest.mock import patch
 
 from agentic_sdk import Workflow
-from agentic_sdk.modules import DirectAnswerAction, GenerativeAction, KeywordRetrieve, PassThroughPerceive, ToolCallAction
+from agentic_sdk.audio import FakeAudioInput
+from agentic_sdk.modules import DirectAnswerAction, GenerativeAction, KeywordRetrieve, PassThroughPerceive, ToolCallAction, VoiceTextPerceive
 
 from support import FoundryOpenAILikeClient
 
@@ -119,6 +120,28 @@ class ReadmeWorkflowSmokeTests(unittest.TestCase):
         result = workflow.run("請介紹 Agentic SDK")
 
         self.assertEqual("自訂 Action 回傳：Agentic SDK 讓你用 workflow 組裝 agent 行為。", result.final_message)
+
+
+    def test_readme_voice_example_path(self) -> None:
+        """The 1-1 example, with the microphone replaced by a transport a test can drive."""
+        audio = FakeAudioInput()
+        perceive = VoiceTextPerceive(transport=audio)
+        workflow = Workflow(
+            workflow_name="語音知識問答 Agent",
+            perceive=perceive,
+            retrieve=KeywordRetrieve(
+                items=[{"keywords": ["保固"], "content": "本產品保固十二個月。"}],
+            ),
+            action=DirectAnswerAction(),
+        )
+
+        loud = b"\x00\x20" * 800
+        for chunk in [loud, loud]:
+            perceive.hear(chunk)
+        audio.transcribe("保固多久？")
+
+        self.assertTrue(perceive.pending_input())
+        self.assertEqual("本產品保固十二個月。", workflow.run().final_message)
 
 
 if __name__ == "__main__":

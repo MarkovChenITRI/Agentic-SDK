@@ -29,7 +29,7 @@
 
 `SemanticRetrieve` 依語意相似度從知識來源取回內容。當流程需要從較長知識片段裡找出真正相關的內容時，這個模組會把檢索重心放在語意接近度。
 
-`SemanticRetrieve` 使用 `sources` 指定來源檔案或資料夾，並以 `saved_path` 指定保存位置。SDK 會先把來源複製到 `saved_path/source-files/`，再從這份副本建立索引；向量索引存放在 `saved_path/vectorstore/`。你的程式可在之後保存或搬移整個 `saved_path`，保留來源副本與索引資料。需要自行提供向量模型或知識庫時，可傳入 `embedder` 與 `knowledge_base`。
+`SemanticRetrieve` 使用 `sources` 指定來源檔案或資料夾，並以 `saved_path` 指定保存位置。SDK 會先把來源複製到 `saved_path/source-files/`，再從這份副本建立索引；向量索引存放在 `saved_path/vectorstore/`。呼叫端可在之後保存或搬移整個 `saved_path`，保留來源副本與索引資料。需要自行提供向量模型或知識庫時，可傳入 `embedder` 與 `knowledge_base`。
 
 `top_k`、`saved_path`、`source-files` 與 `vectorstore` 的預設值由 `agentic_sdk.defaults` 定義。
 

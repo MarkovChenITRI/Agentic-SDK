@@ -33,15 +33,15 @@ Workflow(
 )
 ```
 
-`workflow_name` 用來標示這條流程的名稱；未指定時使用 `default`。`description` 是流程說明文字，會保存在 `Workflow` 與 `WorkflowState`，供你的程式或自訂模組讀取。省略 `events_schema` 時，SDK 會送出每個實際執行步驟的開始、完成與中止事件，並提供模型輸出文字與完整結構化欄位。傳入 `events_schema` 後，可指定要觀察的步驟、中文名稱與欄位。`Workflow` 會為未指定的步驟補上內建實作；每次執行實際經過哪些步驟，由前一步回傳的 `next_module` 決定。
+`workflow_name` 用來標示這條流程的名稱；未指定時使用 `default`。`description` 是流程說明文字，會保存在 `Workflow` 與 `WorkflowState`，供呼叫端或自訂模組讀取。省略 `events_schema` 時，SDK 會送出每個實際執行步驟的開始、完成與中止事件，並提供模型輸出文字與完整結構化欄位。傳入 `events_schema` 後，可指定要觀察的步驟、中文名稱與欄位。`Workflow` 會為未指定的步驟補上內建實作；每次執行實際經過哪些步驟，由前一步回傳的 `next_module` 決定。
 
 ### 用程式直接建立
 
-直接在 Python 程式裡建立 `Workflow`，適合流程結構固定、設定和應用程式一起維護的情況。你可以在建構子中放入需要的模組，並在同一處寫清楚名稱、說明與事件設定。
+直接在 Python 程式裡建立 `Workflow`，適合流程結構固定、設定和應用程式一起維護的情況。需要的模組放進建構子，名稱、說明與事件設定寫在同一處。
 
 ### 用設定資料建立
 
-當你的應用程式要把流程選項保存成 JSON、YAML 或資料庫資料時，可先建立一份設定資料，再由 SDK 組成工作流程。`WorkflowConfig` 表示整條流程，`ModuleSpec` 表示其中一個步驟的種類與參數，`build_workflow()` 則依設定建立 `Workflow`。
+流程選項要保存成 JSON、YAML 或資料庫資料時，先建立一份設定資料，再由 SDK 組成工作流程。`WorkflowConfig` 表示整條流程，`ModuleSpec` 表示其中一個步驟的種類與參數，`build_workflow()` 則依設定建立 `Workflow`。
 
 ```python
 from agentic_sdk import GateConfig, ModuleSpec, WorkflowConfig, build_workflow
@@ -68,7 +68,7 @@ result = workflow.run("我要申請理賠，需要先準備什麼？")
 print(result.final_message)
 ```
 
-設定資料中的步驟種類使用固定名稱，SDK 會依名稱建立對應模組，並檢查參數是否適用。常用種類包括 `pass_through`、`text`、`text_image`、`next_step`、`keyword`、`pass_through_retrieve`、`semantic`、`direct_answer`、`generative`、`tool_call_action`、`response_check` 與 `evidence_check`。程式直接建立與設定資料建立，最後都會得到相同的 `Workflow` 物件和執行方式。
+設定資料中的步驟種類使用固定名稱，SDK 會依名稱建立對應模組，並檢查參數是否適用。種類名稱包括 `pass_through`、`text`、`text_image`、`voice_text`、`next_step`、`keyword`、`pass_through_retrieve`、`semantic`、`direct_answer`、`generative`、`tool_call_action`、`voice_answer`、`response_check` 與 `evidence_check`。語音的兩個種類以物件承載音訊來源：`voice_text` 收 `transport`，`voice_answer` 收 `speech`，與 `semantic` 收 `embedder` 的方式相同。程式直接建立與設定資料建立，最後都會得到相同的 `Workflow` 物件和執行方式。
 
 執行期間有四層資料分工：
 
@@ -115,9 +115,69 @@ config.gates = GateConfig(max_node_hops=20, max_revisit=3, timeout_sec=120.0)
 workflow = build_workflow(config)
 ```
 
+## 執行參數
+
+`run()` 與 `stream()` 接受同一組參數。兩者的差別在返回形式：`run()` 完成後返回 `WorkflowResult`，`stream()` 返回逐段產生 Action 文字的 iterator，完成後由 `stream.result` 取得同一份結果。
+
+| 參數 | 型態 | 說明 |
+| --- | --- | --- |
+| `user_message` | `str \| None` | 這一輪的輸入。模組已透過 `pending_input()` 收取輸入時可省略。 |
+| `memory` | `MemoryStore \| None` | 這一輪使用的對話記憶；省略時使用工作流自己持有的那一份。 |
+| `memory_store` | `PersistentMemory \| None` | 跨 session 的持久化記憶。 |
+| `session_id` | `str \| None` | 對話識別碼，寫入每一則回合。 |
+| `workflow_id` | `str \| None` | 工作流識別碼，寫入每一則回合。 |
+| `attachments` | `list \| None` | 這一輪的附件。 |
+| `cancel` | `CancellationToken \| None` | 停止這一次執行的權杖，見下一節。 |
+| `event_callback` | `Callable \| None` | 接收 stage、token_delta 與 structured_field 事件。 |
+| `events_schema` | `dict \| None` | 覆寫事件的階段名稱與文案。 |
+| `yield_action_deltas` | `bool \| None` | 僅 `stream()` 適用。提供 `event_callback` 時預設不再由 iterator 產生 Action token，避免兩條通道重複渲染；設為 `True` 則兩者同時輸出。 |
+
+## 被打斷
+
+執行上限是流程自我中止；**被打斷**是有人請它停下來，兩者不同，結果也分得開。
+
+`run()` 與 `stream()` 都收一個 `cancel`。任何持有這個權杖的人——背景執行緒、另一條連線、正在聽的模組——都可以要求停止：
+
+```python
+from agentic_sdk.core.cancellation import CancellationToken
+
+token = CancellationToken()
+result = workflow.run("保固多久？", cancel=token)
+```
+
+| 欄位 | 中止（上限） | 被打斷 |
+| --- | --- | --- |
+| `result.aborted` | `True` | `False` |
+| `result.abort_reason` | 中止原因 | `None` |
+| `result.interrupted` | `False` | `True` |
+| `result.interrupt_payload` | `{}` | 含 `reason` 與 `delivered` |
+
+分開的理由是呈現：上限是流程保護自己，該顯示錯誤；被打斷是使用者在主導，**對一件他故意做的事顯示錯誤是荒謬的**。
+
+### 這一輪記下的是已交付的內容
+
+被打斷的那一輪，記憶留下的不是模型產出的內容，而是**實際到達使用者的內容**。有人在看串流輸出時，`emit_token_delta` 會在送出的當下累積；一段被中斷的文字回覆因此記下使用者已經讀到的那半句，而不是整段，也不是空的。
+
+`result.interrupt_payload["delivered"]` 是同一份內容。這與音訊無關——螢幕會交付，喇叭也會，而核心不被允許知道是哪一種。
+
+執行途中，模組可以從 `state.delivered_so_far` 讀到目前為止交付了多少，並用 `state.report_delivered(...)` 更正它。透過 `emit_token_delta` 送出的內容會自動累積，所以**只有交付方式不是 delta 的模組**才需要自己回報——例如一個把音訊交給喇叭的模組。
+
+### 話還沒說出口就先問清楚
+
+有些模組在工作流開始前就已經拿到這一輪的輸入。語音是最明顯的例子：話什麼時候來取決於人什麼時候想講，不是取決於呼叫端什麼時候呼叫 `run()`。
+
+這種模組實作 `pending_input()`，回傳它已經收下、還沒用掉的輸入；`Workflow.run()` 因此不必再被告知一次：
+
+```python
+if perceive.pending_input():
+    result = workflow.run()          # 不必再傳一次使用者說了什麼
+```
+
+這個約定**不是語音專屬**，任何模組都可以實作它——它承認的是「呼叫端不一定是最先知道這一輪要處理什麼的人」。收下的內容用掉就沒了，不會殘留到下一輪。
+
 ## 執行事件
 
-如果呼叫 `run()` 或 `stream()` 時傳入 `event_callback`，省略 `events_schema` 的 `Workflow` 會對所有執行到的模組，在開始、完成或中止時送出 `stage` event，並送出完整的結構化 JSON 欄位。自訂 `events_schema` 時，則只對列出的模組與 `fields` 送出事件。你的應用程式可在開始時更新狀態，並在完成時讀取 SDK 依設定整理的欄位：
+如果呼叫 `run()` 或 `stream()` 時傳入 `event_callback`，省略 `events_schema` 的 `Workflow` 會對所有執行到的模組，在開始、完成或中止時送出 `stage` event，並送出完整的結構化 JSON 欄位。自訂 `events_schema` 時，則只對列出的模組與 `fields` 送出事件。呼叫端在開始時更新狀態，並在完成時讀取 SDK 依設定整理的欄位：
 
 ```python
 def on_event(event):
@@ -171,9 +231,9 @@ result = stream.result
 
 ## README 流程對應
 
-README 裡的幾個範例，實際上都是在示範同一個公開組裝模型可以如何替換節點組合：你可以保留預設實作，也可以只替換其中一個節點，或另外注入自訂節點物件。對 `Workflow` 來說，這些差異都會回到同一套執行規則，也就是讀取 `WorkflowState`、必要時補進最新 user turn、執行目前節點、根據 `next_module` 推進下一步，最後把 assistant turn 追加回當前的 `MemoryStore` 實作。
+README 裡的幾個範例示範同一個公開組裝模型的三種替換方式：保留預設實作、只替換其中一個節點，或注入自訂節點物件。對 `Workflow` 來說，這些差異都會回到同一套執行規則，也就是讀取 `WorkflowState`、必要時補進最新 user turn、執行目前節點、根據 `next_module` 推進下一步，最後把 assistant turn 追加回當前的 `MemoryStore` 實作。
 
-如果你要進一步看 workflow 執行時由哪一層承接這份狀態，下一步應該看 [記憶類型](memory-types.md)。
+要進一步了解 workflow 執行時由哪一層承接這份狀態，下一步看 [記憶類型](memory-types.md)。
 
 ## Entities
 
@@ -198,7 +258,7 @@ README 裡的幾個範例，實際上都是在示範同一個公開組裝模型�
 
 ## 文件站閱讀路徑
 
-| 你現在要做的事 | 先看哪一頁 | 再看哪一頁 |
+| 要做的事 | 先看哪一頁 | 再看哪一頁 |
 | --- | --- | --- |
 | 理解 workflow 怎麼組 | 工作流程 | [記憶類型](memory-types.md) |
 | 理解 workflow 預設使用哪種記憶體 | [記憶類型](memory-types.md) | [模組家族](../modules/index.md) |

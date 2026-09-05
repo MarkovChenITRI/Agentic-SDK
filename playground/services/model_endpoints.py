@@ -71,7 +71,12 @@ def endpoint_state(spec: dict, selections: dict[str, str] | None) -> dict[str, o
         for requirement in requirements
     }
     configured_roles = {
+        # Bound *and* holding credentials. The credential check short-circuits
+        # when nothing is bound, so on its own it reported an unchosen
+        # deployment as configured — the Builder let the agent be finished and
+        # the runner then failed to start on the binding that was never made.
         requirement.role: not credential_missing_roles[requirement.role]
+        and not binding_missing_roles[requirement.role]
         for requirement in requirements
     }
     return {
@@ -131,14 +136,24 @@ def _deployment_requirements(config: BuilderSourceConfig) -> list[OpenAIRequirem
     reachable_roles = reachable_workflow_roles(config)
     if "perceive" in reachable_llm_roles:
         requirements.append(OpenAIRequirement("perceive", "輸入解析器", config.perceive_module, "Perceive"))
-    if "plan" in reachable_llm_roles:
-        requirements.append(OpenAIRequirement("plan", "步驟規劃器", "NextStepPlan", "Plan"))
+    # The planning step is deliberately not asked about. It is a step the agent
+    # gained from an answer the person gave — 再查一次再回答, or 語意查詢 —
+    # not a choice they made, and it belongs to no question. Every deployment
+    # is chosen under its own question on the review page, so there was nowhere
+    # to put it: five ticks, a lit 完成, and a runner that could not start. It
+    # runs on the model chosen for the answer instead.
     if "retrieve" in reachable_roles and config.retrieve_module == "SemanticRetrieve":
         requirements.append(OpenAIRequirement("retrieve", "語意搜尋", config.retrieve_module, "Retrieve"))
     if "action" in reachable_llm_roles:
         requirements.append(OpenAIRequirement("action", "模型回覆器", config.action_module, "Action"))
     if "reflect" in reachable_llm_roles:
         requirements.append(OpenAIRequirement("reflect", "回覆檢核器", "ResponseCheckReflect", "Reflect"))
+    # Listening and speaking are asked for separately because they are separate
+    # agents: someone may want to talk and read, or type and listen.
+    if config.perceive_module == "VoiceTextPerceive" and "perceive" in reachable_roles:
+        requirements.append(OpenAIRequirement("transcribe", "語音聽寫", config.perceive_module, "Perceive"))
+    if config.action_module == "VoiceAnswerAction" and "action" in reachable_roles:
+        requirements.append(OpenAIRequirement("tts", "語音合成", config.action_module, "Action"))
     return requirements
 
 
@@ -165,7 +180,14 @@ def _missing_endpoint_secrets(role: str, endpoint: ModelEndpoint | None) -> list
 
 def _api_key_for_role(endpoint: ModelEndpoint, role: str) -> str:
     settings = key_vault_settings()
-    for configured_endpoint in (*settings.chat_endpoints, *settings.embedding_endpoints):
+    # Every kind of endpoint, because a role that is missing from this list
+    # reports its key as absent no matter what the key vault holds — and the
+    # Builder then refuses to finish an agent nobody can fix.
+    for configured_endpoint in (
+        *settings.chat_endpoints,
+        *settings.embedding_endpoints,
+        *settings.speech_endpoints,
+    ):
         if configured_endpoint.id == endpoint.id:
             return configured_endpoint.api_key
     return ""
@@ -178,6 +200,8 @@ def _role_label(role: str) -> str:
         "retrieve": "語意搜尋",
         "action": "模型回覆器",
         "reflect": "回覆檢核器",
+        "transcribe": "語音聽寫",
+        "tts": "語音合成",
     }.get(role, role)
 
 
@@ -210,7 +234,28 @@ def _embedding_endpoints() -> tuple[ModelEndpoint, ...]:
 def _endpoint_options_for_role(role: str) -> tuple[ModelEndpoint, ...]:
     if role == "retrieve":
         return _embedding_endpoints()
+    if role in {"transcribe", "tts"}:
+        return _speech_endpoints(role)
     return _model_endpoints()
+
+
+def _speech_endpoints(role: str) -> tuple[ModelEndpoint, ...]:
+    """Only the deployment that does this job — the two are not interchangeable.
+
+    Offering both under each role would let someone bind speech synthesis to
+    the listening step and find out at the first word.
+    """
+    return tuple(
+        ModelEndpoint(
+            id=endpoint.id,
+            label=_display_label_for_model(endpoint.deployment_name),
+            model=endpoint.deployment_name,
+            base_url=endpoint.endpoint,
+            secret_prefix=endpoint.id.upper(),
+        )
+        for endpoint in key_vault_settings().speech_endpoints
+        if endpoint.id == role
+    )
 
 
 def _endpoints_by_id(endpoints: tuple[ModelEndpoint, ...]) -> dict[str, ModelEndpoint]:

@@ -2,6 +2,7 @@ import { postJson, postJsonStream } from "../shared/api-client.js";
 import { bindAttachmentPicker } from "./artifact-panel.js";
 import { bindCodePreview } from "./code-preview.js?v=delegated-trigger-v1";
 import { bindInputComposer } from "./input-composer.js";
+import { bindVoiceConversation } from "./voice-conversation.js";
 import { clearProcessEvents, setProcessEvents, setResultMessage, setToolCallPanels, showLiveProcessEvent, showResultSurface, streamResultMarkdown } from "./result-surface.js?v=generated-choice-stepper-v1";
 import { showSavePanel } from "./save-panel.js";
 
@@ -63,6 +64,7 @@ let workflowDescriptionRequest = null;
 const workflowDescriptionPlaceholder = workflowDescriptionInput?.getAttribute("placeholder") || workflowDescriptionDisplay?.dataset.placeholder || "";
 let lastSaveTrigger = null;
 let runnerInitialized = !initializationOverlay;
+let heldUntilReady = null;
 const initialSaveStatusText = saveStatus?.textContent?.trim() || "";
 let savedWorkflowName = initialSaveStatusText === "尚未儲存" ? null : workflowName;
 let savedWorkflowDescription = initialSaveStatusText === "尚未儲存" ? null : workflowDescription;
@@ -153,6 +155,11 @@ function updateInitializationProgress(event) {
 function finishInitialization() {
 	runnerInitialized = true;
 	setRunnerChatEnabled(true);
+	if (heldUntilReady) {
+		const held = heldUntilReady;
+		heldUntilReady = null;
+		runWorkflow(held.payload, held.options);
+	}
 	if (initializationOverlay) {
 		initializationOverlay.classList.add("is-complete");
 		window.setTimeout(() => {
@@ -204,6 +211,10 @@ function actionReplyFrom(result) {
 function executionStatusFrom(result) {
 	if (result.status === "completed") {
 		return "已產生回覆。";
+	}
+	if (result.status === "interrupted") {
+		// They interrupted on purpose. Showing them an error for it is absurd.
+		return "你插話了，我先停下來聽。";
 	}
 	if (result.status === "aborted") {
 		return "流程已中止。";
@@ -813,7 +824,15 @@ workflowDescriptionInput?.addEventListener("blur", async () => {
 
 async function runWorkflow(payload, { displayMessage, showUserMessage = true } = {}) {
 	if (!runnerInitialized) {
+		// Held rather than refused. A voice agent opens its microphone the
+		// moment the page loads, so the first thing anyone says arrives before
+		// the modules have finished warming — telling them to say it again is
+		// asking them to wait for something they cannot see.
+		heldUntilReady = { payload, options: { displayMessage, showUserMessage } };
 		showSavePanel(savePanel, "Agent 還在初始化，完成後才能開始對話。");
+		if (runStatus) {
+			runStatus.textContent = "聽到了，Agent 正在啟動，好了就回答你。";
+		}
 		return;
 	}
 	const runId = ++activeRunId;
@@ -821,6 +840,11 @@ async function runWorkflow(payload, { displayMessage, showUserMessage = true } =
 	const submittedToolCall = payload?.tool_call_submission || null;
 	const requestMessage = prompt || (submittedToolCall ? toolSubmissionDisplay(submittedToolCall) : "");
 	const requestPayload = { message: requestMessage };
+	if (payload?.voice_session_id) {
+		// Without this the run is not registered against the listening session,
+		// so nothing can interrupt it and its answer is spoken to nobody.
+		requestPayload.voice_session_id = payload.voice_session_id;
+	}
 	if (Array.isArray(payload?.attachments) && payload.attachments.length) {
 		requestPayload.attachments = payload.attachments;
 	}
@@ -951,8 +975,80 @@ async function runWorkflow(payload, { displayMessage, showUserMessage = true } =
 }
 
 bindInputComposer(form, async (payload) => {
-	await runWorkflow(payload);
+	await runWorkflow({ ...payload, voice_session_id: voice?.sessionId || "" });
 }, { clearAttachments: () => attachmentPicker?.clear() });
+
+const voiceBar = document.querySelector("[data-voice-bar]");
+const voiceStateText = document.querySelector("[data-voice-state-text]");
+const voiceBars = document.querySelectorAll("[data-voice-spectrum] i");
+const voiceToggles = document.querySelectorAll("[data-voice-toggle]");
+
+const VOICE_STATES = {
+	starting: "正在開啟麥克風…",
+	listening: "聆聽中，直接開口就好",
+	heard: "聽到了",
+	thinking: "正在想…",
+	speaking: "回答中 · 開口就能打斷",
+	interrupted: "好，我停下來聽你說",
+	paused: "麥克風已暫停 · 現在用鍵盤",
+	denied: "需要麥克風權限才能聽你說話",
+	unavailable: "這個 Playground 還沒有語音服務",
+	closed: "語音連線結束了，重新整理可以再開始",
+};
+
+function showVoiceState(state, detail) {
+	if (!voiceBar) {
+		return;
+	}
+	voiceBar.dataset.voiceState = state;
+	if (voiceStateText) {
+		voiceStateText.textContent = state === "heard" && detail ? `聽到了：「${detail}」` : VOICE_STATES[state] || state;
+	}
+	// Exactly one input exists at a time: in voice mode the typing row is not
+	// dimmed, it is not there. Two inputs racing produce two turns for one
+	// question, and the agent answers something the person was still saying.
+	const typing = state === "paused" || state === "denied" || state === "unavailable" || state === "closed";
+	runnerPage?.classList.toggle("is-voice-live", !typing);
+	if (messageInput) {
+		messageInput.disabled = !typing;
+		messageInput.placeholder = typing ? "問問 Agent" : "語音模式進行中，想打字請按「用打字的」";
+	}
+	if (submitButton) {
+		submitButton.disabled = !typing;
+	}
+}
+
+const voice = bindVoiceConversation(runnerPage, {
+	onTranscript: (text) => {
+		runWorkflow({ message: text, voice_session_id: voice?.sessionId || "" });
+		voice?.enter("thinking");
+	},
+	onStatus: (message) => {
+		if (runStatus) {
+			runStatus.textContent = message;
+		}
+	},
+	onState: showVoiceState,
+	onSpectrum: (bands) => {
+		voiceBars.forEach((bar, index) => {
+			// A floor so the row never collapses into nothing: a flat line reads
+			// as broken, and silence is not the same as not working.
+			const height = Math.max(0.08, Math.min(1, (bands[index] || 0) * 1.6));
+			bar.style.transform = `scaleY(${height.toFixed(3)})`;
+		});
+	},
+});
+
+voiceToggles.forEach((toggle) => {
+	toggle.addEventListener("click", () => {
+		if (toggle.dataset.voiceToggle === "voice") {
+			voice?.resume();
+			return;
+		}
+		voice?.pause();
+		messageInput?.focus();
+	});
+});
 
 starterQuestions?.addEventListener("click", (event) => {
 	const button = event.target.closest?.("[data-starter-question-button]");

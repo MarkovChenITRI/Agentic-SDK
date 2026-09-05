@@ -13,6 +13,9 @@ import httpx
 DEFAULT_KEY_VAULT_NAME = "agentic-sdk-models"
 _CHAT_ENDPOINT_PREFIXES = ("GPT-54", "GPT-55")
 _EMBEDDING_ENDPOINT_PREFIXES = ("EMBEDDED-LARGE", "EMBEDDED-SMALL")
+# Speech is configured the same way as embeddings — key, endpoint, deployment —
+# so it reuses that shape rather than inventing a third one.
+_SPEECH_ENDPOINT_PREFIXES = ("TRANSCRIBE", "TTS")
 _TEST_KEY_VAULT_VALUES = {
     "AI-HUB-BASE-URL": "https://aihub.test",
     "AI-HUB-PLAYGROUND-ORIGIN": "https://playground.test",
@@ -28,6 +31,12 @@ _TEST_KEY_VAULT_VALUES = {
     "EMBEDDED-SMALL-API-KEY": "test-embedded-small-key",
     "EMBEDDED-SMALL-ENDPOINT": "https://models.test/openai/v1",
     "EMBEDDED-SMALL-DEPLOYMENT-NAME": "text-embedding-3-small",
+    "TRANSCRIBE-API-KEY": "test-transcribe-key",
+    "TRANSCRIBE-BASE-URL": "https://speech.test/audio/transcriptions",
+    "TRANSCRIBE-DEPLOYMENT-NAME": "gpt-4o-transcribe",
+    "TTS-API-KEY": "test-tts-key",
+    "TTS-BASE-URL": "https://speech.test/audio/speech",
+    "TTS-DEPLOYMENT-NAME": "gpt-4o-mini-tts",
 }
 
 
@@ -60,10 +69,26 @@ class EmbeddingEndpointSettings:
 
 
 @dataclass(frozen=True)
+class SpeechEndpointSettings:
+    """A listening or speaking deployment.
+
+    The same four fields as an embedding endpoint and a different thing
+    entirely: naming it after the shape it happens to share is how a speech
+    deployment ended up being looked up in the embedding list.
+    """
+
+    id: str
+    api_key: str
+    endpoint: str
+    deployment_name: str
+
+
+@dataclass(frozen=True)
 class KeyVaultSettings:
     ai_hub: AiHubSettings
     chat_endpoints: tuple[ChatEndpointSettings, ...]
     embedding_endpoints: tuple[EmbeddingEndpointSettings, ...]
+    speech_endpoints: tuple[SpeechEndpointSettings, ...] = ()
 
 
 def key_vault_settings() -> KeyVaultSettings:
@@ -90,10 +115,16 @@ def _settings_from_values(values: dict[str, str]) -> KeyVaultSettings:
         for prefix in _EMBEDDING_ENDPOINT_PREFIXES
         if (endpoint := _embedding_endpoint_settings(normalized, prefix)) is not None
     )
+    speech_endpoints = tuple(
+        endpoint
+        for prefix in _SPEECH_ENDPOINT_PREFIXES
+        if (endpoint := _speech_endpoint_settings(normalized, prefix)) is not None
+    )
     return KeyVaultSettings(
         ai_hub=AiHubSettings(base_url=base_url.rstrip("/"), playground_origin=playground_origin.rstrip("/")),
         chat_endpoints=chat_endpoints,
         embedding_endpoints=embedding_endpoints,
+        speech_endpoints=speech_endpoints,
     )
 
 
@@ -120,7 +151,19 @@ def _embedding_endpoint_settings(values: dict[str, str], prefix: str) -> Embeddi
     secret_names = (f"{prefix}-API-KEY", f"{prefix}-ENDPOINT", f"{prefix}-DEPLOYMENT-NAME")
     if not any(values.get(name) for name in secret_names):
         return None
-    return EmbeddingEndpointSettings(
+    return SpeechEndpointSettings(
+        id=prefix.lower(),
+        api_key=_required_setting(values, secret_names[0]),
+        endpoint=_required_setting(values, secret_names[1]),
+        deployment_name=_required_setting(values, secret_names[2]),
+    )
+
+
+def _speech_endpoint_settings(values: dict[str, str], prefix: str) -> SpeechEndpointSettings | None:
+    secret_names = (f"{prefix}-API-KEY", f"{prefix}-BASE-URL", f"{prefix}-DEPLOYMENT-NAME")
+    if not any(values.get(name) for name in secret_names):
+        return None
+    return SpeechEndpointSettings(
         id=prefix.lower(),
         api_key=_required_setting(values, secret_names[0]),
         endpoint=_required_setting(values, secret_names[1]),

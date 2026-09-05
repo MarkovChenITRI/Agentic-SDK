@@ -14,6 +14,11 @@ const reviewEndpointStepByRole = {
   retrieve: "retrieve_policy",
   action: "output_format",
   reflect: "failure_policy",
+  // A role missing from this table is dropped from the page without a word,
+  // so a voice agent asked for deployments nobody could pick. Listening
+  // belongs to the question about input, speaking to the one about output.
+  transcribe: "input_type",
+  tts: "output_format",
 };
 
 const dependencyRules = {

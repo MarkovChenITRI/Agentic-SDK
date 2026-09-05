@@ -3,9 +3,12 @@
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol, TypedDict, runtime_checkable
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypedDict, runtime_checkable
 
 from agentic_sdk.core.entities import Attachment, ContextEntry, ContextEntryType, Entities
+
+if TYPE_CHECKING:
+    from agentic_sdk.core.cancellation import CancellationToken
 from agentic_sdk.memory.in_context import InContextMemory, MemoryStore
 from agentic_sdk.memory.protocol import PersistentMemory
 
@@ -40,6 +43,11 @@ class WorkflowState:
     last_action_error: dict[str, Any] | None = None
     last_workflow_error: dict[str, str] | None = None
     attachments: list[Attachment] = field(default_factory=list)
+    # Carried on the state because that is what every module already receives.
+    # A module that streams can offer it to the transport without the workflow
+    # having to reach inside the module to wire anything up.
+    cancel: "CancellationToken | None" = None
+    delivered_so_far: str = ""
     _token_delta_callback: Callable[[str, str, dict[str, Any]], None] | None = field(
         default=None,
         init=False,
@@ -129,6 +137,24 @@ class WorkflowState:
             return self.memory
         return None
 
+    def report_delivered(self, delivered_so_far: str) -> None:
+        """Record how much of the answer actually reached the person.
+
+        Only whoever did the delivering knows this, and it is not the same as
+        how much the model has written: an answer cut off halfway leaves a tail
+        that exists only on paper. Carrying that tail forward would let the next
+        turn refer back to something nobody received.
+
+        Channel-neutral on purpose. A screen delivers and so does a speaker,
+        and the core is not allowed to know which — see ADR-0001 and ADR-0002.
+        """
+        self.delivered_so_far = str(delivered_so_far or "")
+
+    def should_stop(self) -> bool:
+        """Whether whoever started this run has asked for it to stop."""
+        token = self.cancel
+        return bool(token is not None and token.cancelled)
+
     def set_token_delta_callback(
         self,
         callback: Callable[[str, str, dict[str, Any]], None] | None,
@@ -149,6 +175,9 @@ class WorkflowState:
         resolved_content = str(content)
         if not resolved_content:
             return
+        # Emitted to somebody, so it has been delivered. This is the only place
+        # the core learns what reached a person without being told outright.
+        self.delivered_so_far += resolved_content
         self._token_delta_callback(str(module), resolved_content, dict(metadata or {}))
 
     def set_structured_field_callback(
@@ -201,6 +230,9 @@ class WorkflowResult:
     session_id: str = "default"
     aborted: bool = False
     abort_reason: str | None = None
+    # Told apart from aborted so a caller can resume rather than apologise.
+    interrupted: bool = False
+    interrupt_payload: dict[str, Any] = field(default_factory=dict)
     entries: list[ContextEntry] = field(default_factory=list)
     visit_counts: dict[str, int] = field(default_factory=dict)
     usage: dict[str, Any] | None = None

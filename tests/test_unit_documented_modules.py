@@ -741,3 +741,61 @@ def test_both_reflect_modules_retry_once_then_stop():
         assert first["payload"]["reflect_verdict"] == "fail", module.__name__
         assert first["next_module"] == "plan", module.__name__
         assert second["next_module"] is None, module.__name__
+
+
+def test_a_cancelled_run_reports_being_stopped_not_broken():
+    """Being talked over is the person steering, not a fault to apologise for.
+
+    The five streaming modules catch Exception to turn provider failures into a
+    readable message. Cancellation would have fallen into that handler and been
+    filed as a model error, so the person who interrupted would have been shown
+    an apology for something they did on purpose.
+    """
+    from agentic_sdk.core.cancellation import CancellationToken, WorkflowInterrupted
+
+    token = CancellationToken()
+    assert token.cancelled is False
+
+    token.cancel("interjection", text="等一下")
+    assert token.cancelled is True
+    assert token.reason == "interjection"
+    assert token.payload == {"text": "等一下"}
+
+    try:
+        token.raise_if_cancelled()
+    except WorkflowInterrupted as exc:
+        assert exc.reason == "interjection"
+        assert exc.payload["text"] == "等一下"
+    else:
+        raise AssertionError("raise_if_cancelled did not raise")
+
+
+def test_a_cancelled_workflow_leaves_no_half_written_state():
+    """The module that was killed must not leave a partial result behind.
+
+    state.apply runs after a module returns, so an interrupted module writes
+    nothing — this pins that, because resuming after an interruption depends
+    on it and it would be easy to break by having a module write as it goes.
+    """
+    from agentic_sdk import Workflow
+    from agentic_sdk.core.cancellation import CancellationToken
+
+    class NeverFinishes:
+        name = "action"
+
+        def __call__(self, state):
+            state.cancel.raise_if_cancelled()
+            raise AssertionError("should not reach here")
+
+    token = CancellationToken()
+    token.cancel("interjection")
+    workflow = Workflow(workflow_name="w", perceive=PassThroughPerceive(), action=NeverFinishes())
+
+    result = workflow.run("hello", cancel=token)
+
+    assert result.interrupted is True
+    # Why it stopped still belongs on the result — but not on the flag that
+    # means the workflow stopped itself, which is shown as an error.
+    assert result.abort_reason is None
+    assert result.interrupt_payload["reason"] == "interjection"
+    assert [getattr(e.type, "value", e.type) for e in result.entries] == ["user_input"]

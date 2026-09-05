@@ -7,6 +7,7 @@ from threading import Thread
 from typing import Any
 import uuid
 
+from agentic_sdk.core.cancellation import CancellationToken, WorkflowInterrupted
 from agentic_sdk.core.entities import ContextEntry, ContextEntryType
 from agentic_sdk.core.events import ALL_STRUCTURED_FIELDS, normalize_events_schema, resolve_events_schema
 from agentic_sdk.core.gates import Gates
@@ -163,6 +164,7 @@ class Workflow:
         memory_store: PersistentMemory | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
         events_schema: dict[str, dict[str, Any]] | None = None,
+        cancel: "CancellationToken | None" = None,
     ) -> WorkflowResult:
         active_events_schema = (
             self.events_schema
@@ -183,6 +185,15 @@ class Workflow:
         if user_message is not None:
             state_memory.append_message("user", user_message, attachments=list(attachments or []))
         latest_user_turn = state_memory.latest_user_turn()
+        if latest_user_turn is None:
+            # A perceive module may already know what this turn is about. Speech
+            # arrives when the person feels like talking, not when run() is
+            # called, so demanding the words up front would mean a voice agent
+            # could never be started without typing what was just said.
+            supplied = _pending_input_from(self.perceive)
+            if supplied:
+                state_memory.append_message("user", supplied, attachments=list(attachments or []))
+                latest_user_turn = state_memory.latest_user_turn()
         if latest_user_turn is None:
             raise ValueError("Workflow.run requires user_message or a conversation containing a user turn.")
 
@@ -237,10 +248,16 @@ class Workflow:
         total_hops = 0
         aborted = False
         abort_reason: str | None = None
+        interrupted = False
+        interrupt_payload: dict[str, Any] = {}
+
+        state.cancel = cancel
 
         try:
             while current is not None:
                 total_hops += 1
+                if cancel is not None and cancel.cancelled:
+                    raise WorkflowInterrupted(cancel.reason or "cancelled", cancel.payload)
                 self.gates.before_visit(current, state, total_hops)
                 state.increment_visit(current)
 
@@ -286,6 +303,41 @@ class Workflow:
                     )
                     event_callback(finish_event)
                 current = next_module
+        except WorkflowInterrupted as exc:
+            # Not a failure. Someone asked for this to stop, and the result
+            # says so plainly so the caller can pick up where it left off
+            # rather than reporting a fault to the person who interrupted.
+            # Interrupted, not aborted. An abort is the workflow protecting
+            # itself and deserves an error on screen; this is the person
+            # steering, and everything downstream reads the abort flag to
+            # decide which of those to show.
+            interrupted = True
+            # Already trimmed to what was played, by whichever module was
+            # doing the playing. The engine only knows that something was cut
+            # short, not that it was cut short mid-sentence out of a speaker.
+            interrupt_payload = {
+                **exc.payload,
+                "reason": exc.reason,
+                "delivered": state.delivered_so_far,
+            }
+            # Say so on the trace, and say where. Whoever is tuning how eagerly
+            # the agent gives way needs to know it was stopped while answering,
+            # not while deciding what to look up.
+            if current is not None and self._should_emit_stage_event(current, event_callback, active_events_schema):
+                event = self._stage_event(
+                    phase="abort",
+                    status="interrupted",
+                    module_name=current,
+                    module=self.modules.get(current),
+                    state=state,
+                    visit_count=state.visit_counts.get(current, 1),
+                    events_schema=active_events_schema,
+                )
+                # Why, not just where. The abort reason belongs to the branch
+                # that stops the workflow itself; this branch has its own.
+                event["reason"] = exc.reason
+                event["interrupted"] = True
+                event_callback(event)
         except WorkflowAborted as exc:
             aborted = True
             abort_reason = exc.reason
@@ -304,10 +356,18 @@ class Workflow:
                 event_callback(abort_event)
 
         final_message = _final_message_from(state)
+        if interrupted:
+            # What reached the person is the only part of this turn that
+            # happened to them. The rest was written and received by nobody.
+            final_message = interrupt_payload.get("delivered", state.delivered_so_far)
         if final_message and state.memory is not None:
             latest_assistant = state.memory.latest_assistant_turn()
             if latest_assistant is None or latest_assistant.content != final_message:
-                state.memory.append_message("assistant", final_message, metadata={"source": "workflow.run"})
+                state.memory.append_message(
+                    "assistant",
+                    final_message,
+                    metadata={"source": "workflow.run", "interrupted": True} if interrupted else {"source": "workflow.run"},
+                )
         if state.memory is not None:
             self.memory = state.memory
             if memory is not None or _is_memory_store(self.memory_type):
@@ -321,6 +381,8 @@ class Workflow:
             session_id=state.session_id,
             aborted=aborted,
             abort_reason=abort_reason,
+            interrupted=interrupted,
+            interrupt_payload=interrupt_payload,
             entries=list(state.entries),
             visit_counts=dict(state.visit_counts),
             usage=state.payload.get("_llm_usage"),
@@ -340,6 +402,7 @@ class Workflow:
         event_callback: Callable[[dict[str, Any]], None] | None = None,
         events_schema: dict[str, dict[str, Any]] | None = None,
         yield_action_deltas: bool | None = None,
+        cancel: "CancellationToken | None" = None,
     ) -> WorkflowStream:
         """Create an iterator of user-visible action text.
 
@@ -365,6 +428,7 @@ class Workflow:
                 "attachments": attachments,
                 "memory_store": memory_store,
                 "events_schema": events_schema,
+                "cancel": cancel,
             },
             event_callback,
             resolved_yield_action_deltas,
@@ -573,6 +637,17 @@ def _normalize_output(current: str, raw_output: Any, state: WorkflowState) -> Mo
             ],
         )
     raise TypeError(f"module '{current}' returned unsupported output type: {type(raw_output).__name__}")
+
+
+def _pending_input_from(module: Any) -> str:
+    """What a module has already taken in, before the workflow asks for it.
+
+    Optional: a module without it simply has nothing waiting.
+    """
+    pending = getattr(module, "pending_input", None)
+    if not callable(pending):
+        return ""
+    return str(pending() or "").strip()
 
 
 def _next_module_after(current: str, output: ModuleOutput, modules: dict[str, Module]) -> str | None:

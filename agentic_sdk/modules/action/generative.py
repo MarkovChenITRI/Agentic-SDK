@@ -4,6 +4,7 @@ import json
 
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
 from agentic_sdk.llm import chat_stream, require_model, resolve_openai_client
+from agentic_sdk.core.cancellation import WorkflowInterrupted
 from agentic_sdk.memory.in_context import build_module_messages
 
 
@@ -25,6 +26,28 @@ _FINAL_RESPONSE_CONTRACT = (
     "只有在缺少資料確實阻礙該問題時，才以一兩句說明與該結論直接相關的限制及所需補充；"
     "不要列出與本題無關的未知資料。"
 )
+
+
+def _failed_answer(state, exc: Exception) -> ModuleOutput:
+    """The result a generating action returns when the provider let it down.
+
+    Shared because the two actions that generate must report a failure the same
+    way: whoever reads `last_action_error` or the trace should not be able to
+    tell which of them was running.
+    """
+    detail = _format_openai_error(exc)
+    state.last_action_error = {"type": type(exc).__name__, "message": detail}
+    return ModuleOutput(
+        next_module=None,
+        payload={"_llm_usage": None},
+        context_updates=[
+            ContextEntry(
+                type=ContextEntryType.ACTION_RESULT,
+                content=f"error:{type(exc).__name__}",
+                metadata={"ok": False, "error": detail},
+            )
+        ],
+    )
 
 
 class GenerativeAction:
@@ -66,26 +89,21 @@ class GenerativeAction:
                 model=self._model,
                 messages=messages,
                 temperature=self._temperature,
+                should_stop=state.should_stop,
                 on_delta=lambda content: state.emit_token_delta(
                     self.name,
                     content,
                     metadata={"model": self._model, "structured": False},
                 ),
             )
+        except WorkflowInterrupted:
+            # Being talked over is not a provider failure. Letting it fall into
+            # the handler below files the interruption as a model error and
+            # answers the person with an apology for something they did on
+            # purpose.
+            raise
         except Exception as exc:
-            detail = _format_openai_error(exc)
-            state.last_action_error = {"type": type(exc).__name__, "message": detail}
-            return ModuleOutput(
-                next_module=None,
-                payload={"_llm_usage": None},
-                context_updates=[
-                    ContextEntry(
-                        type=ContextEntryType.ACTION_RESULT,
-                        content=f"error:{type(exc).__name__}",
-                        metadata={"ok": False, "error": detail},
-                    )
-                ],
-            )
+            return _failed_answer(state, exc)
 
         content = response.content
         response_model = response.model or self._model
@@ -111,9 +129,36 @@ class GenerativeAction:
         )
 
 
+def _interrupted_answer(state: WorkflowState) -> dict[str, str]:
+    """Tell the model it was cut off, and what the person actually heard.
+
+    Left to itself with only the transcript, it answered 「沒有足夠資料指出前一段
+    具體停在哪裡」 — it could see the words but not that they had been said out
+    loud and abandoned. Continuing from something is a different job from
+    answering it again, and the model cannot tell which is wanted unless the
+    difference is stated.
+    """
+    memory = getattr(state, "memory", None)
+    turns = list(getattr(memory, "turns", []) or [])
+    for turn in reversed(turns):
+        if turn.role != "assistant":
+            continue
+        if not (getattr(turn, "metadata", None) or {}).get("interrupted"):
+            return {}
+        return {
+            "interrupted_answer_instruction": (
+                "上一輪你講到一半被使用者打斷。interrupted_answer 是他實際聽到的內容，"
+                "後面沒講出口的部分他沒有聽到。請承接著往下講，不要從頭重述他已經聽過的話。"
+            ),
+            "interrupted_answer": turn.content,
+        }
+    return {}
+
+
 def _build_messages(state: WorkflowState, system_prompt: str | None) -> list[dict[str, str]]:
     retrieved = state.lookup("latest_retrieved_content") or state.lookup("retrieved_snippet") or ""
     perceived = _perceived_context(state)
+    cut_off = _interrupted_answer(state)
     resolved_prompt = system_prompt or (GROUNDED_SYSTEM_PROMPT if str(retrieved).strip() else OPEN_SYSTEM_PROMPT)
     return build_module_messages(
         state.memory,
@@ -124,6 +169,7 @@ def _build_messages(state: WorkflowState, system_prompt: str | None) -> list[dic
             "perceived_context": perceived,
             "retrieved_context_instruction": "retrieved_context 是已檢索到的可靠資料；如果它不是空白，請優先依據它回答。",
             "retrieved_context": retrieved,
+            **cut_off,
         },
         latest_user_message=state.latest_user_message(),
     )

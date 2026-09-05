@@ -4,7 +4,7 @@
 
 這份教材示範如何用 `EvidenceCheckReflect` 檢查 Agent 的回答是否有查到的資料撐腰。重點不是背參數，而是看懂加上 Reflect 前後，結果裡多了哪些可供程式判斷的訊號。
 
-## 你會學到
+## 涵蓋內容
 
 - 比較有無 `EvidenceCheckReflect` 時，同一題的回應差在哪裡。
 - 讀懂 `reflect_verdict` 這個機器可判讀的驗收結果。

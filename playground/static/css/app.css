@@ -2807,6 +2807,102 @@ a { color: inherit; text-decoration: none; }
   font-weight: 700;
 }
 
+/* The voice row stands in for the typing row, in the same place and at the
+   same height, so switching modes moves nothing on the page. */
+.composer-voice-row {
+  display: none;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: 2.6rem;
+  padding: 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.runner-page.is-voice-live .composer-voice-row {
+  display: flex;
+}
+
+.runner-page.is-voice-live .composer-main-row,
+.runner-page.is-voice-live .composer-attachment-preview {
+  display: none;
+}
+
+/* The same circle as the send button, because they sit side by side: a
+   different diameter reads as a different kind of control. */
+.composer-icon-button {
+  flex: 0 0 auto;
+  justify-self: end;
+  display: inline-grid;
+  place-items: center;
+  width: 2.85rem;
+  height: 2.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-radius: 999px;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  line-height: 1;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.composer-icon-button:hover,
+.composer-icon-button:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  outline: 0;
+}
+
+/* Drawn, not typed: an emoji is somebody else's glyph at somebody else's
+   weight, and it sits beside icons this page draws itself. */
+.composer-icon {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+
+
+.voice-spectrum {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  height: 1.35rem;
+}
+
+.voice-spectrum i {
+  width: 3px;
+  height: 100%;
+  border-radius: 999px;
+  background: #6fb2ff;
+  /* Scaled from the middle so the bars read as a waveform rather than a chart,
+     and on the compositor so fourteen of them can move every frame. */
+  transform: scaleY(0.08);
+  transform-origin: center;
+  transition: transform 70ms linear;
+}
+
+.voice-state {
+  flex: 1 1 auto;
+}
+
+/* Speaking and being interrupted are the two states a person needs to read at
+   a glance, so they are the two that change colour. */
+.composer-voice-row[data-voice-state="speaking"] .voice-spectrum i { background: #6fe0b0; }
+.composer-voice-row[data-voice-state="interrupted"] .voice-spectrum i { background: #ffc878; }
+.composer-voice-row[data-voice-state="paused"] .voice-spectrum i { background: rgba(160, 175, 195, 0.5); }
+.composer-voice-row[data-voice-state="denied"] .voice-state,
+.composer-voice-row[data-voice-state="unavailable"] .voice-state { color: #ff9c9c; }
+
+.runner-status {
+  margin: 0 0 0.4rem;
+  min-height: 1.1rem;
+  font-size: 0.82rem;
+  color: var(--ink-soft, #5b6470);
+}
+
+.runner-status:empty {
+  display: none;
+}
+
 .input-composer {
   display: grid;
   gap: 0.55rem;
@@ -2857,7 +2953,9 @@ a { color: inherit; text-decoration: none; }
 
 .composer-main-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  /* The microphone is a fourth column, not an extra child squeezed into three:
+     without its own track the send button wrapped onto a second line. */
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   min-height: 3.35rem;
   gap: 0.72rem;
   align-items: center;

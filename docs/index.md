@@ -1,6 +1,6 @@
 # Agentic SDK 開發者文件站
 
-這套文件站說明如何使用 Agentic SDK 建立 Python 應用程式。你可以在這裡查到工作流程的組成方式、五類工作各自使用的模組、模組參數與資料傳遞方式，以及工作流程如何保存對話內容。
+說明如何使用 Agentic SDK 建立 Python 應用程式，涵蓋工作流程的組成方式、五類工作各自使用的模組、模組參數與資料傳遞方式，以及工作流程如何保存對話內容。
 
 這一版文件聚焦公開 SDK 規格、模組參數與文件站導覽。所有需要模型的模組，都使用 OpenAI 相容介面作為統一接入方式。
 
@@ -9,6 +9,10 @@
 ### 組合工作流程
 
 說明 `Workflow` 如何承接五類工作，並定義模組在流程中的位置與責任。
+
+### 可以直接跑的範例
+
+[`examples/`](https://github.com/R300-AI/Agentic-SDK/tree/main/examples) 放的是完整、能執行的程式，補足文件說明不到的組裝細節。
 
 ### 模組與設定值
 
@@ -43,7 +47,7 @@
   </thead>
   <tbody>
     <tr>
-      <td rowspan="2">Perceive</td>
+      <td rowspan="3">Perceive</td>
       <td><a href="modules/perceive-modules.md#passthroughperceive">PassThroughPerceive</a></td>
       <td>no</td>
       <td>--</td>
@@ -56,6 +60,12 @@
       <td>根據完整對話歷史整理最新需求，必要時也把圖片一併納入理解。</td>
     </tr>
     <tr>
+      <td><a href="modules/perceive-modules.md#voicetextperceive">VoiceTextPerceive</a></td>
+      <td>yes</td>
+      <td>OpenAI</td>
+      <td>把說出來的話轉成這一輪的輸入，安靜時不上傳；偵測到使用者開口時中止進行中的回答。</td>
+    </tr>
+    <tr>
       <td>Plan</td>
       <td><a href="modules/plan-modules.md#nextstepplan">NextStepPlan</a></td>
       <td>yes</td>
@@ -63,7 +73,13 @@
       <td>根據完整對話與目前中繼結果，決定下一步要 Retrieve 還是 Action。</td>
     </tr>
     <tr>
-      <td rowspan="2">Retrieve</td>
+      <td rowspan="3">Retrieve</td>
+      <td><a href="modules/retrieve-modules.md#passthroughretrieve">PassThroughRetrieve</a></td>
+      <td>no</td>
+      <td>--</td>
+      <td>不查任何資料，直接把前一步的結果往下送。</td>
+    </tr>
+    <tr>
       <td><a href="modules/retrieve-modules.md#keywordretrieve">KeywordRetrieve</a></td>
       <td>no</td>
       <td>--</td>
@@ -76,7 +92,7 @@
       <td>用語意相似度找出相關內容，適合需要提高召回率與理解能力的情境。</td>
     </tr>
     <tr>
-      <td rowspan="3">Action</td>
+      <td rowspan="4">Action</td>
       <td><a href="modules/action-modules.md#directansweraction">DirectAnswerAction</a></td>
       <td>no</td>
       <td>--</td>
@@ -93,6 +109,12 @@
       <td>yes</td>
       <td>OpenAI</td>
       <td>使用 OpenAI 標準 tools schema 讓模型產生 tool calls，適合外部 API 或後端函式由應用層執行的情境。</td>
+    </tr>
+    <tr>
+      <td><a href="modules/action-modules.md#voiceansweraction">VoiceAnswerAction</a></td>
+      <td>yes</td>
+      <td>OpenAI</td>
+      <td>同時產出說出口與顯示在畫面上的兩個頻道，前者一寫完就送去合成，不等整段回覆結束。</td>
     </tr>
     <tr>
       <td rowspan="2">Reflect</td>

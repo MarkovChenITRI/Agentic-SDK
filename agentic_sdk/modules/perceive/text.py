@@ -5,6 +5,7 @@ from typing import Any
 
 from agentic_sdk.core import Attachment, ContextEntry, ContextEntryType, ModuleOutput, WorkflowAborted, WorkflowState
 from agentic_sdk.llm import chat_stream_json, require_model, resolve_openai_client
+from agentic_sdk.core.cancellation import WorkflowInterrupted
 from agentic_sdk.memory import MemoryEntry
 from agentic_sdk.memory.in_context import build_module_messages
 
@@ -77,6 +78,7 @@ class TextPerceive:
                 self._client,
                 model=self._model,
                 messages=self._messages(state),
+                should_stop=state.should_stop,
                 on_delta=lambda content: state.emit_token_delta(
                     self.name,
                     content,
@@ -90,6 +92,12 @@ class TextPerceive:
                     metadata={"model": self._model, "structured": True},
                 ),
             )
+        except WorkflowInterrupted:
+            # Being talked over is not a provider failure. Letting it fall into
+            # the handler below files the interruption as a model error and
+            # answers the person with an apology for something they did on
+            # purpose.
+            raise
         except Exception as exc:
             _abort_for_provider_failure(state, self.name, exc)
         parsed = response.as_json()

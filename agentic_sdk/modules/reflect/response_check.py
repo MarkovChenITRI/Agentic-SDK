@@ -2,6 +2,7 @@
 
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
 from agentic_sdk.llm import chat_stream_json, require_model, resolve_openai_client
+from agentic_sdk.core.cancellation import WorkflowInterrupted
 from agentic_sdk.memory.in_context import build_module_messages
 from agentic_sdk.modules.reflect.retry_policy import ON_FAILURE_TO_NEXT, next_after_failure
 _SYSTEM_PROMPT = (
@@ -49,6 +50,7 @@ class ResponseCheckReflect:
                 self._client,
                 model=self._model,
                 messages=messages,
+                should_stop=state.should_stop,
                 on_delta=lambda content: state.emit_token_delta(
                     self.name,
                     content,
@@ -67,6 +69,12 @@ class ResponseCheckReflect:
             reason = str(parsed.get("reason", ""))
             suggestion = str(parsed.get("suggestion", ""))
             usage = {"model": response.model, "input_tokens": response.input_tokens, "output_tokens": response.output_tokens}
+        except WorkflowInterrupted:
+            # Being talked over is not a provider failure. Letting it fall into
+            # the handler below files the interruption as a model error and
+            # answers the person with an apology for something they did on
+            # purpose.
+            raise
         except Exception as exc:
             verdict = "fail" if err else "pass"
             reason = f"response check unavailable: {exc}"

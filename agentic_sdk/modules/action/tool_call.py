@@ -4,6 +4,7 @@ from typing import Any
 
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
 from agentic_sdk.llm import chat_stream, require_model, resolve_openai_client
+from agentic_sdk.core.cancellation import WorkflowInterrupted
 from agentic_sdk.modules.action.generative import _build_messages, _format_openai_error
 
 
@@ -43,12 +44,19 @@ class ToolCallAction:
                 temperature=self._temperature,
                 tools=self._tools if self._tool_choice != "none" else None,
                 tool_choice=self._tool_choice,
+                should_stop=state.should_stop,
                 on_delta=lambda content: state.emit_token_delta(
                     self.name,
                     content,
                     metadata={"model": self._model, "structured": False},
                 ),
             )
+        except WorkflowInterrupted:
+            # Being talked over is not a provider failure. Letting it fall into
+            # the handler below files the interruption as a model error and
+            # answers the person with an apology for something they did on
+            # purpose.
+            raise
         except Exception as exc:
             detail = _format_openai_error(exc)
             state.last_action_error = {"type": type(exc).__name__, "message": detail}

@@ -16,17 +16,17 @@
 
 | 家族 | 標準模組列表 | 主要工作 |
 | --- | --- | --- |
-| Perceive | PassThroughPerceive、TextPerceive、TextImagePerceive | 把原始輸入整理成查詢、標籤與摘要。 |
+| Perceive | PassThroughPerceive、TextPerceive、TextImagePerceive、VoiceTextPerceive | 把原始輸入整理成查詢、標籤與摘要。 |
 | Plan | NextStepPlan | 決定下一步交給 `Retrieve` 還是 `Action`。 |
-| Retrieve | KeywordRetrieve、SemanticRetrieve | 查回條目、歷史紀錄或知識內容。 |
-| Action | DirectAnswerAction、GenerativeAction、ToolCallAction | 組成自然語言回應、固定格式文字輸出或 OpenAI 標準工具呼叫。 |
+| Retrieve | PassThroughRetrieve、KeywordRetrieve、SemanticRetrieve | 查回條目、歷史紀錄或知識內容，或不查直接往下走。 |
+| Action | DirectAnswerAction、GenerativeAction、ToolCallAction、VoiceAnswerAction | 組成自然語言回應、固定格式文字輸出、OpenAI 標準工具呼叫，或同時說出口與顯示在畫面上的雙頻道回覆。 |
 | Reflect | ResponseCheckReflect、EvidenceCheckReflect | 檢查回應完整性與證據是否足夠。 |
 
 表 1：五個模組家族的模組名與主要工作對照表。
 
 讀完這張表之後，接著看家族之間共用哪些資料。下一節會整理共用的 `Entities` 物件；各家族頁則列出模組參數與輸入輸出格式，方便把家族分工對回實際程式。
 
-需要模型的模組會各自持有 OpenAI-compatible 連線設定。`TextPerceive`、`NextStepPlan`、`GenerativeAction`、`ToolCallAction`、`ResponseCheckReflect` 等模組都要明確提供 `api_key`、`base_url` 與 `model`，模型選擇由建立模組時的設定決定。
+需要模型的模組會各自持有 OpenAI-compatible 連線設定。`TextPerceive`、`NextStepPlan`、`GenerativeAction`、`ToolCallAction`、`ResponseCheckReflect` 等模組都要明確提供 `api_key`、`base_url` 與 `model`，模型選擇由建立模組時的設定決定。語音模組不同：音訊來源以**物件**注入而不是三個設定。`VoiceTextPerceive` 收一個 `transport`，`VoiceAnswerAction` 收一個 `speech`，兩者都是必填；生成模型仍然是三件式。原因是聊天端點同構而音訊來源不同構，詳見 ADR-0003。
 
 ## Entities
 
@@ -38,4 +38,4 @@
 
 1. 先看 [工作流程](../workflow/index.md)，確認五個模組家族各自接手哪一段工作。
 2. 再看 [記憶類型](../workflow/memory-types.md)，理解流程跑動時由哪一層保存中間資料。
-3. 最後進入你要的功能頁，查標準名與標準輸入輸出格式。
+3. 最後進入對應的功能頁，查標準名與標準輸入輸出格式。
