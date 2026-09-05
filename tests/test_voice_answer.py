@@ -183,3 +183,10 @@ def test_an_answer_that_is_not_json_is_left_alone():
     from agentic_sdk.modules.action.voice_answer import _split_channels
 
     assert _split_channels("保固十二個月。") == ("保固十二個月。", "保固十二個月。")
+
+
+def test_a_speaking_module_will_not_invent_its_own_source():
+    import pytest
+
+    with pytest.raises(TypeError):
+        VoiceAnswerAction(api_key="k", base_url="https://example.test/v1", model="m")

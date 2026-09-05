@@ -82,17 +82,6 @@ def test_the_threshold_can_be_moved_for_a_noisy_room():
     assert noisy_room.transport.sent == []
 
 
-def test_a_module_built_without_a_transport_needs_its_endpoint():
-    """The transport is the test seam, not something a caller has to assemble.
-
-    Omitting it is the normal way to use the module, so omitting the endpoint
-    too has to fail loudly rather than produce a module that silently hears
-    nothing.
-    """
-    with pytest.raises(ValueError):
-        VoiceTextPerceive()
-
-
 def test_a_voice_agent_starts_without_being_told_what_was_said():
     """Speech arrives when the person talks, not when run() is called.
 
@@ -184,3 +173,15 @@ def test_the_audio_package_exports_what_it_says_it_does():
     missing = [name for name in audio.__all__ if not hasattr(audio, name)]
 
     assert missing == [], f"__all__ 裡有不存在的名字：{missing}"
+
+
+def test_a_listening_module_will_not_invent_its_own_source():
+    """The module must not hold a list of vendors.
+
+    It used to build one particular vendor's client when no transport was
+    passed, which is how supporting a second vendor would have meant editing
+    the module. Audio sources are constructed outside and handed in — the
+    built-in ones and a caller's own are the same thing to it.
+    """
+    with pytest.raises(TypeError):
+        VoiceTextPerceive()

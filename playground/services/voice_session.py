@@ -166,12 +166,14 @@ def open_transcription() -> "AudioInputTransport | None":
         from agentic_sdk.audio import FakeAudioInput
 
         return FakeAudioInput()
-    from agentic_sdk.audio.azure_realtime import AzureRealtimeInput
+    from agentic_sdk.audio.realtime import RealtimeTranscription
 
-    return AzureRealtimeInput(
-        api_key=endpoint.api_key,
-        base_url=endpoint.endpoint,
+    return RealtimeTranscription(
+        client=_azure_client(endpoint, AZURE_REALTIME_API_VERSION),
         model=endpoint.deployment_name,
+        # Not optional: without it the socket opens and then answers every
+        # message with an error.
+        extra_query={"intent": "transcription"},
     )
 
 
@@ -195,13 +197,37 @@ def open_synthesis():
         from agentic_sdk.audio import FakeAudioOutput
 
         return FakeAudioOutput()
-    from agentic_sdk.audio.azure_speech import AzureSpeechOutput
+    from agentic_sdk.audio.speech import SpeechOutput
 
-    return AzureSpeechOutput(
-        api_key=endpoint.api_key,
-        base_url=endpoint.endpoint,
+    return SpeechOutput(
+        client=_azure_client(endpoint, AZURE_SPEECH_API_VERSION),
         model=endpoint.deployment_name,
     )
+
+
+AZURE_REALTIME_API_VERSION = "2025-04-01-preview"
+"""The preview this deployment speaks. A vendor's calendar, not the SDK's."""
+
+
+AZURE_SPEECH_API_VERSION = "2025-03-01-preview"
+"""What the synthesis deployment answers to."""
+
+
+def _azure_client(endpoint, api_version: str):
+    """The OpenAI SDK's own Azure client, built from what the key vault holds.
+
+    Knowing that these deployments are Azure is a Playground concern: the SDK
+    takes a client and cannot tell one vendor's from another's. The SDK ships
+    Azure support of its own, so nothing here reimplements a handshake.
+
+    The stored setting is a complete operation URL rather than a resource root,
+    which is the shape the previous hand-rolled clients wanted. Trimmed here
+    until the secrets are reshaped — see ADR-0003.
+    """
+    from openai import AzureOpenAI
+
+    root = str(endpoint.endpoint).split("/openai/")[0].rstrip("/")
+    return AzureOpenAI(azure_endpoint=root, api_key=endpoint.api_key, api_version=api_version)
 
 
 def speech_unavailable_message() -> str:

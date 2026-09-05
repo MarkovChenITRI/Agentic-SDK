@@ -24,6 +24,8 @@ def voice_spec() -> dict:
 
 def test_the_spec_can_name_the_speaking_action():
     """Half a registration is what ticket 01 exists to catch."""
+    from agentic_sdk.audio import FakeAudioOutput
+
     module = build_module(
         ModuleSpec(
             kind="voice_answer",
@@ -31,9 +33,9 @@ def test_the_spec_can_name_the_speaking_action():
                 "api_key": "k",
                 "base_url": "https://models.test/openai/v1",
                 "model": "gpt-5.4",
-                "speech_api_key": "k",
-                "speech_base_url": "https://speech.test",
-                "speech_model": "tts",
+                # An object, because an audio source is not a setting — the
+                # same way semantic retrieve takes an embedder.
+                "speech": FakeAudioOutput(),
             },
         )
     )

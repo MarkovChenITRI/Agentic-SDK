@@ -16,7 +16,7 @@ import json
 from typing import Any
 
 from agentic_sdk.audio.speech_rate import heard_portion
-from agentic_sdk.audio.transport import AudioOutputTransport, require_speech_endpoint
+from agentic_sdk.audio.transport import AudioOutputTransport
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
 from agentic_sdk.core.cancellation import WorkflowInterrupted
 from agentic_sdk.llm import chat_stream_json
@@ -41,37 +41,20 @@ class VoiceAnswerAction(GenerativeAction):
     def __init__(
         self,
         *,
-        speech: AudioOutputTransport | None = None,
-        speech_api_key: str | None = None,
-        speech_base_url: str | None = None,
-        speech_model: str | None = None,
-        voice: str = "alloy",
+        speech: AudioOutputTransport,
         **generative: Any,
     ) -> None:
-        """Answer on the given speech endpoint, or through a transport of your own.
+        """Answer with the given speaking transport.
 
-        The generation settings are the same three as every other module, and
-        the speech settings mirror them, because this module talks to two
-        services and a caller configuring it needs to see which is which.
+        The generation settings are the same three as every other module,
+        because a chat endpoint is uniform. The speaking transport is an object
+        instead, because audio sources are not — see ADR-0003. It is required:
+        the module holds no way to build one, and so no list of vendors.
         """
         system_prompt = generative.pop("system_prompt", None)
         super().__init__(
             system_prompt=_with_two_channel_contract(system_prompt), **generative
         )
-        if speech is None:
-            require_speech_endpoint(
-                speech_api_key=speech_api_key,
-                speech_base_url=speech_base_url,
-                speech_model=speech_model,
-            )
-            from agentic_sdk.audio.azure_speech import AzureSpeechOutput
-
-            speech = AzureSpeechOutput(
-                api_key=speech_api_key,
-                base_url=speech_base_url,
-                model=speech_model,
-                voice=voice,
-            )
         self._speech = speech
 
     def __call__(self, state: WorkflowState) -> ModuleOutput:

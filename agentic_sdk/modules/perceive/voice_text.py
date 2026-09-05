@@ -20,7 +20,7 @@ from agentic_sdk.audio.speech_gate import (
     DEFAULT_SPEECH_THRESHOLD,
     SpeechGate,
 )
-from agentic_sdk.audio.transport import AudioInputTransport, require_speech_endpoint
+from agentic_sdk.audio.transport import AudioInputTransport
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
 
 
@@ -30,31 +30,19 @@ class VoiceTextPerceive:
     def __init__(
         self,
         *,
-        api_key: str | None = None,
-        base_url: str | None = None,
-        model: str | None = None,
-        language: str = "zh",
-        transport: AudioInputTransport | None = None,
+        transport: AudioInputTransport,
         speech_threshold: int = DEFAULT_SPEECH_THRESHOLD,
         hangover_seconds: float = DEFAULT_HANGOVER_SECONDS,
     ) -> None:
-        """Listen on the given speech endpoint, or through a transport of your own.
+        """Listen through the given transport.
 
-        ``transport`` exists so a test can drive a whole conversation without a
-        network or a credential. Leave it out and the endpoint settings build
-        the real one, which is how the module is normally used — the shape then
-        matches every other module: api_key, base_url, model.
+        The transport is required rather than optional, and the module holds no
+        way to build one. Audio sources are not interchangeable the way chat
+        endpoints are — live transcription is a long-lived socket, batch
+        transcription uploads a file — so they are constructed outside and
+        handed in, and a caller's own is the same thing to this module as the
+        ones the SDK ships. See ADR-0003.
         """
-        if transport is None:
-            # Checked before the import so a caller who forgot the endpoint is
-            # told that, rather than being told about a module they have never
-            # heard of.
-            require_speech_endpoint(api_key=api_key, base_url=base_url, model=model)
-            from agentic_sdk.audio.azure_realtime import AzureRealtimeInput
-
-            transport = AzureRealtimeInput(
-                api_key=api_key, base_url=base_url, model=model, language=language
-            )
         self.transport = transport
         self._gate = SpeechGate(threshold=speech_threshold, hangover_seconds=hangover_seconds)
         self._heard: list[str] = []

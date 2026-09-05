@@ -24,7 +24,8 @@ from pathlib import Path
 from typing import Iterator
 
 from agentic_sdk import Workflow
-from agentic_sdk.audio.azure_speech import AzureSpeechOutput
+from agentic_sdk.audio.realtime import RealtimeTranscription
+from agentic_sdk.audio.speech import SpeechOutput
 from agentic_sdk.core.cancellation import CancellationToken
 from agentic_sdk.modules import VoiceAnswerAction, VoiceTextPerceive
 
@@ -36,14 +37,18 @@ CHUNK_SAMPLES = 1600  # a tenth of a second
 class PlayThroughSpeaker:
     """Synthesis that is heard, not just produced.
 
-    ``AzureSpeechOutput`` returns audio and nothing plays it — the action module
+    ``SpeechOutput`` returns audio and nothing plays it — the action module
     drains the stream and drops the bytes, because where sound comes out is not
     the SDK's business. Wrapping it is: yield each piece *after* handing it to
     whatever plays, so abandoning the stream on an interjection stops the sound
     as well as the synthesis.
+
+    A wrapper like this one is not a special case. Every audio source reaches a
+    module the same way — constructed outside and handed in — so the SDK cannot
+    tell this apart from the transports it ships.
     """
 
-    def __init__(self, voice: AzureSpeechOutput, into: Path) -> None:
+    def __init__(self, voice: SpeechOutput, into: Path) -> None:
         self._voice = voice
         self._into = into
 
@@ -77,29 +82,50 @@ def microphone_from(path: Path) -> Iterator[bytes]:
         yield resampled[start : start + CHUNK_SAMPLES].tobytes()
 
 
+def _vendor_query(env) -> dict[str, str]:
+    """Whatever this endpoint wants beyond the OpenAI shape.
+
+    Azure's realtime transcription needs three of these and refuses every
+    message without ``intent``. They belong to whoever chose the deployment,
+    not to the SDK.
+    """
+    if not env.get("REALTIME_API_VERSION"):
+        return {}
+    return {
+        "api-version": env["REALTIME_API_VERSION"],
+        "deployment": env["TRANSCRIBE_DEPLOYMENT"],
+        "intent": "transcription",
+    }
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         raise SystemExit(__doc__)
     spoken_to = Path("spoken-answer.wav")
 
     # The three endpoint settings are the same shape on every module.
-    perceive = VoiceTextPerceive(
+    # Audio sources are built here and handed in. The modules hold no way to
+    # build one, which is what keeps a second vendor from meaning a code change.
+    listening = RealtimeTranscription(
         api_key=os.environ["TRANSCRIBE_API_KEY"],
         base_url=os.environ["TRANSCRIBE_BASE_URL"],
         model=os.environ["TRANSCRIBE_DEPLOYMENT"],
+        extra_query=_vendor_query(os.environ),
+        extra_headers={"api-key": os.environ["TRANSCRIBE_API_KEY"]},
     )
+    speaking = SpeechOutput(
+        api_key=os.environ["TTS_API_KEY"],
+        base_url=os.environ["TTS_BASE_URL"],
+        model=os.environ["TTS_DEPLOYMENT"],
+        extra_headers={"api-key": os.environ["TTS_API_KEY"]},
+    )
+
+    perceive = VoiceTextPerceive(transport=listening)
     action = VoiceAnswerAction(
         api_key=os.environ["CHAT_API_KEY"],
         base_url=os.environ["CHAT_BASE_URL"],
         model=os.environ["CHAT_MODEL"],
-        speech=PlayThroughSpeaker(
-            AzureSpeechOutput(
-                api_key=os.environ["TTS_API_KEY"],
-                base_url=os.environ["TTS_BASE_URL"],
-                model=os.environ["TTS_DEPLOYMENT"],
-            ),
-            spoken_to,
-        ),
+        speech=PlayThroughSpeaker(speaking, spoken_to),
     )
     workflow = Workflow(workflow_name="桌面語音 Agent", perceive=perceive, action=action)
 
