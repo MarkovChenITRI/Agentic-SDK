@@ -236,3 +236,28 @@ def test_speaking_into_a_session_that_has_gone_away_is_not_an_error():
     from playground.services.voice_session import SessionSpeech
 
     assert list(SessionSpeech("never-opened").speak("保固十二個月")) == []
+
+
+def test_the_playground_keeps_only_what_the_page_played():
+    """The browser is the only thing that knows how long the answer played.
+
+    It finishes after the run does, so the correction arrives late — and it
+    lands on the record the Playground owns, not on the SDK's memory protocol,
+    which every future kind of memory has to be able to implement. See ADR-0002.
+    """
+    from types import SimpleNamespace
+
+    from playground.services.runner_conversation import RunnerConversationState
+
+    written = "保固期是十二個月，延長保固可以再加兩年，另外配件另計"
+    interrupted = SimpleNamespace(
+        final_message=written,
+        interrupted=True,
+        interrupt_payload={"delivered": written, "heard_seconds": 2.0},
+        entities={},
+        entries=[],
+    )
+
+    state = RunnerConversationState.start().update_from_result(interrupted)
+
+    assert [turn.content for turn in state.turns] == ["保固期是十二個月"]

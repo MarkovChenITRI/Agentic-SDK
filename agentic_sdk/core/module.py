@@ -47,7 +47,7 @@ class WorkflowState:
     # A module that streams can offer it to the transport without the workflow
     # having to reach inside the module to wire anything up.
     cancel: "CancellationToken | None" = None
-    spoken_so_far: str = ""
+    delivered_so_far: str = ""
     _token_delta_callback: Callable[[str, str, dict[str, Any]], None] | None = field(
         default=None,
         init=False,
@@ -137,16 +137,18 @@ class WorkflowState:
             return self.memory
         return None
 
-    def report_spoken_progress(self, spoken_so_far: str) -> None:
-        """Record how much of the answer has actually been said out loud.
+    def report_delivered(self, delivered_so_far: str) -> None:
+        """Record how much of the answer actually reached the person.
 
-        Only whatever is playing the audio knows this, and it is not the same
-        as how much the model has written: speech lags generation, so an
-        interrupted answer has a tail that exists only on paper. Carrying that
-        tail forward would let the next turn refer back to a sentence nobody
-        heard.
+        Only whoever did the delivering knows this, and it is not the same as
+        how much the model has written: an answer cut off halfway leaves a tail
+        that exists only on paper. Carrying that tail forward would let the next
+        turn refer back to something nobody received.
+
+        Channel-neutral on purpose. A screen delivers and so does a speaker,
+        and the core is not allowed to know which — see ADR-0001 and ADR-0002.
         """
-        self.spoken_so_far = str(spoken_so_far or "")
+        self.delivered_so_far = str(delivered_so_far or "")
 
     def should_stop(self) -> bool:
         """Whether whoever started this run has asked for it to stop."""
@@ -173,6 +175,9 @@ class WorkflowState:
         resolved_content = str(content)
         if not resolved_content:
             return
+        # Emitted to somebody, so it has been delivered. This is the only place
+        # the core learns what reached a person without being told outright.
+        self.delivered_so_far += resolved_content
         self._token_delta_callback(str(module), resolved_content, dict(metadata or {}))
 
     def set_structured_field_callback(

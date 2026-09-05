@@ -211,3 +211,29 @@ def test_the_trace_says_why_the_turn_was_cut_short():
     assert aborts, "追蹤上沒有中止事件"
     assert aborts[-1]["reason"] == "interjection"
     assert aborts[-1]["interrupted"] is True
+
+
+def test_what_the_reader_saw_is_what_the_turn_records():
+    """No audio anywhere near this: a text answer cut off halfway.
+
+    The person read eight characters and the record held nothing at all, so the
+    next turn had no idea the agent had said anything. What reached them is
+    what the conversation keeps — the rest happened to nobody.
+    """
+    from agentic_sdk.modules import GenerativeAction, PassThroughPerceive
+
+    token = CancellationToken()
+    action = GenerativeAction(api_key="k", base_url="https://example.test/v1", model="m")
+    action._client = _CancelsMidStream("保固期是十二個月，延長保固可以再加兩年", token)
+    workflow = Workflow(workflow_name="w", perceive=PassThroughPerceive(), action=action)
+
+    # Someone is watching the answer arrive, which is what makes delivery
+    # incremental in the first place.
+    stream = workflow.stream("保固多久？", cancel=token)
+    seen = "".join(stream)
+    result = stream.result
+
+    assert result.interrupted is True
+    assert seen != "", "使用者什麼都沒看到，那就不是這個情境"
+    assert result.interrupt_payload["delivered"] == seen
+    assert [turn.content for turn in workflow.memory.turns if turn.role == "assistant"] == [seen]

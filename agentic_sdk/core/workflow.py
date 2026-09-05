@@ -315,7 +315,11 @@ class Workflow:
             # Already trimmed to what was played, by whichever module was
             # doing the playing. The engine only knows that something was cut
             # short, not that it was cut short mid-sentence out of a speaker.
-            interrupt_payload = {**exc.payload, "reason": exc.reason, "heard": state.spoken_so_far}
+            interrupt_payload = {
+                **exc.payload,
+                "reason": exc.reason,
+                "delivered": state.delivered_so_far,
+            }
             # Say so on the trace, and say where. Whoever is tuning how eagerly
             # the agent gives way needs to know it was stopped while answering,
             # not while deciding what to look up.
@@ -353,9 +357,9 @@ class Workflow:
 
         final_message = _final_message_from(state)
         if interrupted:
-            # What the person heard is the only part of this turn that happened
-            # to them. The rest was written and never spoken.
-            final_message = interrupt_payload.get("heard", state.spoken_so_far)
+            # What reached the person is the only part of this turn that
+            # happened to them. The rest was written and received by nobody.
+            final_message = interrupt_payload.get("delivered", state.delivered_so_far)
         if final_message and state.memory is not None:
             latest_assistant = state.memory.latest_assistant_turn()
             if latest_assistant is None or latest_assistant.content != final_message:
@@ -398,6 +402,7 @@ class Workflow:
         event_callback: Callable[[dict[str, Any]], None] | None = None,
         events_schema: dict[str, dict[str, Any]] | None = None,
         yield_action_deltas: bool | None = None,
+        cancel: "CancellationToken | None" = None,
     ) -> WorkflowStream:
         """Create an iterator of user-visible action text.
 
@@ -423,6 +428,7 @@ class Workflow:
                 "attachments": attachments,
                 "memory_store": memory_store,
                 "events_schema": events_schema,
+                "cancel": cancel,
             },
             event_callback,
             resolved_yield_action_deltas,

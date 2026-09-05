@@ -20,7 +20,7 @@ class AnswerCutOffPartWayThrough:
         self._audio = audio
 
     def __call__(self, state):
-        state.report_spoken_progress(HEARD)
+        state.report_delivered(HEARD)
         self._audio.start_speaking()
         state.cancel.raise_if_cancelled()
         raise AssertionError("should have been interrupted")
@@ -46,7 +46,7 @@ def test_the_interruption_reports_what_was_heard_not_what_was_written():
     audio.transcribe("保固多久？")
     result = workflow.run(cancel=CancellationToken())
 
-    assert result.interrupt_payload["heard"] == HEARD
+    assert result.interrupt_payload["delivered"] == HEARD
     assert UNHEARD not in str(result.interrupt_payload)
 
 

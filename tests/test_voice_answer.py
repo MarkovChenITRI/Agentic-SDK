@@ -147,7 +147,7 @@ def test_only_what_was_played_is_reported_as_heard():
     token.cancel("interjection", heard_seconds=2.0)
     action._speak("保固期是十二個月，延長保固可以再加兩年，另外配件另計", state)
 
-    assert state.spoken_so_far == "保固期是十二個月"
+    assert state.delivered_so_far == "保固期是十二個月"
 
 
 def test_an_answer_nobody_interrupted_is_reported_whole():
@@ -159,7 +159,7 @@ def test_an_answer_nobody_interrupted_is_reported_whole():
 
     action._speak("保固十二個月", state)
 
-    assert state.spoken_so_far == "保固十二個月"
+    assert state.delivered_so_far == "保固十二個月"
 
 
 def test_a_reply_that_ignores_the_contract_is_still_readable():

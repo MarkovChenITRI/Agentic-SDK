@@ -125,7 +125,33 @@ class RunnerConversationState:
         )
 
     def update_from_result(self, result: WorkflowResult) -> "RunnerConversationState":
-        return self.append_assistant(result.final_message, retrieval_evidence=_retrieval_evidence(result))
+        return self.append_assistant(
+            _what_reached_the_person(result), retrieval_evidence=_retrieval_evidence(result)
+        )
+
+
+def _what_reached_the_person(result: WorkflowResult) -> str:
+    """The answer as far as it got, when the page reports how far that was.
+
+    Playback happens in the browser and finishes on its own schedule, so the
+    duration arrives after the run has ended — too late for the workflow and
+    far too specific to ask of every kind of memory. The record this trims is
+    the Playground's own, which is the one the next run is built from. See
+    ADR-0002.
+    """
+    payload = getattr(result, "interrupt_payload", None) or {}
+    if not getattr(result, "interrupted", False):
+        return result.final_message
+    delivered = str(payload.get("delivered") or result.final_message or "")
+    heard_seconds = payload.get("heard_seconds")
+    if heard_seconds is None:
+        # Unknown is not nought: something noticed the interruption without
+        # having played a note, and trimming to nothing would erase an answer
+        # the person did hear.
+        return delivered
+    from agentic_sdk.audio import heard_portion
+
+    return heard_portion(delivered, heard_seconds)
 
 
 def _turn_from_dict(value: object) -> RunnerConversationTurn | None:

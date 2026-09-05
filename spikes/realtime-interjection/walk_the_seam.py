@@ -195,6 +195,13 @@ async def main() -> int:
             print(f"  綁定部署: {bound}")
             await browser.shoot("bound-deployments")
 
+            incomplete = await browser.evaluate(
+                "Array.from(document.querySelectorAll('[data-review-item]'))"
+                ".filter((i) => !i.classList.contains('is-complete'))"
+                ".map((i) => i.innerText.replace(/\\s+/g, ' ').slice(0, 90))"
+            )
+            for row in incomplete:
+                print(f"    未完成: {row}")
             ready = await browser.evaluate(
                 "document.querySelectorAll('[data-review-item].is-complete').length"
                 " + '/' + document.querySelectorAll('[data-review-item]').length"

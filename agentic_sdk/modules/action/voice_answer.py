@@ -131,10 +131,10 @@ class VoiceAnswerAction(GenerativeAction):
                 interrupted = True
                 break
         if not interrupted:
-            state.report_spoken_progress(text)
+            state.report_delivered(text)
             return
         heard_seconds = (state.cancel.payload if state.cancel else {}).get("heard_seconds")
-        state.report_spoken_progress(heard_portion(text, heard_seconds))
+        state.report_delivered(heard_portion(text, heard_seconds))
 
 
 def _with_two_channel_contract(system_prompt: str | None) -> str:
