@@ -46,6 +46,7 @@ TOOL_CALL_OUTPUT_CHOICES = {"interactive"}
 # has always existed and the README opens with it; Q4 just never offered it,
 # so an agent built on a lookup table had to buy a model call it did not need.
 DIRECT_ANSWER_OUTPUT_CHOICES = {"direct"}
+VOICE_OUTPUT_CHOICES = {"voice"}
 STRUCTURED_OUTPUT_CHOICES = {"table", "json", "custom_schema"}
 DEFAULT_RETRIEVE_DESCRIPTION = "依使用者設定的關鍵字參考資料判斷是否需要查詢。"
 DEFAULT_SEMANTIC_RETRIEVE_DESCRIPTION = "依上傳的參考文件查找與問題最相關的內容。"
@@ -138,6 +139,7 @@ def get_builder_steps() -> list[BuilderStep]:
                 BuilderChoice("pass_through", "直接傳遞文字", "直接使用目前對話中的文字內容，不先做額外整理或重寫。"),
                 BuilderChoice("text", "整理文字內容", "先理解並整理文字內容，再交給後續步驟使用。"),
                 BuilderChoice("text_image", "整理文字與圖片", "同時理解文字與圖片內容，再交給後續步驟使用。"),
+                BuilderChoice("voice", "語音對話", "使用者用講的，安靜時不會傳送任何聲音。轉寫結果直接交給後續步驟。"),
             ),
             True,
         ),
@@ -163,6 +165,7 @@ def get_builder_steps() -> list[BuilderStep]:
                 BuilderChoice("free_text", "純文字回覆", "設定 Agent 的角色、語氣、回答順序與限制。"),
                 BuilderChoice("interactive", "可互動元件", "沿用同一組回覆風格與規範，再追加抽取欄位與 API 提交規格。"),
                 BuilderChoice("direct", "直接回傳查到的內容", "把查到的內容原樣回覆，不經過模型改寫。查不到時回覆你設定的備援字句。"),
+                BuilderChoice("voice", "語音回覆", "一邊在畫面上給精確資料，一邊用口語講重點，兩者互補而不是把畫面唸一遍。"),
             ),
         ),
         BuilderStep(

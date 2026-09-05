@@ -37,6 +37,7 @@ from playground.services.source_builder import (
     INTERACTIVE_TOOL_POLICY,
     ALLOWED_ENTRY_MODULES,
     DIRECT_ANSWER_OUTPUT_CHOICES,
+    VOICE_OUTPUT_CHOICES,
     FREE_TEXT_OUTPUT_CHOICES,
     INTERACTIVE_OUTPUT_CHOICES,
     TOOL_CALL_OUTPUT_CHOICES,
@@ -50,9 +51,9 @@ _SPEC_VERSION = "2"
 _PRESENTATION_VERSION = "1"
 
 _ALLOWED_MEMORY_KINDS = {"in_context"}
-_ALLOWED_PERCEIVE_MODULES = {"PassThroughPerceive", "TextPerceive", "TextImagePerceive"}
+_ALLOWED_PERCEIVE_MODULES = {"PassThroughPerceive", "TextPerceive", "TextImagePerceive", "VoiceTextPerceive"}
 _ALLOWED_RETRIEVE_MODULES = {"PassThroughRetrieve", "KeywordRetrieve", "SemanticRetrieve"}
-_ALLOWED_ACTION_MODULES = {"DirectAnswerAction", "GenerativeAction", "ToolCallAction"}
+_ALLOWED_ACTION_MODULES = {"DirectAnswerAction", "GenerativeAction", "ToolCallAction", "VoiceAnswerAction"}
 _ALLOWED_REFLECT_MODULES = {"EvidenceCheckReflect", "ResponseCheckReflect"}
 _ALLOWED_REFLECT_ON_FAILURE = {"retry_plan", "end"}
 _ALLOWED_PLAN_STRATEGIES = {"RouteBySupport"}
@@ -266,7 +267,7 @@ def _apply_action(spec: dict, raw: object) -> None:
             params["output_format"] = None
         else:
             fmt = str(p["output_format"])
-            params["output_format"] = fmt if fmt in (FREE_TEXT_OUTPUT_CHOICES | INTERACTIVE_OUTPUT_CHOICES | DIRECT_ANSWER_OUTPUT_CHOICES) else "free_text"
+            params["output_format"] = fmt if fmt in (FREE_TEXT_OUTPUT_CHOICES | INTERACTIVE_OUTPUT_CHOICES | DIRECT_ANSWER_OUTPUT_CHOICES | VOICE_OUTPUT_CHOICES) else "free_text"
     if "system_prompt" in p:
         params["system_prompt"] = clean_prompt(str(p["system_prompt"] or "")) or None
     if "tools" in p and isinstance(p["tools"], list):
@@ -345,6 +346,8 @@ def apply_builder_step(spec: dict[str, Any], step_key: str, choice_label: object
                 "module": "TextPerceive",
                 "params": {**spec.get("perceive", {}).get("params", {}), "importance": 1.0, "image_instruction": None},
             }
+        elif choice == "voice":
+            return {**spec, "perceive": {**spec.get("perceive", {}), "module": "VoiceTextPerceive"}}
         elif choice == "text_image":
             overrides = {
                 "module": "TextImagePerceive",
@@ -383,9 +386,11 @@ def apply_builder_step(spec: dict[str, Any], step_key: str, choice_label: object
 
     if step_key == "output_format":
         choice = str(choice_label)
-        if choice not in (FREE_TEXT_OUTPUT_CHOICES | INTERACTIVE_OUTPUT_CHOICES | DIRECT_ANSWER_OUTPUT_CHOICES):
+        if choice not in (FREE_TEXT_OUTPUT_CHOICES | INTERACTIVE_OUTPUT_CHOICES | DIRECT_ANSWER_OUTPUT_CHOICES | VOICE_OUTPUT_CHOICES):
             return spec
-        if choice in TOOL_CALL_OUTPUT_CHOICES:
+        if choice in VOICE_OUTPUT_CHOICES:
+            action_module = "VoiceAnswerAction"
+        elif choice in TOOL_CALL_OUTPUT_CHOICES:
             action_module = "ToolCallAction"
         elif choice in DIRECT_ANSWER_OUTPUT_CHOICES:
             action_module = "DirectAnswerAction"
@@ -632,7 +637,7 @@ def spec_to_form_state(spec: dict[str, Any], runner_presentation: dict[str, Any]
     memory_type_choice = memory_kind if memory_kind in _ALLOWED_MEMORY_KINDS else "in_context"
 
     # Q2 choices
-    input_type_choice = {"TextPerceive": "text", "TextImagePerceive": "text_image"}.get(perceive_module, "pass_through")
+    input_type_choice = {"TextPerceive": "text", "TextImagePerceive": "text_image", "VoiceTextPerceive": "voice"}.get(perceive_module, "pass_through")
 
     # Q3 choices
     retrieve_policy_choice = {"KeywordRetrieve": "keyword", "SemanticRetrieve": "semantic"}.get(retrieve_module, "none")
@@ -649,6 +654,8 @@ def spec_to_form_state(spec: dict[str, Any], runner_presentation: dict[str, Any]
         output_format = str(action_params.get("output_format") or "interactive")
     elif action_module == "GenerativeAction":
         output_format = str(action_params.get("output_format") or "free_text")
+    elif action_module == "VoiceAnswerAction":
+        output_format = "voice"
     elif action_module == "DirectAnswerAction":
         output_format = "direct"
     else:

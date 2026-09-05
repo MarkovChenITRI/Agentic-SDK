@@ -7,7 +7,7 @@ if TYPE_CHECKING:
 
 
 _MODEL_PERCEIVE_MODULES = {"TextPerceive", "TextImagePerceive"}
-_MODEL_ACTION_MODULES = {"GenerativeAction", "ToolCallAction"}
+_MODEL_ACTION_MODULES = {"GenerativeAction", "ToolCallAction", "VoiceAnswerAction"}
 
 
 def reachable_workflow_roles(config: "BuilderSourceConfig") -> set[str]:

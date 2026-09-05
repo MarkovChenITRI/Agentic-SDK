@@ -139,6 +139,12 @@ def _deployment_requirements(config: BuilderSourceConfig) -> list[OpenAIRequirem
         requirements.append(OpenAIRequirement("action", "模型回覆器", config.action_module, "Action"))
     if "reflect" in reachable_llm_roles:
         requirements.append(OpenAIRequirement("reflect", "回覆檢核器", "ResponseCheckReflect", "Reflect"))
+    # Listening and speaking are asked for separately because they are separate
+    # agents: someone may want to talk and read, or type and listen.
+    if config.perceive_module == "VoiceTextPerceive" and "perceive" in reachable_roles:
+        requirements.append(OpenAIRequirement("transcribe", "語音聽寫", config.perceive_module, "Perceive"))
+    if config.action_module == "VoiceAnswerAction" and "action" in reachable_roles:
+        requirements.append(OpenAIRequirement("tts", "語音合成", config.action_module, "Action"))
     return requirements
 
 
@@ -178,6 +184,8 @@ def _role_label(role: str) -> str:
         "retrieve": "語意搜尋",
         "action": "模型回覆器",
         "reflect": "回覆檢核器",
+        "transcribe": "語音聽寫",
+        "tts": "語音合成",
     }.get(role, role)
 
 
@@ -210,7 +218,28 @@ def _embedding_endpoints() -> tuple[ModelEndpoint, ...]:
 def _endpoint_options_for_role(role: str) -> tuple[ModelEndpoint, ...]:
     if role == "retrieve":
         return _embedding_endpoints()
+    if role in {"transcribe", "tts"}:
+        return _speech_endpoints(role)
     return _model_endpoints()
+
+
+def _speech_endpoints(role: str) -> tuple[ModelEndpoint, ...]:
+    """Only the deployment that does this job — the two are not interchangeable.
+
+    Offering both under each role would let someone bind speech synthesis to
+    the listening step and find out at the first word.
+    """
+    return tuple(
+        ModelEndpoint(
+            id=endpoint.id,
+            label=_display_label_for_model(endpoint.deployment_name),
+            model=endpoint.deployment_name,
+            base_url=endpoint.endpoint,
+            secret_prefix=endpoint.id.upper(),
+        )
+        for endpoint in key_vault_settings().speech_endpoints
+        if endpoint.id == role
+    )
 
 
 def _endpoints_by_id(endpoints: tuple[ModelEndpoint, ...]) -> dict[str, ModelEndpoint]:
