@@ -55,6 +55,55 @@
 
 `GenerativeAction` 會把模型產生的文字放入 `result.final_message` 和 `result.entities["latest_final_message"]`。`result.entities["_llm_usage"]` 會記錄模型名稱、輸入 token 數與輸出 token 數。需要 JSON、表格或固定欄位時，可在 `system_prompt` 說明回覆格式，再由你的程式讀取與驗證。
 
+## VoiceAnswerAction
+
+`VoiceAnswerAction` 繼承 `GenerativeAction`，在同一次生成裡產出兩個頻道：`spoken` 是要說出口的話，口語、講判斷與理由；`displayed` 是要顯示在畫面上的內容，放型號、數字、條列或表格。兩者互相補充，不是把畫面內容唸一遍。
+
+模組會把兩頻道契約接在你的 `system_prompt` 後面，因此仍可指定自己的角色與語氣。`spoken` 欄位一寫完就送去合成，不等整段回覆結束——回覆愈長，這個提早開口愈有感；短回覆兩者只差數十毫秒。
+
+此模組同時連兩個服務，所以有兩組連線設定：生成用的三件式（`api_key`、`base_url`、`model`）與語音合成用的三件式（`speech_api_key`、`speech_base_url`、`speech_model`）。
+
+### 初始化參數
+
+| 參數 | 型態 | 必填 | 預設值 | 說明 |
+| --- | --- | --- | --- | --- |
+| `api_key` | `string` | 是 | 無 | 生成回覆的 OpenAI-compatible 端點金鑰。 |
+| `base_url` | `string` | 是 | 無 | 生成回覆的 API base URL。 |
+| `model` | `string` | 是 | 無 | 生成回覆的模型名稱。 |
+| `speech_api_key` | `string` | 是* | 無 | 語音合成端點金鑰。 |
+| `speech_base_url` | `string` | 是* | 無 | 語音合成 API base URL。 |
+| `speech_model` | `string` | 是* | 無 | 語音合成部署名稱。 |
+| `voice` | `string` | 否 | `"alloy"` | 合成音色。 |
+| `speech` | `AudioOutputTransport|null` | 否 | `null` | 自備輸出傳輸；提供時不需要上面三個 `speech_*` 參數。 |
+| `temperature` | `number|null` | 否 | `null` | 生成溫度。 |
+| `system_prompt` | `string|null` | 否 | `null` | 你的系統提示；兩頻道契約會接在後面。 |
+
+\* 未提供 `speech` 時必填。兩者都沒有會在建構時就報錯，而不是產生一個安靜地不會說話的模組。
+
+### 回覆內容
+
+`displayed` 那一半進入 `result.final_message` 與 `result.entities["latest_final_message"]`；`spoken` 那一半放在 action 的 `ContextEntry.metadata["spoken"]`。模型若沒有照契約回覆，整段會被當成一般回覆同時顯示與唸出；若回了其他鍵名的 JSON，會攤平成 `鍵：值` 的行，而不是把大括號顯示給使用者。
+
+### SDK 不播放聲音
+
+`AzureSpeechOutput` 只把音訊產生出來，模組把串流抽乾後不做任何事。要讓人聽見，包一層在 `speak()` 裡把每一段交給音訊裝置再 `yield`：
+
+```python
+class MySpeaker:
+    def speak(self, text):
+        for piece in self._voice.speak(text):
+            my_audio_device.write(piece)
+            yield piece
+```
+
+先播放再 `yield` 的順序有意義：使用者插話時模組會放棄這個 generator，播放與合成才會一起停。可執行範例見 `examples/voice/desktop_voice_agent.py`。
+
+### 被打斷時
+
+`Workflow.run(cancel=...)` 收到的取消權杖被 `VoiceTextPerceive` 在偵測到有人開口時取消。此模組每合成一段就檢查一次，停下來之後回報**實際播出去的那一段**，不是已經寫好的全文。因此 `result.interrupted` 為真時，`result.interrupt_payload["heard"]` 與記憶裡的助理回合都只有對方真正聽到的內容。
+
+`result.aborted` 在被打斷時為**假**——那是流程自我中止（跳轉上限、逾時）才使用的旗標，會被當成錯誤呈現。
+
 ## ToolCallAction
 
 參考論文：[Toolformer: Language Models Can Teach Themselves to Use Tools](https://arxiv.org/abs/2302.04761)
