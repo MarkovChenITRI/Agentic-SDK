@@ -48,6 +48,7 @@ nav:
     - 讓 Agent 檢查回答有沒有依據: tutorials/search-documents-and-answer.md
     - 讓 Agent 判斷什麼時候要叫工具: tutorials/call-tools-from-a-workflow.md
     - 五大模組的共同寫法: tutorials/module-writing-basics.md
+    - 用講的跟 Workflow 對話: tutorials/talk-to-a-workflow.md
   - 技術 Blog:
     - blog/index.md
     - Reflect - Letta: blog/reflect-letta.md

@@ -19,14 +19,14 @@
 | Perceive | PassThroughPerceive、TextPerceive、TextImagePerceive、VoiceTextPerceive | 把原始輸入整理成查詢、標籤與摘要。 |
 | Plan | NextStepPlan | 決定下一步交給 `Retrieve` 還是 `Action`。 |
 | Retrieve | KeywordRetrieve、SemanticRetrieve | 查回條目、歷史紀錄或知識內容。 |
-| Action | DirectAnswerAction、GenerativeAction、ToolCallAction | 組成自然語言回應、固定格式文字輸出或 OpenAI 標準工具呼叫。 |
+| Action | DirectAnswerAction、GenerativeAction、ToolCallAction、VoiceAnswerAction | 組成自然語言回應、固定格式文字輸出、OpenAI 標準工具呼叫，或同時說出口與顯示在畫面上的雙頻道回覆。 |
 | Reflect | ResponseCheckReflect、EvidenceCheckReflect | 檢查回應完整性與證據是否足夠。 |
 
 表 1：五個模組家族的模組名與主要工作對照表。
 
 讀完這張表之後，接著看家族之間共用哪些資料。下一節會整理共用的 `Entities` 物件；各家族頁則列出模組參數與輸入輸出格式，方便把家族分工對回實際程式。
 
-需要模型的模組會各自持有 OpenAI-compatible 連線設定。`TextPerceive`、`NextStepPlan`、`GenerativeAction`、`ToolCallAction`、`ResponseCheckReflect` 等模組都要明確提供 `api_key`、`base_url` 與 `model`，模型選擇由建立模組時的設定決定。
+需要模型的模組會各自持有 OpenAI-compatible 連線設定。`TextPerceive`、`NextStepPlan`、`GenerativeAction`、`ToolCallAction`、`ResponseCheckReflect` 等模組都要明確提供 `api_key`、`base_url` 與 `model`，模型選擇由建立模組時的設定決定。語音模組同樣是三件式：`VoiceTextPerceive` 用語音聽寫部署，`VoiceAnswerAction` 除了生成模型之外，另有一組 `speech_api_key`、`speech_base_url`、`speech_model` 指向語音合成部署。
 
 ## Entities
 
