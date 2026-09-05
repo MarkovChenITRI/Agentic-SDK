@@ -115,6 +115,34 @@ config.gates = GateConfig(max_node_hops=20, max_revisit=3, timeout_sec=120.0)
 workflow = build_workflow(config)
 ```
 
+## 被打斷
+
+執行上限是流程自我中止；**被打斷**是有人請它停下來，兩者不同，結果也分得開。
+
+`run()` 與 `stream()` 都收一個 `cancel`。任何持有這個權杖的人——背景執行緒、另一條連線、正在聽的模組——都可以要求停止：
+
+```python
+from agentic_sdk.core.cancellation import CancellationToken
+
+token = CancellationToken()
+result = workflow.run("保固多久？", cancel=token)
+```
+
+| 欄位 | 中止（上限） | 被打斷 |
+| --- | --- | --- |
+| `result.aborted` | `True` | `False` |
+| `result.abort_reason` | 中止原因 | `None` |
+| `result.interrupted` | `False` | `True` |
+| `result.interrupt_payload` | `{}` | 含 `reason` 與 `delivered` |
+
+分開的理由是呈現：上限是流程保護自己，該顯示錯誤；被打斷是使用者在主導，**對一件他故意做的事顯示錯誤是荒謬的**。
+
+### 這一輪記下的是已交付的內容
+
+被打斷的那一輪，記憶留下的不是模型產出的內容，而是**實際到達使用者的內容**。有人在看串流輸出時，`emit_token_delta` 會在送出的當下累積；一段被中斷的文字回覆因此記下使用者已經讀到的那半句，而不是整段，也不是空的。
+
+`result.interrupt_payload["delivered"]` 是同一份內容。這與音訊無關——螢幕會交付，喇叭也會，而核心不被允許知道是哪一種。
+
 ## 執行事件
 
 如果呼叫 `run()` 或 `stream()` 時傳入 `event_callback`，省略 `events_schema` 的 `Workflow` 會對所有執行到的模組，在開始、完成或中止時送出 `stage` event，並送出完整的結構化 JSON 欄位。自訂 `events_schema` 時，則只對列出的模組與 `fields` 送出事件。你的應用程式可在開始時更新狀態，並在完成時讀取 SDK 依設定整理的欄位：

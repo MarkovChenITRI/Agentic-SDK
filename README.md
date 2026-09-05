@@ -82,10 +82,15 @@ print(result.final_message)
 from agentic_sdk import Workflow
 from agentic_sdk.modules import DirectAnswerAction, KeywordRetrieve, VoiceTextPerceive
 
+from agentic_sdk.audio.realtime import RealtimeTranscription
+
+# 音訊來源在外面建好，再交給模組。
 perceive = VoiceTextPerceive(
-    api_key="<TRANSCRIBE_API_KEY>",
-    base_url="<TRANSCRIBE_BASE_URL>",
-    model="<TRANSCRIBE_DEPLOYMENT>",
+    transport=RealtimeTranscription(
+        api_key="<TRANSCRIBE_API_KEY>",
+        base_url="<TRANSCRIBE_BASE_URL>",
+        model="<TRANSCRIBE_MODEL>",
+    )
 )
 workflow = Workflow(
     workflow_name="語音知識問答 Agent",
@@ -105,7 +110,9 @@ if perceive.pending_input():
     print(workflow.run().final_message)
 ```
 
-`VoiceTextPerceive` 的端點參數和其他模組一樣是三件式。**安靜時什麼都不上傳**——純靜音與說話計費相同，而且會被服務辨識成沒有人說過的字，不過濾的話安靜的房間會持續產生假的輸入。
+**音訊來源是物件，不是三個設定。** 聊天端點同構，三件式描述得完；音訊來源不同構——即時轉寫是長連線、批次轉寫是上傳檔案、合成是串流回應——所以在外面建好再交進去，模組裡沒有任何廠商名稱。端點需要 OpenAI 形狀以外的東西時用 `extra_query` / `extra_headers`；連這樣都表達不了就自己寫一個傳輸，對模組來說和 SDK 附的沒有分別。
+
+**安靜時什麼都不上傳**——純靜音與說話計費相同，而且會被服務辨識成沒有人說過的字，不過濾的話安靜的房間會持續產生假的輸入。
 
 吵雜環境調高 `speech_threshold`。要在測試裡驅動整條流程，傳 `transport=FakeAudioInput()` 就不需要網路與憑證。
 
@@ -113,35 +120,34 @@ if perceive.pending_input():
 
 ```python
 from agentic_sdk import Workflow
-from agentic_sdk.audio.azure_speech import AzureSpeechOutput
+from agentic_sdk.audio.speech import SpeechOutput
 from agentic_sdk.core.cancellation import CancellationToken
 from agentic_sdk.modules import VoiceAnswerAction, VoiceTextPerceive
 
-perceive = VoiceTextPerceive(api_key=..., base_url=..., model=...)
 workflow = Workflow(
     workflow_name="語音對話 Agent",
-    perceive=perceive,
+    perceive=VoiceTextPerceive(transport=listening),
     action=VoiceAnswerAction(
-        api_key="<CHAT_API_KEY>",          # 產生回覆的模型
-        base_url="<CHAT_BASE_URL>",
-        model="<CHAT_DEPLOYMENT>",
-        speech=MySpeaker(AzureSpeechOutput(  # 見下方：SDK 不負責播放
-            api_key="<TTS_API_KEY>", base_url="<TTS_BASE_URL>", model="<TTS_DEPLOYMENT>",
+        speech=MySpeaker(SpeechOutput(     # 見下方：SDK 不負責播放
+            api_key="<TTS_API_KEY>", base_url="<TTS_BASE_URL>", model="<TTS_MODEL>",
         )),
+        api_key="<CHAT_API_KEY>",          # 生成模型仍是三件式
+        base_url="<CHAT_BASE_URL>",
+        model="<CHAT_MODEL>",
     ),
 )
 
 result = workflow.run(cancel=CancellationToken())
-print(result.final_message)          # 顯示在畫面上的那一半
+print(result.final_message)                     # 顯示在畫面上的那一半
 if result.interrupted:
-    print(result.interrupt_payload["heard"])   # 對方實際聽到的那一段
+    print(result.interrupt_payload["delivered"])  # 對方實際收到的那一段
 ```
 
 `VoiceAnswerAction` 一次產生兩個頻道：`spoken` 是口語、講判斷與理由，`displayed` 是型號、價格、條列這類要用看的。**`spoken` 一寫完就送去合成**，不等整段回覆結束。
 
-**打斷靠的是那顆 `CancellationToken`。** perceive 模組在自己那一輪拿到它，之後只要偵測到有人開口就取消——不等轉寫，因為語音活動約 600ms 就測得到，轉寫要將近四秒。被打斷的那一輪 `interrupted` 為真、`aborted` 為假（那是流程自我中止才用的），而記憶裡只留對方真正聽到的部分。
+**打斷靠的是那顆 `CancellationToken`。** perceive 模組在自己那一輪拿到它，之後只要偵測到有人開口就取消——不等轉寫，因為語音活動約 600ms 就測得到，轉寫要將近四秒。被打斷的那一輪 `interrupted` 為真、`aborted` 為假（那是流程自我中止才用的），而記憶裡只留**實際交付出去**的部分。這一條不限語音：文字串流被中斷時，記下的也是使用者已經讀到的那半句，而不是模型寫完的整段。
 
-**SDK 不播放聲音，也不擷取麥克風。** `AzureSpeechOutput` 只把音訊產生出來；要讓人聽見，包一層在 `speak()` 裡把每一段交給你的音訊裝置再 `yield`——這樣使用者插話時放棄串流會同時停掉播放與合成。可執行的完整範例在 [`examples/voice/desktop_voice_agent.py`](examples/voice/desktop_voice_agent.py)，用一個 WAV 當麥克風，不需要音效裝置就能跑。
+**SDK 不播放聲音，也不擷取麥克風。** `SpeechOutput` 只把音訊產生出來；要讓人聽見，包一層在 `speak()` 裡把每一段交給你的音訊裝置再 `yield`——這樣使用者插話時放棄串流會同時停掉播放與合成。可執行的完整範例在 [`examples/voice/desktop_voice_agent.py`](examples/voice/desktop_voice_agent.py)，用一個 WAV 當麥克風，不需要音效裝置就能跑。
 
 ### 2. 使用 OpenAI-compatible 生成回覆
 

@@ -94,13 +94,22 @@ Perceive 模組負責把原始輸入整理成 workflow 後續節點可直接消�
 
 | 參數 | 型態 | 必填 | 預設值 | 說明 |
 | --- | --- | --- | --- | --- |
-| `api_key` | `string` | 是（除非給 `transport`） | 無 | 語音轉寫服務的金鑰。 |
-| `base_url` | `string` | 是（除非給 `transport`） | 無 | 語音轉寫服務的端點。 |
-| `model` | `string` | 是（除非給 `transport`） | 無 | 轉寫部署名稱。 |
-| `language` | `string` | 否 | `"zh"` | 轉寫語言。 |
-| `transport` | `AudioInputTransport` | 否 | 依上述端點建立 | 自備的音訊傳輸。測試以假傳輸驅動整條流程，不需網路與憑證。 |
+| `transport` | `AudioInputTransport` | **是** | 無 | 音訊來源。在模組外面建好再交進來——模組沒有辦法自己生一個，因此也沒有一份廠商清單。測試以假傳輸驅動整條流程，不需網路與憑證。 |
 | `speech_threshold` | `int` | 否 | `500` | 判定為說話的音量下限（16 位元取樣的 RMS）。吵雜環境調高。 |
-| `hangover_chunks` | `int` | 否 | `3` | 說話結束後仍繼續送出的片段數，避免切掉句尾。 |
+| `hangover_seconds` | `float` | 否 | `0.8` | 說話結束後仍繼續送出的安靜長度。服務靠聽到靜音判定一句話結束，切太乾淨就永遠等不到轉寫。 |
+
+### 音訊來源怎麼建
+
+SDK 附的是 `RealtimeTranscription`，走 OpenAI SDK 的即時客戶端：
+
+```python
+from agentic_sdk.audio.realtime import RealtimeTranscription
+
+listening = RealtimeTranscription(api_key=..., base_url=..., model=...)
+perceive = VoiceTextPerceive(transport=listening)
+```
+
+端點需要 OpenAI 形狀以外的東西時，用 `extra_query` 與 `extra_headers` 帶進去；也可以直接傳一個自己建好的 `client`（例如 `AzureOpenAI`），讓 OpenAI SDK 處理該廠商的差異。連這樣都表達不了的，就自己寫一個實作 `AudioInputTransport` 的類別——對模組而言，你寫的和 SDK 附的沒有分別。詳見 ADR-0003。
 
 ### 標準輸入參數
 

@@ -26,7 +26,7 @@
 
 讀完這張表之後，接著看家族之間共用哪些資料。下一節會整理共用的 `Entities` 物件；各家族頁則列出模組參數與輸入輸出格式，方便把家族分工對回實際程式。
 
-需要模型的模組會各自持有 OpenAI-compatible 連線設定。`TextPerceive`、`NextStepPlan`、`GenerativeAction`、`ToolCallAction`、`ResponseCheckReflect` 等模組都要明確提供 `api_key`、`base_url` 與 `model`，模型選擇由建立模組時的設定決定。語音模組同樣是三件式：`VoiceTextPerceive` 用語音聽寫部署，`VoiceAnswerAction` 除了生成模型之外，另有一組 `speech_api_key`、`speech_base_url`、`speech_model` 指向語音合成部署。
+需要模型的模組會各自持有 OpenAI-compatible 連線設定。`TextPerceive`、`NextStepPlan`、`GenerativeAction`、`ToolCallAction`、`ResponseCheckReflect` 等模組都要明確提供 `api_key`、`base_url` 與 `model`，模型選擇由建立模組時的設定決定。語音模組不同：音訊來源以**物件**注入而不是三個設定。`VoiceTextPerceive` 收一個 `transport`，`VoiceAnswerAction` 收一個 `speech`，兩者都是必填；生成模型仍然是三件式。原因是聊天端點同構而音訊來源不同構，詳見 ADR-0003。
 
 ## Entities
 
