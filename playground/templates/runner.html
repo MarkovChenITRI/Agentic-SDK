@@ -109,6 +109,13 @@
 
       <p class="runner-status" data-run-status role="status" aria-live="polite"></p>
       <form class="input-composer chat-composer" data-input-composer>
+        {% if uses_voice %}
+        <div class="voice-bar" data-voice-bar data-voice-state="starting">
+          <span class="voice-orb" data-voice-orb aria-hidden="true"><i data-voice-level></i></span>
+          <span class="voice-state" data-voice-state-text role="status" aria-live="polite">正在開啟麥克風…</span>
+          <button class="voice-switch" type="button" data-voice-switch>用打字的</button>
+        </div>
+        {% endif %}
         <label for="runner-message">輸入訊息</label>
         <div class="composer-attachment-preview" data-artifact-list aria-label="已選擇的參考資料"></div>
         <div class="composer-main-row">

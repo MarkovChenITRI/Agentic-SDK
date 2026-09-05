@@ -978,15 +978,77 @@ bindInputComposer(form, async (payload) => {
 	await runWorkflow({ ...payload, voice_session_id: voice?.sessionId || "" });
 }, { clearAttachments: () => attachmentPicker?.clear() });
 
+const voiceBar = document.querySelector("[data-voice-bar]");
+const voiceStateText = document.querySelector("[data-voice-state-text]");
+const voiceLevel = document.querySelector("[data-voice-level]");
+const voiceSwitch = document.querySelector("[data-voice-switch]");
+
+const VOICE_STATES = {
+	starting: "正在開啟麥克風…",
+	listening: "聆聽中，直接開口就好",
+	heard: "聽到了",
+	thinking: "正在想…",
+	speaking: "回答中 · 開口就能打斷",
+	interrupted: "好，我停下來聽你說",
+	paused: "麥克風已暫停 · 現在用鍵盤",
+	denied: "需要麥克風權限才能聽你說話",
+	unavailable: "這個 Playground 還沒有語音服務",
+	closed: "語音連線結束了，重新整理可以再開始",
+};
+
+function showVoiceState(state, detail) {
+	if (!voiceBar) {
+		return;
+	}
+	voiceBar.dataset.voiceState = state;
+	if (voiceStateText) {
+		voiceStateText.textContent = state === "heard" && detail ? `聽到了：「${detail}」` : VOICE_STATES[state] || state;
+	}
+	if (voiceSwitch) {
+		voiceSwitch.textContent = state === "paused" ? "回到語音" : "用打字的";
+		voiceSwitch.hidden = state === "denied" || state === "unavailable" || state === "closed";
+	}
+	// Exactly one input is live at a time. Two of them racing produces two
+	// turns for one question, and the agent answers something the person was
+	// still in the middle of saying.
+	const typing = state === "paused" || state === "denied" || state === "unavailable" || state === "closed";
+	runnerPage?.classList.toggle("is-voice-live", !typing);
+	if (messageInput) {
+		messageInput.disabled = !typing;
+		messageInput.placeholder = typing ? "問問 Agent" : "語音模式進行中，想打字請按「用打字的」";
+	}
+	if (submitButton) {
+		submitButton.disabled = !typing;
+	}
+}
+
 const voice = bindVoiceConversation(runnerPage, {
 	onTranscript: (text) => {
 		runWorkflow({ message: text, voice_session_id: voice?.sessionId || "" });
+		voice?.enter("thinking");
 	},
 	onStatus: (message) => {
 		if (runStatus) {
 			runStatus.textContent = message;
 		}
 	},
+	onState: showVoiceState,
+	onLevel: (level) => {
+		if (voiceLevel) {
+			// Scaled so ordinary speech fills most of the bar; the point is to
+			// show that something is being heard, not to be a meter.
+			voiceLevel.style.transform = `scaleX(${Math.min(1, level * 6).toFixed(3)})`;
+		}
+	},
+});
+
+voiceSwitch?.addEventListener("click", () => {
+	if (voiceBar?.dataset.voiceState === "paused") {
+		voice?.resume();
+		return;
+	}
+	voice?.pause();
+	messageInput?.focus();
 });
 
 starterQuestions?.addEventListener("click", (event) => {

@@ -116,3 +116,41 @@ def test_every_deployment_a_voice_agent_needs_is_offered_on_the_page():
 
     missing = sorted(role for role in needed if f"{role}:" not in table)
     assert missing == [], f"這些角色在畫面上沒有對應的選單：{missing}"
+
+
+def test_a_voice_agent_says_on_the_page_that_it_is_listening():
+    """Without this the page is a text agent with a hidden microphone.
+
+    Two things depend on it being visible: the person can tell whether it is
+    hearing them, and the keyboard and the microphone are never both live —
+    two inputs racing produce two turns for one question.
+    """
+    from playground.app import create_app
+
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    with app.test_client() as client:
+        for step, choice in [("input_type", "voice"), ("output_format", "voice")]:
+            client.post("/playground/builder/state", json={"step": step, "choice": choice})
+        page = client.get("/playground/run").get_data(as_text=True)
+
+    assert "data-voice-bar" in page
+    assert "data-voice-switch" in page
+    # Inside the composer, so the two inputs are one control and cannot drift
+    # apart on the page.
+    composer = page[page.index("data-input-composer") :]
+    assert composer.index("data-voice-bar") < composer.index("runner-message")
+
+
+def test_a_typing_agent_gets_no_voice_bar():
+    from playground.app import create_app
+
+    app = create_app()
+    app.config.update(TESTING=True)
+
+    with app.test_client() as client:
+        client.post("/playground/builder/state", json={"step": "output_format", "choice": "direct"})
+        page = client.get("/playground/run").get_data(as_text=True)
+
+    assert "data-voice-bar" not in page

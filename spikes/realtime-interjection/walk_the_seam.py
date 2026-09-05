@@ -206,14 +206,30 @@ async def main() -> int:
             await asyncio.sleep(5)
             await browser.shoot("runner-listening")
 
+            seen_states = []
             for second in range(40):
                 await asyncio.sleep(1)
+                state = await browser.evaluate(
+                    "document.querySelector('[data-voice-bar]')?.dataset.voiceState + '|'"
+                    " + (document.querySelector('[data-voice-state-text]')?.textContent || '')"
+                    " + ' | init=' + (document.querySelector('[data-initialization-message]')?.textContent || '')"
+                    " + ' | overlay=' + document.querySelector('[data-initialization-overlay]')?.hidden"
+                )
+                if not seen_states or seen_states[-1] != state:
+                    seen_states.append(state)
+                    print(f"  {second:>2}s 語音列: {state}")
                 if second == 9:
                     await browser.shoot("heard-the-question")
                 if second == 16:
                     await browser.shoot("answering-aloud")
-                if second == 30:
+                if second == 26:
                     await browser.shoot("after-the-interruption")
+                if second == 32:
+                    await browser.evaluate(
+                        "document.querySelector('[data-voice-switch]')?.click() || true"
+                    )
+                    await asyncio.sleep(1)
+                    await browser.shoot("switched-to-typing")
 
             state = await browser.evaluate(
                 "({status: document.querySelector('[data-run-status]')?.textContent || '',"
