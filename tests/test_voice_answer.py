@@ -26,6 +26,15 @@ def two_channel_reply() -> str:
     return json.dumps({"spoken": SPOKEN, "displayed": DISPLAYED}, ensure_ascii=False)
 
 
+def _state_with_cancel(token):
+    """A state the way the workflow hands one to a module mid-run."""
+    from agentic_sdk.core import WorkflowState
+
+    state = WorkflowState(workflow_name="voice", user_message="保固多久？")
+    state.cancel = token
+    return state
+
+
 def run_with(action) -> object:
     workflow = Workflow(
         workflow_name="voice",
@@ -120,3 +129,34 @@ def test_nothing_heard_is_reported_when_playback_never_started():
     result = workflow.run("有什麼鞋墊？", cancel=token)
 
     assert result.interrupt_payload.get("heard", "") == ""
+
+
+def test_only_what_was_played_is_reported_as_heard():
+    """The producer of the heard text, not a hand-fed value.
+
+    Speech lags generation, so an answer cut off mid-playback has a tail that
+    was written and never spoken. Reporting the whole thing would let the next
+    turn refer back to a sentence nobody heard.
+    """
+    from agentic_sdk.core.cancellation import CancellationToken
+
+    token = CancellationToken()
+    action = voice_action(FakeAudioOutput(), "")
+    state = _state_with_cancel(token)
+
+    token.cancel("interjection", heard_seconds=2.0)
+    action._speak("保固期是十二個月，延長保固可以再加兩年，另外配件另計", state)
+
+    assert state.spoken_so_far == "保固期是十二個月"
+
+
+def test_an_answer_nobody_interrupted_is_reported_whole():
+    from agentic_sdk.core.cancellation import CancellationToken
+
+    token = CancellationToken()
+    action = voice_action(FakeAudioOutput(), "")
+    state = _state_with_cancel(token)
+
+    action._speak("保固十二個月", state)
+
+    assert state.spoken_so_far == "保固十二個月"

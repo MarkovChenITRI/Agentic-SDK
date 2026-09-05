@@ -54,15 +54,21 @@ def test_speaking_over_the_answer_stops_it():
 
 
 def test_being_interrupted_is_not_an_error():
-    """A hop limit is the workflow protecting itself; this is the person steering."""
+    """A hop limit is the workflow protecting itself; this is the person steering.
+
+    The two look identical from inside the run and must never look identical
+    to the person, so the result does not carry an abort at all — everything
+    downstream reads that flag to decide whether to show an error.
+    """
     audio = FakeAudioInput()
     workflow = voice_workflow(audio, SlowAnswer(audio))
 
     audio.transcribe("保固多久？")
     result = workflow.run(cancel=CancellationToken())
 
-    assert result.abort_reason is not None
-    assert "interrupted" in result.abort_reason
+    assert result.interrupted is True
+    assert result.aborted is False
+    assert result.abort_reason is None
 
 
 def test_the_trace_says_which_module_was_interrupted():

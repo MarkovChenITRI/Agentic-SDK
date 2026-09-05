@@ -307,11 +307,15 @@ class Workflow:
             # Not a failure. Someone asked for this to stop, and the result
             # says so plainly so the caller can pick up where it left off
             # rather than reporting a fault to the person who interrupted.
+            # Interrupted, not aborted. An abort is the workflow protecting
+            # itself and deserves an error on screen; this is the person
+            # steering, and everything downstream reads the abort flag to
+            # decide which of those to show.
             interrupted = True
-            aborted = True
-            abort_reason = f"interrupted: {exc.reason}"
-            heard_text = _heard_portion(state.spoken_so_far, exc.payload.get("heard_seconds"))
-            interrupt_payload = {**exc.payload, "heard": heard_text}
+            # Already trimmed to what was played, by whichever module was
+            # doing the playing. The engine only knows that something was cut
+            # short, not that it was cut short mid-sentence out of a speaker.
+            interrupt_payload = {**exc.payload, "reason": exc.reason, "heard": state.spoken_so_far}
             # Say so on the trace, and say where. Whoever is tuning how eagerly
             # the agent gives way needs to know it was stopped while answering,
             # not while deciding what to look up.
@@ -647,36 +651,6 @@ def _next_module_after(current: str, output: ModuleOutput, modules: dict[str, Mo
     if current == "action" and "reflect" in modules and next_module is None:
         return "reflect"
     return next_module
-
-
-SPEAKING_CHARACTERS_PER_SECOND = 4.5
-"""How much text a synthesised voice gets through in a second.
-
-Only whatever is playing the audio knows the real timing, and all it reports
-is a duration — so the duration has to be turned back into a position in the
-text. The rate is a measured average rather than a property of this sentence,
-which is why the result is trimmed at a punctuation mark rather than a
-character: being a few characters out either way should not leave half a word
-in the transcript.
-"""
-
-
-def _heard_portion(spoken: str, heard_seconds: float | None) -> str:
-    """The part of the answer that was actually played before it was cut off.
-
-    Without a reported duration the whole thing stands: the SDK path has no
-    player, and guessing that less was heard would delete something that was.
-    """
-    if heard_seconds is None or not spoken:
-        return spoken
-    played = int(float(heard_seconds) * SPEAKING_CHARACTERS_PER_SECOND)
-    if played >= len(spoken):
-        return spoken
-    cut = max(
-        (spoken.rfind(mark, 0, played + 1) for mark in "，。！？；、,.!?;"),
-        default=-1,
-    )
-    return spoken[: cut if cut > 0 else played].strip()
 
 
 def _final_message_from(state: WorkflowState) -> str:

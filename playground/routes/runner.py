@@ -55,7 +55,10 @@ def runner():
         runner_greeting=_runner_greeting(),
         starter_questions=starter_questions,
         uses_semantic_retrieve=config.retrieve_module == "SemanticRetrieve",
-        uses_voice=config.perceive_module == "VoiceTextPerceive",
+        # Either half is enough to need the socket: one carries the microphone
+        # up, the other carries the answer back down.
+        uses_voice=config.perceive_module == "VoiceTextPerceive"
+        or config.action_module == "VoiceAnswerAction",
         last_aihub_save=session.get("last_aihub_save"),
         has_ai_hub_agent=bool(session.get("agent_id")),
         auto_save_after_login=auto_save_after_login,

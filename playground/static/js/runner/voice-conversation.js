@@ -12,7 +12,8 @@
  * whole round trip, which is the thing being interrupted is meant to fix.
  */
 
-const SERVICE_SAMPLE_RATE = 16000;
+const TRANSCRIBE_SAMPLE_RATE = 16000;
+const SYNTHESIS_SAMPLE_RATE = 24000;
 const FRAME_SAMPLES = 1024;
 
 export function bindVoiceConversation(page, { onTranscript, onStatus }) {
@@ -96,7 +97,10 @@ export function bindVoiceConversation(page, { onTranscript, onStatus }) {
 			return;
 		}
 		const samples = new Int16Array(audio);
-		const buffer = context.createBuffer(1, samples.length, SERVICE_SAMPLE_RATE);
+		// Synthesis and transcription are different services at different
+		// rates. Playing 24 kHz audio as 16 kHz stretches it by half again —
+		// and stretches the heard duration reported back with it.
+		const buffer = context.createBuffer(1, samples.length, SYNTHESIS_SAMPLE_RATE);
 		const channel = buffer.getChannelData(0);
 		for (let index = 0; index < samples.length; index += 1) {
 			channel[index] = samples[index] / 32768;
@@ -149,7 +153,7 @@ export function bindVoiceConversation(page, { onTranscript, onStatus }) {
 
 /** Resample to the rate the transcription service takes, as 16-bit mono. */
 export function toServiceAudio(samples, sampleRate) {
-	const ratio = sampleRate / SERVICE_SAMPLE_RATE;
+	const ratio = sampleRate / TRANSCRIBE_SAMPLE_RATE;
 	const length = Math.floor(samples.length / ratio);
 	const out = new Int16Array(length);
 	for (let index = 0; index < length; index += 1) {

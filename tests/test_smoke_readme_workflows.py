@@ -122,9 +122,6 @@ class ReadmeWorkflowSmokeTests(unittest.TestCase):
         self.assertEqual("自訂 Action 回傳：Agentic SDK 讓你用 workflow 組裝 agent 行為。", result.final_message)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_readme_voice_example_path(self) -> None:
         """The 1-1 example, with the microphone replaced by a transport a test can drive."""
         audio = FakeAudioInput()
@@ -145,3 +142,7 @@ if __name__ == "__main__":
 
         self.assertTrue(perceive.pending_input())
         self.assertEqual("本產品保固十二個月。", workflow.run().final_message)
+
+
+if __name__ == "__main__":
+    unittest.main()

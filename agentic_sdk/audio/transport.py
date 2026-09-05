@@ -109,6 +109,23 @@ class FakeAudioOutput:
                 self.abandoned.append(text)
 
 
+class PlayedElsewhere:
+    """An output transport for when the audio is produced where it is heard.
+
+    In a browser the page synthesises and plays the spoken channel itself, so
+    synthesising it again on the server would pay twice for audio nobody hears.
+    The module still needs a transport — the spoken channel is what it hands
+    over, and what it hands over still has to go somewhere.
+    """
+
+    def __init__(self) -> None:
+        self.spoken: list[str] = []
+
+    def speak(self, text: str) -> Iterator[bytes]:
+        self.spoken.append(text)
+        return iter(())
+
+
 def require_speech_endpoint(**settings: Any) -> None:
     """Refuse a module that has neither a transport nor an endpoint to build one.
 

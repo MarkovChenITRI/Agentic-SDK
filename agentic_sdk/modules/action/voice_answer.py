@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from agentic_sdk.audio.speech_rate import heard_portion
 from agentic_sdk.audio.transport import AudioOutputTransport, require_speech_endpoint
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput, WorkflowState
 from agentic_sdk.core.cancellation import WorkflowInterrupted
@@ -143,13 +144,23 @@ class VoiceAnswerAction(GenerativeAction):
         )
 
     def _speak(self, text: str, state: WorkflowState) -> None:
-        """Play the words out, and stop the moment the person talks over them."""
-        heard: list[str] = []
+        """Play the words out, and stop the moment the person talks over them.
+
+        What is reported afterwards is the part that was actually played, not
+        the part that was written. They differ whenever someone interrupts,
+        and keeping the difference is what stops the next turn referring back
+        to a sentence nobody heard.
+        """
+        interrupted = False
         for _piece in self._speech.speak(text):
             if state.should_stop():
+                interrupted = True
                 break
-            heard.append(text)
-        state.report_spoken_progress(text if heard else "")
+        if not interrupted:
+            state.report_spoken_progress(text)
+            return
+        heard_seconds = (state.cancel.payload if state.cancel else {}).get("heard_seconds")
+        state.report_spoken_progress(heard_portion(text, heard_seconds))
 
 
 def _with_two_channel_contract(system_prompt: str | None) -> str:

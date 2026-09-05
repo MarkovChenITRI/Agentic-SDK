@@ -5,6 +5,7 @@ import json
 from starlette.testclient import TestClient
 
 import pytest
+from types import SimpleNamespace
 
 from agentic_sdk.audio import FakeAudioInput
 from playground.main import app
@@ -200,3 +201,16 @@ def test_a_page_without_a_speech_endpoint_cannot_speak_either(monkeypatch):
         socket.send_json({"type": "speak", "text": "保固十二個月"})
 
         assert socket.receive_json()["type"] == "unavailable"
+
+
+def test_the_person_who_interrupted_is_not_shown_an_error():
+    """They did it on purpose. An error for that is absurd."""
+    from playground.services.runner_service import _execution_status, _interruption_note
+
+    interrupted = SimpleNamespace(aborted=False, interrupted=True, abort_reason=None)
+    hop_limit = SimpleNamespace(aborted=True, interrupted=False, abort_reason="hop limit")
+
+    assert _execution_status(interrupted, handoff_reason="") == "interrupted"
+    assert _execution_status(hop_limit, handoff_reason="") == "aborted"
+    assert "插話" in _interruption_note(interrupted)
+    assert _interruption_note(hop_limit) == ""

@@ -73,8 +73,13 @@ async def voice_session(socket: WebSocket, session_id: str) -> None:
     def began_speaking() -> None:
         # The interruption signal. Waiting for the words instead would mean
         # talking over the person for the three seconds a transcript takes.
-        registry.interject(session_id, heard_seconds=None)
+        #
+        # The page is told first: stopping the playback is what the person
+        # feels, and it is a decision the browser can make without asking. Its
+        # reply carries the one thing only it knows — how much was played —
+        # and refines this cancellation, which cannot know and says so.
         announce({"type": "speech_started"})
+        registry.interject(session_id, heard_seconds=None)
 
     try:
         while True:
@@ -147,6 +152,10 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# At import, not in main(): `gunicorn -w 4 playground.main:app` never calls
+# main(), and that is the launcher most likely to add workers.
+require_single_process()
+
 app.mount("/", WSGIMiddleware(create_app()))
 
 
@@ -155,7 +164,6 @@ def main() -> None:
     parser.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", os.environ.get("WEBSITES_PORT", "80"))))
     args = parser.parse_args()
-    require_single_process()
 
     uvicorn.run(
         "playground.main:app",

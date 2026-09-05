@@ -61,6 +61,17 @@ _MODULE_CONFIG_PARAMS: dict[str, set[str]] = {
         "vision_query",
     },
     "text": {"welcome_message", "options", "importance", "api_key", "base_url", "model"},
+    "voice_answer": {
+        "api_key",
+        "base_url",
+        "model",
+        "temperature",
+        "system_prompt",
+        "speech_api_key",
+        "speech_base_url",
+        "speech_model",
+        "voice",
+    },
     "text_image": {
         "welcome_message",
         "options",
@@ -119,6 +130,7 @@ def build_module(spec: ModuleSpec) -> Module:
         "text": modules.TextPerceive,
         "text_image": modules.TextImagePerceive,
         "tool_call_action": modules.ToolCallAction,
+        "voice_answer": modules.VoiceAnswerAction,
         "voice_text": modules.VoiceTextPerceive,
     }
     try:

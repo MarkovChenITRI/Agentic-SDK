@@ -128,6 +128,7 @@ def run_agent(
             spec,
             endpoint_selections or {},
             semantic_runtime=semantic_runtime,
+            voice_session_id=voice_session_id,
         )
         if tool_submission_context is not None:
             workflow_result = _run_tool_submission_continuation(
@@ -251,7 +252,7 @@ def run_agent(
         ],
     }
     return {
-        "status": "aborted" if workflow_result.aborted or handoff_reason else "completed",
+        "status": _execution_status(workflow_result, handoff_reason),
         "final_message": final_message,
         "spoken": _spoken_channel(workflow_result.entries),
         "tool_calls": tool_calls,
@@ -747,6 +748,8 @@ def _debug_messages_for_execution(config: BuilderSourceConfig, workflow_result: 
 
     if workflow_result.aborted:
         messages.append(f"Gate：流程中止，{workflow_result.abort_reason or '未提供原因'}。")
+    if note := _interruption_note(workflow_result):
+        messages.append(note)
 
     return messages
 
@@ -1049,6 +1052,15 @@ def _action_process_name(config: BuilderSourceConfig) -> str:
         return "模型回覆器"
     if config.action_module == "ToolCallAction":
         return "工具呼叫回覆器"
+    if config.action_module == "VoiceAnswerAction":
+        from agentic_sdk.audio.transport import PlayedElsewhere
+        from agentic_sdk.modules.action.voice_answer import VoiceAnswerAction
+
+        return VoiceAnswerAction(
+            system_prompt=config.action_prompt,
+            speech=PlayedElsewhere(),
+            **endpoint_params_for_role("action", endpoint_selections),
+        )
     if config.action_module == "CustomAction":
         return "自訂回覆器"
     return "直接回覆器"
@@ -1151,6 +1163,15 @@ def _action_debug_name(config: BuilderSourceConfig) -> str:
         return "GenerativeAction"
     if config.action_module == "ToolCallAction":
         return "ToolCallAction"
+    if config.action_module == "VoiceAnswerAction":
+        from agentic_sdk.audio.transport import PlayedElsewhere
+        from agentic_sdk.modules.action.voice_answer import VoiceAnswerAction
+
+        return VoiceAnswerAction(
+            system_prompt=config.action_prompt,
+            speech=PlayedElsewhere(),
+            **endpoint_params_for_role("action", endpoint_selections),
+        )
     if config.action_module == "CustomAction":
         return config.custom_action_class or "CustomAction"
     return "DirectAnswerAction"
@@ -1199,6 +1220,7 @@ def build_workflow(
     endpoint_selections: dict[str, str],
     *,
     semantic_runtime: SemanticRuntime | None = None,
+    voice_session_id: str | None = None,
 ) -> Workflow:
     """Build the Workflow an agent spec describes, ready to run.
 
@@ -1215,7 +1237,7 @@ def build_workflow(
         gates=_gates_from_spec(spec),
         entry_module=config.entry_module,
         events_schema=config.events_schema,
-        perceive=_perceive_from_config(config, endpoint_selections, reachable_roles),
+        perceive=_perceive_from_config(config, endpoint_selections, reachable_roles, voice_session_id),
         plan=_plan_from_config(config, endpoint_selections, reachable_roles),
         retrieve=_retrieve_from_config(config, endpoint_selections, reachable_roles, runtime.source_list, runtime.saved_path),
         action=_action_from_config(config, endpoint_selections, reachable_roles),
@@ -1288,11 +1310,27 @@ def _validate_semantic_knowledge_resources(config: BuilderSourceConfig, semantic
         raise ValueError(f"知識庫缺少設定的參考文件：{', '.join(missing_files)}。請重新上傳文件並儲存 Agent。")
 
 
-def _perceive_from_config(config: BuilderSourceConfig, endpoint_selections: dict[str, str], reachable_roles: set[str]):
+def _perceive_from_config(
+    config: BuilderSourceConfig,
+    endpoint_selections: dict[str, str],
+    reachable_roles: set[str],
+    voice_session_id: str | None = None,
+):
     from agentic_sdk.modules.perceive import PassThroughPerceive, TextImagePerceive, TextPerceive
 
     if "perceive" not in reachable_roles:
         return None
+    if config.perceive_module == "VoiceTextPerceive":
+        from playground.services.voice_session import registry
+
+        # The microphone is already open somewhere. Building a second module
+        # would leave the workflow listening to a session nobody is speaking
+        # into, and paying for a second transcription connection to do it.
+        if listener := registry.listener(voice_session_id or ""):
+            return listener
+        # Nobody is speaking: this is someone using the keyboard on a voice
+        # agent, which is a normal thing to do and not a broken agent.
+        return PassThroughPerceive(input_label=config.perceive_input_label or "")
     if config.perceive_module == "TextPerceive":
         return TextPerceive(
             welcome_message=config.perceive_welcome_message or "",
@@ -1348,6 +1386,25 @@ def _consult_the_sources_first(state: WorkflowState, chosen: str | None) -> str 
     if state.latest_of(ContextEntryType.RETRIEVED) is not None:
         return chosen
     return "retrieve"
+
+
+def _execution_status(workflow_result, handoff_reason: str) -> str:
+    """Interrupted, aborted, or finished — and they are three different things.
+
+    Being talked over ends the turn without anything having gone wrong, so it
+    gets its own status rather than borrowing the one that means the workflow
+    stopped itself.
+    """
+    if getattr(workflow_result, "interrupted", False):
+        return "interrupted"
+    return "aborted" if workflow_result.aborted or handoff_reason else "completed"
+
+
+def _interruption_note(workflow_result) -> str:
+    """Say on the trace that the turn was cut short, and that it was on purpose."""
+    if not getattr(workflow_result, "interrupted", False):
+        return ""
+    return "Gate：有人插話，回答在這裡停住，下一輪從聽到的部分接續。"
 
 
 def _spoken_channel(entries) -> str:
@@ -1440,6 +1497,15 @@ def _action_from_config(config: BuilderSourceConfig, endpoint_selections: dict[s
         return GenerativeAction(system_prompt=config.action_prompt, **endpoint_params_for_role("action", endpoint_selections))
     if config.action_module == "ToolCallAction":
         return ToolCallAction(system_prompt=config.action_prompt, tools=list(config.action_tools), tool_choice=config.action_tool_choice, **endpoint_params_for_role("action", endpoint_selections))
+    if config.action_module == "VoiceAnswerAction":
+        from agentic_sdk.audio.transport import PlayedElsewhere
+        from agentic_sdk.modules.action.voice_answer import VoiceAnswerAction
+
+        return VoiceAnswerAction(
+            system_prompt=config.action_prompt,
+            speech=PlayedElsewhere(),
+            **endpoint_params_for_role("action", endpoint_selections),
+        )
     if config.action_module == "CustomAction":
         return DirectAnswerAction(memory_key=config.custom_action_memory_key, fallback=config.custom_action_fallback, prefix=config.custom_action_prefix)
     if config.action_module != "DirectAnswerAction":

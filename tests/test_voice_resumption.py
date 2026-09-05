@@ -126,21 +126,21 @@ def test_only_the_part_that_was_played_is_remembered():
     Remembering it whole makes the agent's next answer refer back to something
     the person never heard, which reads as the agent inventing the exchange.
     """
-    from agentic_sdk.core.workflow import _heard_portion
+    from agentic_sdk.audio.speech_rate import heard_portion
 
     spoken = "保固期是十二個月，延長保固可以再加兩年，另外配件另計"
 
-    assert _heard_portion(spoken, 2.0) == "保固期是十二個月"
+    assert heard_portion(spoken, 2.0) == "保固期是十二個月"
 
 
 def test_an_interruption_that_reports_no_timing_keeps_what_was_said():
     """The SDK path has no player, so nothing knows the duration."""
-    from agentic_sdk.core.workflow import _heard_portion
+    from agentic_sdk.audio.speech_rate import heard_portion
 
-    assert _heard_portion("保固十二個月", None) == "保固十二個月"
+    assert heard_portion("保固十二個月", None) == "保固十二個月"
 
 
 def test_hearing_the_whole_answer_is_not_trimmed_by_rounding():
-    from agentic_sdk.core.workflow import _heard_portion
+    from agentic_sdk.audio.speech_rate import heard_portion
 
-    assert _heard_portion("保固十二個月", 30.0) == "保固十二個月"
+    assert heard_portion("保固十二個月", 30.0) == "保固十二個月"

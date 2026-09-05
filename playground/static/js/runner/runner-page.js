@@ -206,6 +206,10 @@ function executionStatusFrom(result) {
 	if (result.status === "completed") {
 		return "已產生回覆。";
 	}
+	if (result.status === "interrupted") {
+		// They interrupted on purpose. Showing them an error for it is absurd.
+		return "你插話了，我先停下來聽。";
+	}
 	if (result.status === "aborted") {
 		return "流程已中止。";
 	}

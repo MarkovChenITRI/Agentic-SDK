@@ -3,7 +3,7 @@ from agentic_sdk.audio.transport import (
     AudioInputTransport,
     AudioOutputTransport,
     FakeAudioInput,
-    FakeAudioOutput,
+    FakeAudioOutput, PlayedElsewhere,
     require_speech_endpoint,
 )
 
@@ -11,7 +11,7 @@ __all__ = [
     "AudioInputTransport",
     "AudioOutputTransport",
     "FakeAudioInput",
-    "FakeAudioOutput",
+    "FakeAudioOutput, PlayedElsewhere",
     "SpeechGate",
     "require_speech_endpoint",
     "loudness",
