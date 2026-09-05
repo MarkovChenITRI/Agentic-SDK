@@ -1,0 +1,67 @@
+# 3. How a voice endpoint is defined
+
+Date: 2026-09-05
+
+## Status
+
+Accepted
+
+## Context
+
+Every module in this SDK that needs a model takes three settings — `api_key`,
+`base_url`, `model` — and builds an OpenAI client from them. The documentation
+says so plainly: any OpenAI-compatible endpoint, Azure AI Foundry or Ollama or
+anything else.
+
+The two voice modules did not follow that. They hand-rolled the transport: a
+websocket client that assembled `intent=transcription` and an
+`api-version=2025-04-01-preview` into its own URL, and an HTTP client that
+posted with an `api-key` header. Both were named after Azure, and both were
+what a module built for itself when no transport was passed. One vendor's
+product details were sitting inside a library that claims to be vendor-neutral,
+and supporting a second vendor would have meant editing the module.
+
+They were also unnecessary. The `openai` package this project already depends
+on covers all three surfaces — `audio.speech` with streaming,
+`audio.transcriptions`, and `beta.realtime`, whose `connect` takes
+`extra_query` and `extra_headers`. Everything the hand-rolled clients were
+doing, including Azure's non-standard query parameters, goes through it.
+
+## Decision
+
+**Endpoints are defined through the OpenAI SDK.** Vendor differences travel as
+`extra_query` and `extra_headers`, not as branches inside a module. What the
+SDK cannot express takes the custom form instead.
+
+**Resources that are not uniform are injected as objects; modules carry no list
+of sources.** A chat endpoint is uniform — every OpenAI-compatible endpoint is
+the same interface, so three settings describe it and a module may build the
+client itself. Audio sources are not: live transcription is a long-lived
+websocket, batch transcription uploads a file, synthesis streams a response, and
+each has its own handshake and lifetime. Describing that family with one
+endpoint's shape is how the extension path gets closed.
+
+So the audio transport becomes a **required** constructor argument.
+`require_speech_endpoint` and the endpoint settings it guarded are removed, and
+with them the vendor list that lived inside the modules.
+
+## Consequences
+
+A custom audio source is not a special case; it is the only case. The
+implementations the SDK ships are simply the ones it happens to include, and a
+module cannot tell them apart from anything a caller writes — which is already
+true in practice, since the Playground passes its own browser-playback
+transport and the tests pass fakes.
+
+The Playground needs no change: it already constructs its transports outside
+the modules and passes them in. Its Builder bindings also stand, because
+choosing a deployment is a Playground concern.
+
+The stored endpoint settings do change shape. They currently hold complete
+operation URLs, ending in `/audio/speech?api-version=…`, because that is what
+the hand-rolled clients wanted. Through the OpenAI SDK they become base URLs
+with the deployment named as the model, exactly like the chat endpoints beside
+them.
+
+Every voice example changes with it: constructing a transport is one line more
+than passing three settings, and it is the line that keeps the door open.

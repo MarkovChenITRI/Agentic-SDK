@@ -130,7 +130,12 @@ window.fetch = async (...args) => {
   const url = String(args[0]);
   if (url.includes('execute')) { mark('run.start'); }
   const response = await realFetch(...args);
-  if (url.includes('execute')) { mark('run.responded'); }
+  if (url.includes('execute')) {
+    mark('run.headers');
+    // The body is what tells us the workflow finished, not the headers: this
+    // is a streamed response and the headers arrive almost immediately.
+    response.clone().text().then(() => mark('run.finished'));
+  }
   return response;
 };
 const RealWebSocket = window.WebSocket;
@@ -194,7 +199,12 @@ window.fetch = async (...args) => {
   const url = String(args[0]);
   if (url.includes('execute')) { mark('run.start'); }
   const response = await realFetch(...args);
-  if (url.includes('execute')) { mark('run.responded'); }
+  if (url.includes('execute')) {
+    mark('run.headers');
+    // The body is what tells us the workflow finished, not the headers: this
+    // is a streamed response and the headers arrive almost immediately.
+    response.clone().text().then(() => mark('run.finished'));
+  }
   return response;
 };
 const RealWebSocket = window.WebSocket;

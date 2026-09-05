@@ -104,6 +104,27 @@ common, nothing on the first can reach the second.
 A listening session ends when the page does. Nothing survives it — the next
 one hears nothing of the last.
 
+## Delivered content
+
+**Delivered content** is the part of an answer that actually reached the
+person, as opposed to the part the model produced.
+
+They differ whenever a turn is cut short, and not only in a voice agent: a
+text answer interrupted halfway leaves the reader with half a sentence and the
+model with a whole one. The conversation records the delivered part, because
+the other part happened to nobody.
+
+Only whoever did the delivering can say what it was. Nothing infers it from how
+much was generated or from how long something ran.
+
+### Not delivered content
+
+- **What was produced** is what the model wrote, whether or not anyone received
+  it.
+- **Heard duration** is one deliverer's measurement — how long a speaker ran —
+  which the audio layer turns into delivered content. A screen has no duration
+  and still delivers.
+
 ## Heard duration
 
 The **heard duration** is how much of an answer was actually played before the
