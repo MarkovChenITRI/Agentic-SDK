@@ -1415,13 +1415,20 @@ def _register_voice_session(voice_session_id: str | None):
 
 
 def _plan_endpoint_role(endpoint_selections: dict[str, str], reachable_roles: set[str]) -> str:
-    """Which binding the planner runs on: its own, or a borrowed one.
+    """Which binding the planner runs on. Normally the answering step's.
 
-    The Builder only started asking for the planner's binding recently. Every
-    agent saved before that has bindings for the other roles and none for plan,
-    so demanding one would stop those agents from running at all. They keep the
-    endpoint they were already using — the action role's — until someone opens
-    the agent and binds the planner properly.
+    Nobody is asked to choose one: the planning step is something the agent
+    gained from an answer about its behaviour, not something the person picked,
+    and putting it on screen would make one question carry two model choices
+    that differ only in their caption.
+
+    The search binding is not a candidate however convenient it looks. It is an
+    embedding deployment — it turns text into vectors and cannot decide
+    anything — and the agent that most needs a planner is the one that answered
+    不用查, which has no search binding at all.
+
+    An explicit choice still wins, for agents saved while the Builder briefly
+    asked for one.
     """
     if endpoint_selections.get("plan"):
         return "plan"

@@ -136,8 +136,12 @@ def _deployment_requirements(config: BuilderSourceConfig) -> list[OpenAIRequirem
     reachable_roles = reachable_workflow_roles(config)
     if "perceive" in reachable_llm_roles:
         requirements.append(OpenAIRequirement("perceive", "輸入解析器", config.perceive_module, "Perceive"))
-    if "plan" in reachable_llm_roles:
-        requirements.append(OpenAIRequirement("plan", "步驟規劃器", "NextStepPlan", "Plan"))
+    # The planning step is deliberately not asked about. It is a step the agent
+    # gained from an answer the person gave — 再查一次再回答, or 語意查詢 —
+    # not a choice they made, and it belongs to no question. Every deployment
+    # is chosen under its own question on the review page, so there was nowhere
+    # to put it: five ticks, a lit 完成, and a runner that could not start. It
+    # runs on the model chosen for the answer instead.
     if "retrieve" in reachable_roles and config.retrieve_module == "SemanticRetrieve":
         requirements.append(OpenAIRequirement("retrieve", "語意搜尋", config.retrieve_module, "Retrieve"))
     if "action" in reachable_llm_roles:
