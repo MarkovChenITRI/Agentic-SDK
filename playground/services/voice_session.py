@@ -220,9 +220,11 @@ def _azure_client(endpoint, api_version: str):
     takes a client and cannot tell one vendor's from another's. The SDK ships
     Azure support of its own, so nothing here reimplements a handshake.
 
-    The stored setting is a complete operation URL rather than a resource root,
-    which is the shape the previous hand-rolled clients wanted. Trimmed here
-    until the secrets are reshaped — see ADR-0003.
+    The key vault holds the endpoints this Playground offers, in whatever shape
+    they arrive — a complete operation URL here, a resource root elsewhere.
+    Turning that into a client is this layer's job and always will be: the
+    stored settings are not required to be OpenAI-shaped, and requiring it
+    would make the Playground's own configuration answer to the SDK.
     """
     from openai import AzureOpenAI
 

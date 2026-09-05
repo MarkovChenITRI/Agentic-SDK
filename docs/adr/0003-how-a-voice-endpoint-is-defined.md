@@ -57,11 +57,11 @@ The Playground needs no change: it already constructs its transports outside
 the modules and passes them in. Its Builder bindings also stand, because
 choosing a deployment is a Playground concern.
 
-The stored endpoint settings do change shape. They currently hold complete
-operation URLs, ending in `/audio/speech?api-version=…`, because that is what
-the hand-rolled clients wanted. Through the OpenAI SDK they become base URLs
-with the deployment named as the model, exactly like the chat endpoints beside
-them.
+The Playground's stored endpoint settings do not change. The key vault holds
+the endpoints that Playground offers, in whatever shape they arrive, and they
+are not required to be OpenAI-shaped — that is the Playground's configuration,
+not the SDK's. Turning a stored setting into a client belongs to the layer that
+stored it, and stays there.
 
 Every voice example changes with it: constructing a transport is one line more
 than passing three settings, and it is the line that keeps the door open.
