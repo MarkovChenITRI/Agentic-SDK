@@ -1,0 +1,13 @@
+# 同一個人在不同機器上用不同的顯示名稱或信箱提交時，這份對照讓
+# git shortlog 與 git log --author 把他們算成一個人。GitHub 的
+# Contributors 圖表不讀這份檔案，它只讀提交的 author 與 co-author 欄位。
+#
+# 格式：正規姓名 <正規信箱> <要被歸併的信箱>
+
+Markov Chen <140595764+MarkovChenITRI@users.noreply.github.com>
+Markov Chen <140595764+MarkovChenITRI@users.noreply.github.com> <markov.chen1996@itri.org.tw>
+Markov Chen <140595764+MarkovChenITRI@users.noreply.github.com> MarkovChenITRI <140595764+MarkovChenITRI@users.noreply.github.com>
+
+# 待確認：jumbokuo@gmail.com 有兩次合併提交，顯示名稱同為 Markov。
+# 確認是同一人之後，取消下一行的註解。
+# Markov Chen <140595764+MarkovChenITRI@users.noreply.github.com> <jumbokuo@gmail.com>

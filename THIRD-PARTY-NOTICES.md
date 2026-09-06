@@ -53,4 +53,4 @@ Agentic SDK 依賴以下套件，各自由其著作權人依所列授權條款�
 | MPL-2.0 | 檔案層級 copyleft，僅在修改該套件原始檔時觸發；本專案未修改 |
 | PSF-2.0 | 保留版權聲明 |
 
-清單由 `pyproject.toml` 宣告的依賴與已安裝套件的中繼資料產生，依賴變動時需重新產生。
+這份檔案由 `scripts/generate_third_party_notices.py` 產生，改動依賴後重新執行它。
