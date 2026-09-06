@@ -175,6 +175,19 @@ print(workflow.run("特休有幾天？").final_message)
 
 模組的完整合約見[五大模組的共同寫法](https://r300-ai.github.io/Agentic-SDK/tutorials/module-writing-basics/)。
 
+### 失敗與上限
+
+接自己的推論服務之前先看這四個數字，它們決定最壞情況下服務會被打幾次。
+
+| 情況 | 行為 | 出處 |
+| --- | --- | --- |
+| Reflect 判定回覆不合格 | 退回 Plan 重跑一次，第二次仍不合格就結束，不會無限重試 | `agentic_sdk/modules/reflect/retry_policy.py` |
+| 串流閒置 | 超過 30 秒沒有新的片段就丟出 `TimeoutError` | `agentic_sdk/llm/openai_compatible.py:267` |
+| 呼叫失敗 | SDK 不自動重試，例外往上丟給呼叫端 | 同上，該層沒有 retry |
+| 流程繞不出來 | 總步數超過 50 或單一步驟進入超過 5 次即中止 | `agentic_sdk/core/gates.py:11` |
+
+前兩項與最後一項的數值可以改：逾時傳給模組，兩個上限傳 `Workflow(gates=Gates(...))`。
+
 ## 這個專案不做什麼
 
 先講清楚邊界，省得裝完才發現不對題。
