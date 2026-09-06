@@ -38,21 +38,29 @@
 授權確認的第二項是技轉標的能否涵蓋該單位程式碼的依據。單位無法同意時，
 在 issue 裡說明，由維護者與技轉單位個案處理。
 
-## 第二步：建立 GitHub team
+## 第二步：加為協作者
 
-維護者在 `R300-AI` 組織下建立該單位的 team，把申請單上的帳號加入。
-team 代號在後續步驟使用。
+維護者在 Settings → Collaborators 逐一加入申請單上的帳號，角色給 Write。
+本專案的權限只到單一 repo，不使用組織層級的 team，所以審查權以個人帳號為單位。
+
+角色分三階，新單位從 Write 開始。
+
+| 角色 | 能做什麼 | 什麼時候給 |
+| --- | --- | --- |
+| Triage | 分類 issue、標籤 | 只協助議題管理時 |
+| Write | 推分支、送 PR、審查 | 新單位加入時 |
+| Maintain | 改 repo 設定、管理協作者 | 持續審查一段時間之後 |
 
 ## 第三步：設定審查路徑
 
-維護者把 team 與路徑寫進 `.github/CODEOWNERS`，一行一條路徑。
+維護者把帳號與路徑寫進 `.github/CODEOWNERS`，一行一條路徑，多人以空白分隔。
 
 ```
-/agentic_sdk/vision/    @R300-AI/vision-team
+/agentic_sdk/vision/    @account1 @account2
 ```
 
-設定完成後，動到該路徑的 Pull Request 會自動請該 team 審查。這一步只影響
-審查者指派，不改變任何使用者可見的行為。
+被列的帳號必須先完成第二步，否則 GitHub 不會發出審查請求，而且不會有任何
+錯誤訊息。設定完成後，動到該路徑的 Pull Request 會自動請這些人審查。
 
 ## 第四步：送出第一個 Pull Request
 

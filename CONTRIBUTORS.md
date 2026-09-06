@@ -37,6 +37,12 @@
 | 語音測試 | `tests/test_voice_*.py`、`tests/test_speech_output.py` |
 | 語音決策紀錄 | `docs/adr/0001-where-voice-lives.md`、`docs/adr/0003-how-a-voice-endpoint-is-defined.md` |
 
+## 審查權怎麼給
+
+本專案的權限只到單一 repo，不使用組織層級的 team。審查權以個人帳號為單位，
+在 Settings → Collaborators 逐一給予，角色 Write 以上，再寫進
+`.github/CODEOWNERS`。
+
 ## 提交歷史為什麼對不上這一頁
 
 GitHub 的 Contributors 圖表只讀提交的 author 與 co-author 欄位。語音功能併入

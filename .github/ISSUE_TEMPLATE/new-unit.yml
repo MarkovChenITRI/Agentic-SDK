@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        這張單處理的是歸屬，不是程式碼。填完之後維護者會建立 GitHub team、
+        這張單處理的是歸屬，不是程式碼。填完之後維護者會把帳號加為協作者、
         設定審查路徑，該單位再開始送 Pull Request。
         授權與貢獻紀錄的規則見 [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md)。
 
