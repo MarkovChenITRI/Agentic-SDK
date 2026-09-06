@@ -12,6 +12,7 @@
 | GitHub 帳號 | 姓名 | 單位 | 期間 | 貢獻範疇 |
 | --- | --- | --- | --- | --- |
 | [@MarkovChenITRI](https://github.com/MarkovChenITRI) | Markov Chen | 電光所 異質整合晶片系統組（R 組） | 2026-06 起 | 工作流程核心、五個角色模組、Playground、文件網站 |
+| [@Terrykuo20031222](https://github.com/Terrykuo20031222) | 未定 | 未定 | 2026-08 | 合併分支 |
 | 未定 | 未定 | 機械所 機器人技術組（Q 組） | 2026-09 起 | 即時語音互動 |
 
 期間只寫起訖月份。人離開該單位時填上結束月份，另起一列記錄新單位。
