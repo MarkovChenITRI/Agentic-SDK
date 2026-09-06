@@ -138,10 +138,4 @@ print(workflow.run("特休有幾天？").final_message)
 
 [![Contributors](https://contrib.rocks/image?repo=R300-AI/Agentic-SDK)](https://github.com/R300-AI/Agentic-SDK/graphs/contributors)
 
-由工業技術研究院的團隊開發與維護。[貢獻指南](CONTRIBUTING.md)列出每一位貢獻者的所屬單位與負責範疇，哪一塊有問題就找負責那一塊的人。
-
-## 參與方式
-
-新的團隊或個人要參與，請先與維護窗口聯繫確認要投入的範圍。範圍談定之後開一張[新單位加入貢獻](https://github.com/R300-AI/Agentic-SDK/issues/new?template=new-unit.yml)，把貢獻範疇與所屬單位登記下來再開始動工。送出 Pull Request 前的檢查項目與提交訊息格式見[貢獻指南](CONTRIBUTING.md)。
-
-維護窗口：<!-- 待填：姓名與聯絡方式 -->
+由工業技術研究院的團隊開發與維護。[貢獻指南](CONTRIBUTING.md)列出每一位貢獻者的所屬單位與負責範疇。
