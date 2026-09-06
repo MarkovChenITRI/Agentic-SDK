@@ -9,10 +9,8 @@ authors:
     family-names: Chen
     alias: MarkovChenITRI
     affiliation: >-
-      Industrial Technology Research Institute,
-      Electronic and Optoelectronic System Research Laboratories
-  - name: 工業技術研究院 機械與機電系統研究所 機器人技術組
-    affiliation: Industrial Technology Research Institute
-    website: https://www.itri.org.tw
+      Industrial Technology Research Institute — Electronic and
+      Optoelectronic System Research Laboratories; Mechanical and
+      Mechatronics Systems Research Laboratories
 repository-code: https://github.com/R300-AI/Agentic-SDK
 license-url: https://github.com/R300-AI/Agentic-SDK/blob/main/LICENSE

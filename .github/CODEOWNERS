@@ -7,7 +7,8 @@
 # 否則 GitHub 不會向他發出審查請求，也不會有任何錯誤訊息。
 
 # 即時語音互動 — 機械所 機器人技術組（Q 組）
-# 帳號待該組提供後填入，一行一條路徑，多人以空白分隔。
+# 目前這些路徑的貢獻人與其餘部分是同一個帳號，指派給自己不會產生審查請求，
+# 所以先留註解。日後由不同帳號接手語音時，解除註解並填入該帳號。
 # /agentic_sdk/audio/                          @帳號
 # /agentic_sdk/modules/perceive/voice_text.py  @帳號
 # /agentic_sdk/modules/action/voice_answer.py  @帳號
