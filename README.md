@@ -44,7 +44,7 @@
 
 > Powered by Agentic SDK, provided by the Industrial Technology Research Institute (ITRI).
 
-商用與非商用的界線由工研院技轉單位認定。窗口的聯絡方式尚未公告，需要時請先開一張 issue 詢問。
+商用與非商用的界線由工研院技術移轉單位認定。
 
 ## 核心概念
 
