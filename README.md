@@ -122,7 +122,7 @@ print(workflow.run("特休有幾天？").final_message)
 
 ## 延伸閱讀
 
-其餘功能的說明與可直接執行的教材都在 [Agentic SDK 文件網站](https://r300-ai.github.io/Agentic-SDK/)。Runner 上看到的推論過程、選擇面板與語音插話，都各自對應下面一份教材。「安裝與第一條流程」是其餘各份的共同基準，之後可以挑需要的看。
+[Agentic SDK 文件網站](https://r300-ai.github.io/Agentic-SDK/)有完整的模組規格與教材。教材從安裝開始，都附可以直接執行的 Notebooks 程式碼：
 
 * [安裝與第一條流程](https://r300-ai.github.io/Agentic-SDK/tutorials/getting-started/)
 * [用內建模組組出流程](https://r300-ai.github.io/Agentic-SDK/tutorials/build-and-run-a-workflow/)
