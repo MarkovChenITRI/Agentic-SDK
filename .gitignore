@@ -69,6 +69,8 @@ node_modules/
 !.github/workflows/**
 !.github/CODEOWNERS
 !.github/pull_request_template.md
+!.github/ISSUE_TEMPLATE
+!.github/ISSUE_TEMPLATE/**
 /ai-hub-webui
 
 # 開發期間使用的技能設定與工作紀錄，留在本地

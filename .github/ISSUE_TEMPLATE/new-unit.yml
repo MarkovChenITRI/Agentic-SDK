@@ -1,0 +1,68 @@
+name: 新單位加入貢獻
+description: 新的團隊或單位要開始貢獻時，先開這一張，讓歸屬與審查權在寫程式之前就定好。
+title: "[新單位] "
+labels: ["onboarding"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        這張單處理的是歸屬，不是程式碼。填完之後維護者會建立 GitHub team、
+        設定審查路徑，該單位再開始送 Pull Request。
+        授權與貢獻紀錄的規則見 [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md)。
+
+  - type: input
+    id: unit
+    attributes:
+      label: 單位全名
+      description: 寫到組，例如「工業技術研究院 機械與機電系統研究所 機器人技術組」。
+      placeholder: 工業技術研究院 ○○研究所 ○○組
+    validations:
+      required: true
+
+  - type: input
+    id: short-name
+    attributes:
+      label: 單位簡稱
+      description: 表格裡使用的短稱，例如「Q 組」。
+    validations:
+      required: true
+
+  - type: textarea
+    id: members
+    attributes:
+      label: 貢獻人
+      description: 一行一位，格式為 `GitHub 帳號　姓名　單位配發信箱`。信箱要與該帳號上的信箱一致，貢獻者圖表才算得到。
+      placeholder: |
+        @account1　王小明　name@itri.org.tw
+        @account2　李小華　name2@itri.org.tw
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 預計貢獻的功能
+      description: 一到三句，寫這個單位要負責哪一塊。
+    validations:
+      required: true
+
+  - type: textarea
+    id: paths
+    attributes:
+      label: 預計涵蓋的路徑
+      description: 一行一條，可用萬用字元。這份清單會寫進 REUSE.toml 與 CODEOWNERS，技轉作業據此界定標的。尚未確定時填「待第一個 PR 後補」。
+      placeholder: |
+        agentic_sdk/vision/**
+        tests/test_vision_*.py
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: licensing
+    attributes:
+      label: 授權確認
+      options:
+        - label: 已讀 LICENSE，理解本專案為 PolyForm Noncommercial 並附加標示與商業使用條款。
+          required: true
+        - label: 本單位同意授予工業技術研究院不可撤回的權利，得以任何條款再授權本單位的貢獻，包含技轉的商業授權。
+          required: true

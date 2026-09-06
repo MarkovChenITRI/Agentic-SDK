@@ -1,0 +1,32 @@
+name: 問題回報
+description: 功能的行為與文件不符，或執行時發生錯誤。
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 發生什麼事
+      description: 實際的行為，附上錯誤訊息全文。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 預期的行為
+      description: 依據哪一份文件或哪一段程式碼做出這個預期。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 重現步驟
+      description: 一步一個動作，讓別人能在自己的機器上跑出同一個結果。
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 提交雜湊或套件版本。
+    validations:
+      required: true

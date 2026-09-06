@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 商業使用與技術移轉
+    url: https://www.itri.org.tw
+    about: 商業使用不在本專案的授權範圍內，請洽工研院技轉窗口，不要開 issue。
+  - name: 貢獻規則
+    url: https://github.com/R300-AI/Agentic-SDK/blob/main/CONTRIBUTING.md
+    about: 送出 Pull Request 之前要更新哪些紀錄，見貢獻指南。
