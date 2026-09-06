@@ -1,49 +1,30 @@
 # Agentic SDK
 
-一次問答拆成五個步驟，每一步都有現成的實作。想創新其中一步的人，換掉那一格就好，其餘不必重造。
-
-| 想換掉哪一格 | 怎麼換 | 現成的其餘部分做什麼 |
-| --- | --- | --- |
-| 推論硬體 | 把 `base_url` 指到自己的服務 | 五個步驟照跑，直接看整條 agent 在這顆晶片上撐不撐得住 |
-| 規劃或記憶的機制 | 傳入自己寫的物件 | 輸入、檢索、回答、檢查都是現成的 |
-| 應用邏輯 | 用現成模組先組出能跑的，再逐格替換 | 事件、多輪對話、打斷都已經接好 |
-
-所有需要模型的模組都走 OpenAI 相容介面，換推論服務只需要換 `base_url`。各模組需要哪些端點見[模組家族](https://r300-ai.github.io/Agentic-SDK/modules/)。
-
-每一步都送出事件，畫面照著顯示進度。使用者中途開口就能打斷，而記錄下來的是實際交付出去的那一段，不是模型寫完的整段。
-
-五個步驟各有哪些現成模組見下一節。不寫程式的話，附的網頁示範程式用滑鼠也能組出同一條流程。
-
-## 授權先看
-
-本專案採 [PolyForm Noncommercial License 1.0.0](LICENSE) 並附加標示條款，版權屬工業技術研究院。
-
-| 用途 | 可不可以 |
-| --- | --- |
-| 研究、教學、個人專案、內部概念驗證 | 可以，免費 |
-| 商業使用 | 需另循工研院技術移轉取得授權 |
-
-任何使用都必須在文件、關於畫面與成果發表中顯示：
-
-> Powered by Agentic SDK, provided by the Industrial Technology Research Institute (ITRI).
-
-商用與非商用的界線由工研院技術移轉單位認定。
-
-## 核心概念
-
-一次問答拆成五個步驟，每一步是一個可替換的物件，用不到的留空。
-
-五步不是固定跑一遍。Plan 決定下一步走到哪一格，該格跑完再問 Plan 一次，因此可以來回檢索或重新規劃，上限由 `Workflow(gates=...)` 的 `max_node_hops` 控制，預設 50 步。
+一次問答拆成五個步驟，每一步是一個可以整個換掉的物件。
 
 | 步驟 | 做什麼 | 現成模組 |
 | --- | --- | --- |
 | Perceive | 整理使用者輸入 | 原樣傳遞、文字、文字加圖片、語音 |
-| Plan | 每一輪決定下一步走到哪一格，走完再問一次，直到它說結束 | 依支援資料判斷 |
+| Plan | 決定下一步走到哪一格 | 依支援資料判斷 |
 | Retrieve | 取得支援資料 | 不查、關鍵字、語意相似度 |
 | Action | 產生回覆或動作 | 固定文字、模型生成、工具請求、語音回答 |
 | Reflect | 檢查回覆 | 檢查依據、檢查回覆內容 |
 
-每一格都可以換成自己寫的物件，規格見[模組家族](https://r300-ai.github.io/Agentic-SDK/modules/)。
+五步不是跑一遍就結束。Plan 決定下一步走到哪一格，那一格跑完再問 Plan 一次，
+所以可以來回檢索或重新規劃。
+
+## 這樣拆是為了讓人只換一格
+
+一個想法通常只落在其中一格。拆開之後，驗證那個想法不必先把其餘四格造出來。
+
+| 想換的是 | 怎麼換 | 其餘四格替他做完的事 |
+| --- | --- | --- |
+| 推論硬體 | 把 `base_url` 指到自己的服務 | 完整一條 agent 在那顆晶片上跑起來，不只是單次推論 |
+| 規劃或記憶的機制 | 傳入自己寫的物件 | 輸入、檢索、回答、檢查都是現成的 |
+| 應用邏輯 | 先用現成模組組出能跑的，再逐格替換 | 事件、多輪對話、打斷都已經接好 |
+
+需要模型的模組都走 OpenAI 相容介面，換推論服務只需要換 `base_url`。
+各模組需要哪些端點見[模組家族](https://r300-ai.github.io/Agentic-SDK/modules/)。
 
 ## 安裝
 
@@ -56,11 +37,11 @@ python -c "import agentic_sdk; print('Agentic SDK import ok')"
 
 不指定標籤會裝到 `main` 的最新內容。`main` 隨時可能改變既有行為，而且重新安裝之後程式不會報錯，只是結果不一樣。要固定行為就指定標籤。
 
-## 快速開始
+## 三個例子
 
-三個範例由淺入深。第一個不需要任何模型服務，複製貼上就能跑。
+先跑通一條完整的流程，再看換掉其中一格長什麼樣。三個例子對應上面那張表的三列。
 
-### 1. 不用模型也能跑
+### 一條完整的流程
 
 ```python
 from agentic_sdk import Workflow
@@ -84,25 +65,9 @@ print(result.final_message)   # 年資滿一年可休七天特休。
 
 `PassThroughPerceive` 原樣保留輸入，`KeywordRetrieve` 逐字比對關鍵字取出條目，`DirectAnswerAction` 直接回傳取到的內容。沒有命中時回傳 `KeywordRetrieve(fallback=...)` 設定的那句。
 
-### 2. 多輪對話
+### 換掉推論服務
 
-同一個 `session_id` 的前後文自動保留，第二輪不必重述第一輪。不同 `session_id` 各自獨立，多個使用者不會串在一起。
-
-```python
-first = workflow.run("特休有幾天？", session_id="user-42")
-second = workflow.run("那病假呢？", session_id="user-42")
-
-for turn in second.memory.turns:
-    print(turn.role, turn.content)
-# user      特休有幾天？
-# assistant 年資滿一年可休七天特休。
-# user      那病假呢？
-# assistant 病假一年三十天，超過三十天需附診斷證明。
-```
-
-### 3. 換成模型生成回覆
-
-把 `DirectAnswerAction` 換成 `GenerativeAction`，回覆改由模型整理，其餘不動。任何 OpenAI 相容的服務都可以，例如 Azure AI Foundry 或本機的 Ollama。
+把回覆改由模型整理，`base_url` 指到哪裡就跑在哪裡。Azure AI Foundry、本機的 Ollama、自家硬體上的服務都是同一個寫法。
 
 ```python
 from agentic_sdk.modules import GenerativeAction
@@ -125,9 +90,9 @@ workflow = Workflow(
 print(workflow.run("我到職滿一年了，可以請幾天特休？").final_message)
 ```
 
-### 4. 換掉的不只是 Action
+### 換掉規劃機制
 
-上面換的是 Action。同樣的方式可以換掉任何一格——一個模組就是一個收 `WorkflowState`、回 `ModuleOutput` 的可呼叫物件。下面換掉 Plan，其餘四格照舊。
+換掉的不只是模型。一個模組就是一個收 `WorkflowState`、回 `ModuleOutput` 的可呼叫物件，五格都能這樣換。下面換掉 Plan，其餘四格照舊。
 
 ```python
 from agentic_sdk.core import ModuleOutput
@@ -195,3 +160,19 @@ print(workflow.run("特休有幾天？").final_message)
 由工業技術研究院的團隊開發與維護。想參與的團隊請讀[加入貢獻的逐步導引](https://r300-ai.github.io/Agentic-SDK/contributing/)。
 
 依賴套件各自的授權列於 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
+## 授權
+
+本專案採 [PolyForm Noncommercial License 1.0.0](LICENSE) 並附加標示條款，版權屬工業技術研究院。
+
+| 用途 | 可不可以 |
+| --- | --- |
+| 研究、教學、個人專案、內部概念驗證 | 可以，免費 |
+| 商業使用 | 需另循工研院技術移轉取得授權 |
+
+任何使用都必須在文件、關於畫面與成果發表中顯示：
+
+> Powered by Agentic SDK, provided by the Industrial Technology Research Institute (ITRI).
+
+商用與非商用的界線由工研院技術移轉單位認定。
+
