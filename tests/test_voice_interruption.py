@@ -290,3 +290,42 @@ def test_the_record_holds_the_answer_and_not_the_reasoning_around_it():
 
     assert result.interrupted is True
     assert result.interrupt_payload["delivered"] == "保固期是十二個月"
+
+
+def test_a_structured_answer_records_the_words_and_not_the_envelope():
+    """The voice action streams two channels inside one JSON object.
+
+    Its raw tokens carry the display channel and the field names alongside the
+    sentence, so counting them as delivered showed the person the envelope the
+    answer arrived in. What was said is what the module reports.
+    """
+
+    class _StreamsStructuredAnswer:
+        name = "action"
+
+        def __call__(self, state):
+            envelope = '{"spoken":"保固十二個月","displayed":"保固期：12 個月"}'
+            closes_at = envelope.index('","displayed') + 1
+            for position, character in enumerate(envelope, start=1):
+                state.emit_token_delta(self.name, character, metadata={"structured": True})
+                if position == closes_at:
+                    # The speaker starts here, the moment the field closes, and
+                    # the rest of the envelope still has to arrive.
+                    state.report_delivered("保固十二個月")
+            raise WorkflowInterrupted("interjection")
+
+    from agentic_sdk.modules import PassThroughPerceive
+
+    workflow = Workflow(
+        workflow_name="w",
+        perceive=PassThroughPerceive(),
+        action=_StreamsStructuredAnswer(),
+    )
+    result = workflow.run(
+        "保固多久？",
+        event_callback=lambda event: None,
+        events_schema={"action": {"label": "回答", "description": "回答", "fields": ()}},
+    )
+
+    assert result.interrupted is True
+    assert result.interrupt_payload["delivered"] == "保固十二個月"

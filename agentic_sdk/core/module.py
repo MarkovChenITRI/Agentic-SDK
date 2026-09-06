@@ -193,11 +193,14 @@ class WorkflowState:
         if not resolved_content:
             return
         # Reaching the person is what delivery means, so only the answering
-        # module adds to the record. This is the only place the core learns
-        # what reached them without being told outright.
-        if str(module) in self._delivering_modules:
+        # module adds to the record. A structured stream is the envelope the
+        # answer arrives in — field names and a second channel — so whoever
+        # produces one reports delivery outright instead. This is the only
+        # place the core learns what reached them without being told.
+        resolved_metadata = dict(metadata or {})
+        if str(module) in self._delivering_modules and not resolved_metadata.get("structured"):
             self.delivered_so_far += resolved_content
-        self._token_delta_callback(str(module), resolved_content, dict(metadata or {}))
+        self._token_delta_callback(str(module), resolved_content, resolved_metadata)
 
     def set_structured_field_callback(
         self,
