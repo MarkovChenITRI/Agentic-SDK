@@ -1,7 +1,8 @@
 # Agentic SDK
 
-Agentic SDK 是一個 Python 程式庫，用來組出一個會查資料、會判斷、會自我檢查的 AI agent，
-問答機器人、會呼叫工具的代理、語音助理都用同一套寫法。架構取自 Park 等人 2023 年的
+Agentic SDK 讓一條 agent 在網頁上點出來、匯出成 Python、換到另一個推論服務上執行，
+三件事都不必重寫；換模型只改一個網址，自訂一個環節只要寫一個普通的 Python 物件，
+不必繼承任何基底類別。架構取自 Park 等人 2023 年的
 [Generative Agents](https://arxiv.org/abs/2304.03442)，分成四層，每一層都附現成的實作。
 
 | 層 | 負責什麼 |
