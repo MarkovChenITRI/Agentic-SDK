@@ -53,10 +53,14 @@ DEFAULT_SEMANTIC_RETRIEVE_DESCRIPTION = "依上傳的參考文件查找與問題
 DEFAULT_RUNNER_DESCRIPTION = "可填寫這個 Agent 的用途、適用情境或回覆目標。"
 _PLAYGROUND_REVIEW_FIELD = "__playground_review"
 _PLAYGROUND_OPTIONS_FIELD = "__playground_options"
+AUDIO_TRANSPORT_NAME = "transcription"
+SPEECH_OUTPUT_NAME = "speech"
+
 _MODULE_IMPORT_ORDER = (
     "PassThroughPerceive",
     "TextPerceive",
     "TextImagePerceive",
+    "VoiceTextPerceive",
     "NextStepPlan",
     "PassThroughRetrieve",
     "KeywordRetrieve",
@@ -66,6 +70,7 @@ _MODULE_IMPORT_ORDER = (
     "DirectAnswerAction",
     "GenerativeAction",
     "ToolCallAction",
+    "VoiceAnswerAction",
 )
 
 
@@ -548,6 +553,9 @@ def _build_workflow_source(config: BuilderSourceConfig) -> str:
     if import_block:
         import_lines.append(import_block)
     sections = ["\n".join(import_lines)]
+    audio_section = _audio_transport_section(workflow_block)
+    if audio_section:
+        sections.append(audio_section)
     sections.append(workflow_block)
     return "\n\n".join(sections) + "\n"
 
@@ -645,6 +653,8 @@ def _action_class_for_config(config: BuilderSourceConfig) -> str:
         return "ToolCallAction"
     if config.action_module == "GenerativeAction":
         return "GenerativeAction"
+    if config.action_module == "VoiceAnswerAction":
+        return "VoiceAnswerAction"
     return "DirectAnswerAction"
 
 
@@ -660,6 +670,9 @@ def _action_expression(config: BuilderSourceConfig) -> str:
             arguments.append(f"prefix={json.dumps(config.direct_answer_prefix, ensure_ascii=False)}")
         return f"DirectAnswerAction({', '.join(arguments)})" if arguments else "DirectAnswerAction()"
     arguments = _llm_arguments(binding_role="action")
+    if action_class == "VoiceAnswerAction":
+        # 播音的物件在外部建立後傳進來，不是端點設定的一部分 —— 見 ADR-0003。
+        arguments.insert(0, f"speech={SPEECH_OUTPUT_NAME}")
     action_prompt = _action_system_prompt_for_config(config, action_class)
     if action_prompt:
         arguments.append(f"system_prompt={json.dumps(action_prompt, ensure_ascii=False)}")
@@ -683,6 +696,9 @@ def _perceive_expression(config: BuilderSourceConfig) -> str:
         if config.perceive_input_label:
             return f"PassThroughPerceive(input_label={json.dumps(config.perceive_input_label, ensure_ascii=False)})"
         return "PassThroughPerceive()"
+    if config.perceive_module == "VoiceTextPerceive":
+        # 收音的物件同樣在外部建立，且它不是聊天端點，吃不下那三個參數。
+        return f"VoiceTextPerceive(transport={AUDIO_TRANSPORT_NAME})"
     arguments = _llm_arguments(binding_role="perceive")
     if config.perceive_welcome_message:
         arguments.append(f"welcome_message={json.dumps(config.perceive_welcome_message, ensure_ascii=False)}")
@@ -777,6 +793,33 @@ def _format_module_imports(module_names: list[str]) -> str:
     if not ordered_names:
         return ""
     return "from agentic_sdk.modules import (\n    " + ",\n    ".join(ordered_names) + ",\n)"
+
+
+def _audio_transport_section(workflow_block: str) -> str | None:
+    """Build the two audio objects a voice workflow is handed.
+
+    They sit above the workflow rather than inside it because audio sources are
+    not interchangeable the way chat endpoints are, so the SDK takes an object
+    and never a vendor name — see ADR-0003. Swapping vendor means overriding one
+    method on these two classes, which is why they are named here at all.
+    """
+    lines: list[str] = []
+    imports: list[str] = []
+    if f"transport={AUDIO_TRANSPORT_NAME}" in workflow_block:
+        imports.append("RealtimeTranscription")
+        lines.append(
+            f'{AUDIO_TRANSPORT_NAME} = RealtimeTranscription('
+            'api_key="<API_KEY>", base_url="<BASE_URL>", model="<MODEL>")'
+        )
+    if f"speech={SPEECH_OUTPUT_NAME}" in workflow_block:
+        imports.append("SpeechOutput")
+        lines.append(
+            f'{SPEECH_OUTPUT_NAME} = SpeechOutput('
+            'api_key="<API_KEY>", base_url="<BASE_URL>", model="<MODEL>")'
+        )
+    if not lines:
+        return None
+    return "\n".join([f"from agentic_sdk.audio import {', '.join(imports)}", "", *lines])
 
 
 def _module_names_for_source(python_source: str) -> list[str]:

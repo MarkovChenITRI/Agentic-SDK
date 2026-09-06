@@ -213,3 +213,32 @@ def test_choosing_voice_does_not_answer_the_other_questions():
     # retrieve_policy report a default on an untouched spec too, which is
     # older behaviour and not something a voice choice changes.)
     assert state["choices"]["failure_policy"] == ""
+
+
+def test_the_shown_code_names_the_modules_the_agent_actually_runs():
+    """The preview panel is what a developer copies into their own project.
+
+    It named DirectAnswerAction for a voice agent and passed a chat endpoint's
+    three arguments to a module that takes a transport, so the code on screen
+    would not have run and did not describe the agent it came from.
+    """
+    from playground.services.workflow_spec import compile_python_source
+
+    spec = build_spec(("input_type", "voice"), ("output_format", "voice"))
+    source = compile_python_source(spec)
+
+    assert "VoiceTextPerceive" in source
+    assert "VoiceAnswerAction" in source
+    assert "DirectAnswerAction" not in source
+    assert "transport=" in source
+    assert "speech=" in source
+    # The transport is not a chat endpoint and takes none of its arguments.
+    perceive_line = next(line for line in source.splitlines() if "VoiceTextPerceive(" in line)
+    assert "api_key" not in perceive_line
+    for name in ("VoiceTextPerceive", "VoiceAnswerAction"):
+        assert f"    {name},\n" in source, f"{name} 沒有被匯入"
+    # Both objects are named before they are used, so the block runs as shown.
+    assert "transcription = RealtimeTranscription(" in source
+    assert "speech = SpeechOutput(" in source
+    compile(source.replace("<API_KEY>", "k").replace("<BASE_URL>", "u").replace("<MODEL>", "m"),
+            "<generated>", "exec")
