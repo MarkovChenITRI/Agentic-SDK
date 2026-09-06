@@ -345,6 +345,9 @@ print(result.final_message)
 上方頭像由 GitHub 的貢獻者圖表自動產生，逐人、逐次提交累積。每位貢獻人在
 貢獻當時所屬的單位與期間記於 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
 
+新的團隊要參與，請讀[加入貢獻的逐步導引](https://r300-ai.github.io/Agentic-SDK/contributing/)，
+它從開一張加入申請走到第一次貢獻併入，逐步列出每一步的產出。
+
 ## 授權
 
 本專案採 [PolyForm Noncommercial License 1.0.0](LICENSE) 並附加標示與商業使用條款，
