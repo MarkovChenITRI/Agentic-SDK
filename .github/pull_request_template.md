@@ -12,6 +12,7 @@
 - [ ] 首次貢獻的單位已加進 `CITATION.cff` 的 authors
 - [ ] 取得新路徑審查責任的單位已加進 `.github/CODEOWNERS`
 - [ ] 依賴有增減時已重新產生 `THIRD-PARTY-NOTICES.md`
+- [ ] 新功能整塊屬於某個單位時已加進 `REUSE.toml`；檔案搬移時路徑已同步
 
 ## 驗證
 
