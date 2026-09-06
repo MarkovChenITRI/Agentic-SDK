@@ -28,6 +28,25 @@
 
 需要模型的模組會各自持有 OpenAI-compatible 連線設定。`TextPerceive`、`NextStepPlan`、`GenerativeAction`、`ToolCallAction`、`ResponseCheckReflect` 等模組都要明確提供 `api_key`、`base_url` 與 `model`，模型選擇由建立模組時的設定決定。語音模組不同：音訊來源以**物件**注入而不是三個設定。`VoiceTextPerceive` 收一個 `transport`，`VoiceAnswerAction` 收一個 `speech`，兩者都是必填；生成模型仍然是三件式。原因是聊天端點同構而音訊來源不同構，詳見 ADR-0003。
 
+## 推論服務要提供哪些端點
+
+各模組對 OpenAI 相容服務的要求不同。接自建服務或自家硬體上的推論服務之前，
+先確認實際會用到的那幾個模組所需的端點。
+
+| 模組 | 需要的端點 | 用到的參數 |
+| --- | --- | --- |
+| `TextPerceive`、`TextImagePerceive`、`NextStepPlan`、`GenerativeAction`、`ToolCallAction`、`ResponseCheckReflect`、`EvidenceCheckReflect` | `/v1/chat/completions` | `stream: true`；部分模組要求 `response_format: {"type":"json_object"}`；`ToolCallAction` 另需 `tools` |
+| `SemanticRetrieve` | `/v1/embeddings` | 無 |
+| `VoiceAnswerAction` 使用的 `SpeechOutput` | `/v1/audio/speech` | 串流回應 |
+| `VoiceTextPerceive` 使用的 `RealtimeTranscription` | Realtime WebSocket，`intent=transcription` | 非 REST |
+
+`PassThroughPerceive`、`KeywordRetrieve`、`PassThroughRetrieve`、`DirectAnswerAction`
+不呼叫任何端點。
+
+後兩列不是每個推論服務都提供。Ollama 只涵蓋前兩列，語音的兩個模組必須另外
+指到有對應端點的服務；`SpeechOutput` 與 `RealtimeTranscription` 各自接受自己的
+`base_url`。
+
 ## Entities
 
 `Entities` 是流程內部節點交換資料時使用的核心物件。`Plan`、`Retrieve`、`Reflect` 這三個家族會讀寫同一份物件；`Perceive` 的輸入參數與 `Action` 的輸出參數則放在各自模組頁定義。閱讀時先掌握一件事：`Plan`、`Retrieve`、`Reflect` 透過同一份 `Entities` 交換資料，完整對話歷史由目前的 `MemoryStore` 實作承接。

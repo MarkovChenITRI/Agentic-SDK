@@ -8,28 +8,11 @@
 | 規劃或記憶的機制 | 傳入自己寫的物件 | 輸入、檢索、回答、檢查都是現成的 |
 | 應用邏輯 | 用現成模組先組出能跑的，再逐格替換 | 事件、多輪對話、打斷都已經接好 |
 
-所有需要模型的模組都走 OpenAI 相容介面，換推論服務只需要換 `base_url`。各步驟實際要求的端點見下表，接自家服務前先照這張表確認。
+所有需要模型的模組都走 OpenAI 相容介面，換推論服務只需要換 `base_url`。各模組需要哪些端點見[模組家族](https://r300-ai.github.io/Agentic-SDK/modules/)。
 
-每一步都送出事件，內容包含這一步是哪一格、用的是哪個模組類別、第幾次進到這一格，以及它產出的 payload；需要模型的模組會在 payload 裡回報 token 用量。事件不含時間戳，要量延遲得自己在 callback 裡計時。
-
-使用者中途開口就能打斷，而記錄下來的是實際交付出去的那一段，不是模型寫完的整段。
+每一步都送出事件，畫面照著顯示進度。使用者中途開口就能打斷，而記錄下來的是實際交付出去的那一段，不是模型寫完的整段。
 
 五個步驟各有哪些現成模組見下一節。不寫程式的話，附的網頁示範程式用滑鼠也能組出同一條流程。
-
-### 自家推論服務要提供哪些端點
-
-只用得到的那幾格才需要對應端點。三個範例只用到第一列。
-
-| 用到的模組 | 需要的端點 | 用到的參數 |
-| --- | --- | --- |
-| `TextPerceive`、`NextStepPlan`、`GenerativeAction`、`ToolCallAction`、`ResponseCheckReflect`、`EvidenceCheckReflect` | `/v1/chat/completions` | `stream: true`；部分模組要求 `response_format: {"type":"json_object"}`；`ToolCallAction` 另需 `tools` |
-| `SemanticRetrieve` | `/v1/embeddings` | 無 |
-| `VoiceAnswerAction` 的 `SpeechOutput` | `/v1/audio/speech` | 串流回應 |
-| `VoiceTextPerceive` 的 `RealtimeTranscription` | Realtime WebSocket，`intent=transcription` | 非 REST |
-
-`PassThroughPerceive`、`KeywordRetrieve`、`PassThroughRetrieve`、`DirectAnswerAction` 不打任何端點。
-
-後兩列不是每個推論服務都提供。Ollama 只有前兩列，所以語音的兩格必須另外指到有對應端點的服務，`SpeechOutput` 與 `RealtimeTranscription` 各自接受自己的 `base_url`。
 
 ## 授權先看
 
@@ -174,19 +157,6 @@ print(workflow.run("特休有幾天？").final_message)
 ```
 
 模組的完整合約見[五大模組的共同寫法](https://r300-ai.github.io/Agentic-SDK/tutorials/module-writing-basics/)。
-
-### 失敗與上限
-
-接自己的推論服務之前先看這四個數字，它們決定最壞情況下服務會被打幾次。
-
-| 情況 | 行為 | 出處 |
-| --- | --- | --- |
-| Reflect 判定回覆不合格 | 退回 Plan 重跑一次，第二次仍不合格就結束，不會無限重試 | `agentic_sdk/modules/reflect/retry_policy.py` |
-| 串流閒置 | 超過 30 秒沒有新的片段就丟出 `TimeoutError` | `agentic_sdk/llm/openai_compatible.py:267` |
-| 呼叫失敗 | SDK 不自動重試，例外往上丟給呼叫端 | 同上，該層沒有 retry |
-| 流程繞不出來 | 總步數超過 50 或單一步驟進入超過 5 次即中止 | `agentic_sdk/core/gates.py:11` |
-
-前兩項與最後一項的數值可以改：逾時傳給模組，兩個上限傳 `Workflow(gates=Gates(...))`。
 
 ## 這個專案不做什麼
 
