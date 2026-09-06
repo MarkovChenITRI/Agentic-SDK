@@ -2,8 +2,6 @@
 
 Agentic SDK 是一個用 Python 組合 Agent 工作流程的程式庫。五種模組接起來就是一條可測試、可替換、可觀察的 Agent 流程，各模組的職責見下一節。
 
-SDK 以 `MemoryStore` 統一管理對話記憶；`InContextMemory` 與 `PersistentMemory` 提供兩種可替換的記憶方式。`InContextMemory` 依時間順序保存同一個 `session_id` 的完整對話歷史，所有需要模型的模組都可透過 `MemoryStore` 讀取這份前文。
-
 ## 核心概念
 
 一個 workflow 由幾個可選模組組成：
@@ -14,9 +12,9 @@ SDK 以 `MemoryStore` 統一管理對話記憶；`InContextMemory` 與 `Persiste
 - Action：產生最終回覆、呼叫工具，或執行自訂處理邏輯。
 - Reflect：檢查結果品質或資料依據，必要時中止或重新規劃。
 
-最小 workflow 只需要 `Workflow` 加上實際會用到的模組。所有模組都可以用一般 Python 物件替換，因此適合從小型 PoC 擴充到正式應用。
+最小 workflow 只需要 `Workflow` 加上實際會用到的模組，其餘留空。模組都是一般的 Python 物件，換成自訂實作即可，因此適合從小型 PoC 擴充到正式應用。
 
-`Workflow.run(...)` 仍支援最簡單的單輪呼叫。`Workflow` 預設會以 `InContextMemory` 承接同一個 `session_id` 的完整對話歷史；要替換記憶實作時，在建立 workflow 時傳入 memory 物件，例如 `memory = InContextMemory()` 搭配 `Workflow(memory_type=memory)`。`memory_type` 也接受 `"in_context"`、`"persistent"` 或既有的 memory class 形式。`WorkflowState` 則保留執行中的中繼結果、payload 與觀測資料。
+多輪對話的歷史會自動保留，需要模型的模組都讀得到。
 
 ## 安裝
 
@@ -35,9 +33,7 @@ python -c "import agentic_sdk; print('Agentic SDK import ok')"
 python -m pip install "git+https://github.com/R300-AI/Agentic-SDK.git"
 ```
 
-`main` 隨時可能包含改變既有行為的變更。已經寫好的程式在下次重新安裝之後，可能得到不同的結果而不會出現錯誤訊息。要停留在特定行為上，請指定標籤。
-
-從 GitHub 安裝時，pip 使用 `git+https://...` 格式；也可使用命名形式：`python -m pip install "agentic-sdk @ git+https://github.com/R300-AI/Agentic-SDK.git@v0.1.0"`。
+`main` 隨時可能改變既有行為，而且重新安裝之後不會出現錯誤訊息。要停留在固定的行為上就指定標籤。
 
 ## 快速開始
 
@@ -71,10 +67,6 @@ print(result.final_message)
 ```
 
 `PassThroughPerceive` 會保留原始輸入，`KeywordRetrieve` 依關鍵字取得支援資料，`DirectAnswerAction` 則直接回傳檢索到的內容。
-
-用同一個 `session_id` 再次呼叫同一個 `Workflow` 時，新的使用者輸入與前一次 assistant 回覆都會保留在 `result.memory` 中。
-
-這段快速開始同時是 [00：跑出第一條 Agentic SDK Workflow](docs/tutorials/getting-started.md) 的可執行基準；完整的 00–08 學習順序見 [Notebook 教材總覽](docs/tutorials/index.md)。
 
 ### 2. 使用 OpenAI-compatible 生成回覆
 
