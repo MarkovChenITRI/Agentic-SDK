@@ -78,3 +78,8 @@ CLAUDE.md
 docs/agents/
 .scratch/
 spikes/
+
+# 開發用的領域詞彙與教學素材，與 SDK 本體無關
+CONTEXT.md
+examples/aihub/
+examples/lanew/*.png

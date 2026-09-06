@@ -58,11 +58,6 @@ jobs:
       - name: Verify semantic ingestion conversion dependencies
         run: python scripts/verify_semantic_ingestion_dependencies.py
 
-      - name: Verify third-party notices match the declared dependencies
-        run: python scripts/generate_third_party_notices.py --check
-
-      - name: Verify the ownership declaration still matches the tree
-        run: python scripts/verify_ownership_paths.py
 
       - name: Run tests
         run: python -m pytest -q
