@@ -58,6 +58,11 @@ class WorkflowState:
         init=False,
         repr=False,
     )
+    _delivering_modules: set[str] = field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
     _structured_field_callback: Callable[[str, str, Any, dict[str, Any]], None] | None = field(
         default=None,
         init=False,
@@ -159,9 +164,21 @@ class WorkflowState:
         self,
         callback: Callable[[str, str, dict[str, Any]], None] | None,
         modules: set[str] | None = None,
+        delivering_modules: set[str] | None = None,
     ) -> None:
+        """Subscribe to token deltas, and name which of them reach the person.
+
+        Streaming and delivering are two different things. A plan and a check
+        stream as well, and both stream raw JSON to a trace panel nobody reads
+        as an answer. Counting those as delivered hands an interrupted turn
+        back its own scratch work wrapped around the sentence — see ADR-0002.
+
+        Whoever wires the modules together knows which one answers; the core
+        does not, and stays out of it.
+        """
         self._token_delta_callback = callback
         self._token_delta_modules = set(modules or ())
+        self._delivering_modules = set(delivering_modules or ())
 
     def emit_token_delta(
         self,
@@ -175,9 +192,11 @@ class WorkflowState:
         resolved_content = str(content)
         if not resolved_content:
             return
-        # Emitted to somebody, so it has been delivered. This is the only place
-        # the core learns what reached a person without being told outright.
-        self.delivered_so_far += resolved_content
+        # Reaching the person is what delivery means, so only the answering
+        # module adds to the record. This is the only place the core learns
+        # what reached them without being told outright.
+        if str(module) in self._delivering_modules:
+            self.delivered_so_far += resolved_content
         self._token_delta_callback(str(module), resolved_content, dict(metadata or {}))
 
     def set_structured_field_callback(

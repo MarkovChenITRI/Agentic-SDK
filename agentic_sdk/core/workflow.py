@@ -222,6 +222,7 @@ class Workflow:
                     )
                 ),
                 set(active_events_schema),
+                {self.modules["action"].name},
             )
             state.set_structured_field_callback(
                 lambda module_name, field, value, metadata: event_callback(

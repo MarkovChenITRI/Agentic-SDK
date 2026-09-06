@@ -9,7 +9,7 @@ import struct
 from agentic_sdk import Workflow
 from agentic_sdk.audio import FakeAudioInput
 from agentic_sdk.core import ContextEntry, ContextEntryType, ModuleOutput
-from agentic_sdk.core.cancellation import CancellationToken
+from agentic_sdk.core.cancellation import CancellationToken, WorkflowInterrupted
 from agentic_sdk.modules import PassThroughRetrieve, VoiceTextPerceive
 
 
@@ -237,3 +237,56 @@ def test_what_the_reader_saw_is_what_the_turn_records():
     assert seen != "", "使用者什麼都沒看到，那就不是這個情境"
     assert result.interrupt_payload["delivered"] == seen
     assert [turn.content for turn in workflow.memory.turns if turn.role == "assistant"] == [seen]
+
+
+def test_the_record_holds_the_answer_and_not_the_reasoning_around_it():
+    """The plan and the check stream too, and both stream raw JSON.
+
+    Everything a module streamed was counted as delivered, so an interrupted
+    turn handed the person back its own scratch work — a plan object and a
+    verdict object wrapped around the sentence they had actually read.
+    """
+    from agentic_sdk.modules import GenerativeAction, PassThroughPerceive
+
+    class _StreamsSomeJson:
+        """Stands in for a plan or a check: streams, but not to the person."""
+
+        def __init__(self, name: str, payload: str, *, then_interrupt: bool = False) -> None:
+            self.name = name
+            self._payload = payload
+            self._then_interrupt = then_interrupt
+
+        def __call__(self, state):
+            for character in self._payload:
+                state.emit_token_delta(self.name, character)
+            if self._then_interrupt:
+                raise WorkflowInterrupted("interjection")
+            return ModuleOutput(content=self._payload)
+
+    class _StreamsAnAnswer:
+        name = "action"
+
+        def __call__(self, state):
+            for character in "保固期是十二個月":
+                state.emit_token_delta(self.name, character)
+            return ModuleOutput(content="保固期是十二個月")
+
+    workflow = Workflow(
+        workflow_name="w",
+        perceive=PassThroughPerceive(),
+        action=_StreamsAnAnswer(),
+        reflect=_StreamsSomeJson("reflect", '{"verdict":"pass"}', then_interrupt=True),
+    )
+    events_schema = {
+        name: {"label": name, "description": name, "fields": ()}
+        for name in ("action", "reflect")
+    }
+
+    result = workflow.run(
+        "保固多久？",
+        event_callback=lambda event: None,
+        events_schema=events_schema,
+    )
+
+    assert result.interrupted is True
+    assert result.interrupt_payload["delivered"] == "保固期是十二個月"

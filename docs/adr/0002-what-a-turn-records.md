@@ -44,7 +44,10 @@ elapsed time.
 
 **`WorkflowState` carries delivered content, and it is channel-neutral.** Token
 deltas accumulate into it as they are emitted, so a text stream needs nothing
-from its caller. An audio transport reports as it plays. The word "spoken" does
+from its caller. Only the answering module's deltas count: a plan and a check
+stream raw JSON to a trace panel, and that reaches nobody as an answer.
+Whoever wires the modules together names the deliverer, because the core does
+not know which role answers. An audio transport reports as it plays. The word "spoken" does
 not appear: the core does not know a speaker exists, which is ADR-0001's rule
 and the reason `report_spoken_progress` and `spoken_so_far` are removed.
 
