@@ -2,11 +2,15 @@ cff-version: 1.2.0
 title: Agentic SDK
 message: 使用本軟體或其衍生成果發表時，請引用下列資訊。
 type: software
+# authors 記的是引用時的現況，隸屬填目前的單位。
+# 歷次貢獻的人、單位與期間記在 CONTRIBUTORS.md，換部門時改那一份。
 authors:
-  - name: 工業技術研究院 電子與光電系統研究所 異質整合晶片系統組
-    alias: R300-AI
-    affiliation: Industrial Technology Research Institute
-    website: https://www.itri.org.tw
+  - given-names: Markov
+    family-names: Chen
+    alias: MarkovChenITRI
+    affiliation: >-
+      Industrial Technology Research Institute,
+      Electronic and Optoelectronic System Research Laboratories
   - name: 工業技術研究院 機械與機電系統研究所 機器人技術組
     affiliation: Industrial Technology Research Institute
     website: https://www.itri.org.tw
