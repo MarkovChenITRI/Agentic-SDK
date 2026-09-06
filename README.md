@@ -1,8 +1,11 @@
 # Agentic SDK
 
-Agentic SDK 依 Park 等人 2023 年的
-[Generative Agents](https://arxiv.org/abs/2304.03442) 架構實作，用四層機制把一個 AI agent
-組起來。任何一層都可以換成自己的實作，換掉之後其餘三層照舊運作。
+要做一個 AI agent，難的通常不是自己最想解的那一段。想試一顆新的推論晶片、想換一種規劃方式、
+想接自己公司的資料，這些都得先有一條完整的流程把它跑起來才驗證得了；而搭那條流程本身，
+往往比原本想做的事還花時間。
+
+Agentic SDK 把那條流程拆成四層，每一層都有現成的實作，也都可以換成自己的。
+架構取自 Park 等人 2023 年的 [Generative Agents](https://arxiv.org/abs/2304.03442)。
 
 | 層 | 負責什麼 |
 | --- | --- |
@@ -42,6 +45,14 @@ Module 這一層預設裝著五個步驟，對應論文架構裡的四個機制�
 3. **換應用邏輯。** 先用現成模組組出能跑的，再逐步替換成自己的。
 
 需要模型的模組都走 OpenAI 相容介面，各模組需要哪些端點見[模組家族](https://r300-ai.github.io/Agentic-SDK/modules/)。
+
+## 先看它跑起來
+
+第一次接觸不必從程式碼開始。專案附了一個網頁版的 Playground，在頁面上選好每一步要用哪個模組、
+填上知識庫內容，按下去就能跟自己組出來的 agent 對話。組得滿意可以存成一個 agent 重複使用，
+也可以匯出成 Python 程式碼，接著就是下面那幾節在講的東西。
+
+啟動方式與環境設定見 [playground/README.md](playground/README.md)。
 
 ## 安裝
 
@@ -165,10 +176,6 @@ print(workflow.run("特休有幾天？").final_message)
 | 查某個步驟有哪些現成模組與參數 | [模組家族](https://r300-ai.github.io/Agentic-SDK/modules/) |
 
 九份教材的完整順序見 [Notebook 教材總覽](https://r300-ai.github.io/Agentic-SDK/tutorials/)，可直接執行的檔案在 `notebooks/`。
-
-## 不寫程式也能試
-
-專案另附一個網頁示範程式，用滑鼠組出一條流程並跑起來，滿意的話存成 Agent 重複使用。安裝與環境設定見 [playground/README.md](playground/README.md)。
 
 ## 貢獻者
 
