@@ -1,0 +1,12 @@
+# 路徑對應到負責審查的單位。這份檔案只影響 Pull Request 的審查者指派，
+# 不改變任何使用者可見的行為。
+# 團隊代號需與 GitHub 組織下實際存在的 team 一致，尚未建立前先留註解。
+
+# 即時語音互動 — 機械所 機器人技術組（Q 組）
+# /agentic_sdk/audio/                          @R300-AI/<Q組團隊代號>
+# /agentic_sdk/modules/perceive/voice_text.py  @R300-AI/<Q組團隊代號>
+# /agentic_sdk/modules/action/voice_answer.py  @R300-AI/<Q組團隊代號>
+# /playground/services/voice_session.py        @R300-AI/<Q組團隊代號>
+# /playground/static/js/runner/voice-conversation.js @R300-AI/<Q組團隊代號>
+# /docs/adr/0001-where-voice-lives.md          @R300-AI/<Q組團隊代號>
+# /docs/adr/0003-how-a-voice-endpoint-is-defined.md @R300-AI/<Q組團隊代號>

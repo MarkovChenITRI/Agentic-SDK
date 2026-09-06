@@ -67,6 +67,7 @@ node_modules/
 .github/*
 !.github/workflows
 !.github/workflows/**
+!.github/CODEOWNERS
 /ai-hub-webui
 
 # 開發期間使用的技能設定與工作紀錄，留在本地

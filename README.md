@@ -330,3 +330,14 @@ print(result.final_message)
 ## 示範程式
 
 專案另附一個 Flask 示範程式，用來展示工作流程的建立、執行與互動方式。安裝、啟動與示範環境設定請閱讀 [playground/README.md](playground/README.md)。
+## 授權
+
+本專案採 [PolyForm Noncommercial License 1.0.0](LICENSE) 並附加標示與商業使用條款，
+版權屬工業技術研究院。非商業用途一律允許，商業使用需另循工研院技術移轉取得授權。
+
+任何使用都必須在文件、關於畫面與成果發表中顯示下列標示：
+
+> Powered by Agentic SDK, provided by the Industrial Technology Research Institute (ITRI).
+
+依賴套件各自的授權列於 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)，
+各單位的貢獻範疇列於 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
