@@ -8,11 +8,28 @@
 | 規劃或記憶的機制 | 傳入自己寫的物件 | 輸入、檢索、回答、檢查都是現成的 |
 | 應用邏輯 | 用現成模組先組出能跑的，再逐格替換 | 事件、多輪對話、打斷都已經接好 |
 
-所有需要模型的模組都走 OpenAI 相容介面，所以推論服務換成 Ollama、vLLM、Azure AI Foundry 或自家硬體上的服務，差別只是一個網址。
+所有需要模型的模組都走 OpenAI 相容介面，換推論服務只需要換 `base_url`。各步驟實際要求的端點見下表，接自家服務前先照這張表確認。
 
-每一步都送出事件，畫面照著顯示進度。使用者中途開口就能打斷，而記錄下來的是實際交付出去的那一段，不是模型寫完的整段。
+每一步都送出事件，內容包含這一步是哪一格、用的是哪個模組類別、第幾次進到這一格，以及它產出的 payload；需要模型的模組會在 payload 裡回報 token 用量。事件不含時間戳，要量延遲得自己在 callback 裡計時。
+
+使用者中途開口就能打斷，而記錄下來的是實際交付出去的那一段，不是模型寫完的整段。
 
 五個步驟各有哪些現成模組見下一節。不寫程式的話，附的網頁示範程式用滑鼠也能組出同一條流程。
+
+### 自家推論服務要提供哪些端點
+
+只用得到的那幾格才需要對應端點。三個範例只用到第一列。
+
+| 用到的模組 | 需要的端點 | 用到的參數 |
+| --- | --- | --- |
+| `TextPerceive`、`NextStepPlan`、`GenerativeAction`、`ToolCallAction`、`ResponseCheckReflect`、`EvidenceCheckReflect` | `/v1/chat/completions` | `stream: true`；部分模組要求 `response_format: {"type":"json_object"}`；`ToolCallAction` 另需 `tools` |
+| `SemanticRetrieve` | `/v1/embeddings` | 無 |
+| `VoiceAnswerAction` 的 `SpeechOutput` | `/v1/audio/speech` | 串流回應 |
+| `VoiceTextPerceive` 的 `RealtimeTranscription` | Realtime WebSocket，`intent=transcription` | 非 REST |
+
+`PassThroughPerceive`、`KeywordRetrieve`、`PassThroughRetrieve`、`DirectAnswerAction` 不打任何端點。
+
+後兩列不是每個推論服務都提供。Ollama 只有前兩列，所以語音的兩格必須另外指到有對應端點的服務，`SpeechOutput` 與 `RealtimeTranscription` 各自接受自己的 `base_url`。
 
 ## 授權先看
 
@@ -33,10 +50,12 @@
 
 一次問答拆成五個步驟，每一步是一個可替換的物件，用不到的留空。
 
+五步不是固定跑一遍。Plan 決定下一步走到哪一格，該格跑完再問 Plan 一次，因此可以來回檢索或重新規劃，上限由 `Workflow(gates=...)` 的 `max_node_hops` 控制，預設 50 步。
+
 | 步驟 | 做什麼 | 現成模組 |
 | --- | --- | --- |
 | Perceive | 整理使用者輸入 | 原樣傳遞、文字、文字加圖片、語音 |
-| Plan | 決定下一步要查資料、回答，還是結束 | 依支援資料判斷 |
+| Plan | 每一輪決定下一步走到哪一格，走完再問一次，直到它說結束 | 依支援資料判斷 |
 | Retrieve | 取得支援資料 | 不查、關鍵字、語意相似度 |
 | Action | 產生回覆或動作 | 固定文字、模型生成、工具請求、語音回答 |
 | Reflect | 檢查回覆 | 檢查依據、檢查回覆內容 |
@@ -123,7 +142,38 @@ workflow = Workflow(
 print(workflow.run("我到職滿一年了，可以請幾天特休？").final_message)
 ```
 
-五個步驟都是這樣替換的：換掉一個物件，其餘照舊。
+### 4. 換掉的不只是 Action
+
+上面換的是 Action。同樣的方式可以換掉任何一格——一個模組就是一個收 `WorkflowState`、回 `ModuleOutput` 的可呼叫物件。下面換掉 Plan，其餘四格照舊。
+
+```python
+from agentic_sdk.core import ModuleOutput
+
+class AlwaysRetrieveOnce:
+    """自訂的規劃機制：第一次先查資料，查過就回答。"""
+
+    name = "plan"
+
+    def __call__(self, state):
+        looked_up = state.lookup("latest_retrieved_content")
+        return ModuleOutput(next_module="action" if looked_up else "retrieve")
+
+
+workflow = Workflow(
+    workflow_name="自訂規劃",
+    perceive=PassThroughPerceive(),
+    plan=AlwaysRetrieveOnce(),
+    retrieve=KeywordRetrieve(
+        items=[{"keywords": ["特休"], "content": "年資滿一年可休七天特休。"}],
+    ),
+    action=DirectAnswerAction(),
+)
+
+print(workflow.run("特休有幾天？").final_message)
+# 走過的步驟依序是 perceive、plan、retrieve、action
+```
+
+模組的完整合約見[五大模組的共同寫法](https://r300-ai.github.io/Agentic-SDK/tutorials/module-writing-basics/)。
 
 ## 這個專案不做什麼
 
