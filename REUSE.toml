@@ -1,0 +1,39 @@
+# 功能歸屬的機器可讀宣告，格式為 REUSE 規範 3.2 的 REUSE.toml。
+#
+# 為什麼用這一份而不是逐檔標頭：路徑清單集中在一處，改動歸屬時只動這裡；
+# 代價是檔案被搬走時宣告不會跟著走，所以路徑異動要一併更新這一份。
+# 需要更嚴格時，在原始檔頂端加 SPDX-FileCopyrightText 標頭，宣告即隨檔案移動。
+#
+# SPDX-License-Identifier 用 LicenseRef- 而非 PolyForm-Noncommercial-1.0.0，
+# 因為本專案在 PolyForm 原文之外另加了標示與商業使用條款，直接宣告 PolyForm
+# 會低估實際的義務。全文見 LICENSE。
+
+version = 1
+SPDX-PackageName = "Agentic SDK"
+SPDX-PackageSupplier = "Industrial Technology Research Institute (ITRI) <https://www.itri.org.tw>"
+SPDX-PackageDownloadLocation = "https://github.com/R300-AI/Agentic-SDK"
+
+# 預設：全部歸電光所 異質整合晶片系統組，底下的區塊逐段覆寫。
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 ITRI Electronic and Optoelectronic System Research Laboratories, Heterogeneous Integration Chip System Division"
+SPDX-License-Identifier = "LicenseRef-Agentic-SDK"
+
+# 即時語音互動：機械所 機器人技術組
+[[annotations]]
+path = [
+  "agentic_sdk/audio/**",
+  "agentic_sdk/modules/perceive/voice_text.py",
+  "agentic_sdk/modules/action/voice_answer.py",
+  "playground/services/voice_session.py",
+  "playground/static/js/runner/voice-conversation.js",
+  "tests/test_voice_*.py",
+  "tests/test_speech_output.py",
+  "examples/voice/**",
+  "docs/adr/0001-where-voice-lives.md",
+  "docs/adr/0003-how-a-voice-endpoint-is-defined.md",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 ITRI Mechanical and Mechatronics Systems Research Laboratories, Robotics Technology Division"
+SPDX-License-Identifier = "LicenseRef-Agentic-SDK"

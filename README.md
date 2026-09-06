@@ -330,3 +330,31 @@ print(result.final_message)
 ## 示範程式
 
 專案另附一個 Flask 示範程式，用來展示工作流程的建立、執行與互動方式。安裝、啟動與示範環境設定請閱讀 [playground/README.md](playground/README.md)。
+
+## 貢獻者
+
+[![Contributors](https://contrib.rocks/image?repo=R300-AI/Agentic-SDK)](https://github.com/R300-AI/Agentic-SDK/graphs/contributors)
+
+本專案由工業技術研究院內多個單位共同開發。
+
+| 單位 | 貢獻範疇 |
+| --- | --- |
+| 電光所 異質整合晶片系統組（R 組） | 工作流程核心、五個角色模組、Playground、文件網站 |
+| 機械所 機器人技術組（Q 組） | 即時語音互動 |
+
+上方頭像由 GitHub 的貢獻者圖表自動產生，逐人、逐次提交累積。每位貢獻人在
+貢獻當時所屬的單位與期間記於 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+
+新的團隊要參與，請讀[加入貢獻的逐步導引](https://r300-ai.github.io/Agentic-SDK/contributing/)，
+它從開一張加入申請走到第一次貢獻併入，逐步列出每一步的產出。
+
+## 授權
+
+本專案採 [PolyForm Noncommercial License 1.0.0](LICENSE) 並附加標示與商業使用條款，
+版權屬工業技術研究院。非商業用途一律允許，商業使用需另循工研院技術移轉取得授權。
+
+任何使用都必須在文件、關於畫面與成果發表中顯示下列標示：
+
+> Powered by Agentic SDK, provided by the Industrial Technology Research Institute (ITRI).
+
+依賴套件各自的授權列於 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
