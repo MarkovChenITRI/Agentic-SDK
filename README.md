@@ -1,11 +1,9 @@
 # Agentic SDK
 
-一個 AI agent 在一輪互動裡實際做的事，早已有人整理過。Park 等人 2023 年的
-[Generative Agents](https://arxiv.org/abs/2304.03442) 提出一套代理架構：
-一條記憶流承接代理的全部經驗，觀察、檢索、反思與規劃四個機制在這條記憶流上運作，
-論文的評估並指出觀察、規劃與反思三者各自關鍵。Agentic SDK 依這套架構實作，
-把每個機制做成一個 Python 物件，記憶流做成所有物件共用的 `MemoryStore`，
-論文含在「行為」裡的執行則獨立成 Action，湊成下面五個步驟。
+Agentic SDK 依 Park 等人 2023 年的
+[Generative Agents](https://arxiv.org/abs/2304.03442) 架構實作，把該架構的四個機制
+各做成一個 Python 物件，另把執行獨立成 Action，合為下面五個步驟；架構裡承接經驗的記憶流，
+在這裡是所有步驟共用的 `MemoryStore`。
 
 | 步驟 | 做什麼 | 現成模組 |
 | --- | --- | --- |
