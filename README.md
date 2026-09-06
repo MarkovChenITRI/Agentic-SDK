@@ -1,48 +1,34 @@
 # Agentic SDK
 
-Agentic SDK 讓一條 agent 在網頁上點出來、匯出成 Python、換到另一個推論服務上執行，
-三件事都不必重寫；換模型只改一個網址，自訂一個環節只要寫一個普通的 Python 物件，
-不必繼承任何基底類別。架構取自 Park 等人 2023 年的
-[Generative Agents](https://arxiv.org/abs/2304.03442)，分成四層，每一層都附現成的實作。
+Agentic SDK 是一個 Python 程式庫，用來建立一個完整從AI Agent接收輸入到輸出的完整過程。這個過程是依照　Park 等人 2023 年發表的 [Generative Agents](https://arxiv.org/abs/2304.03442)作為核心概念，將人類的各種決策行為視為一種可以持續循環的**流程**（Ｗorkflow），這個流程會由**功能模組**（Module）與**記憶單元**（Memory）所組成：**感知**（Perceive）負責把進來的東西變成看得懂的內容，**規劃**（Plan）負責決定接下來要做什麼，**查找**（Retrieve）負責去找手上沒有的資料，**行動**（Action）負責實際動手做，**反思**（Reflect）負責判斷結果行不行；中間過程的內容都交給記憶單元保存，需要時再取回來用。每一類功能目前內建的模組如下：
 
-| 層 | 負責什麼 |
+| 功能模組 | 內建的模組 |
 | --- | --- |
-| Workflow | 跑完一輪對話。決定接下來交給哪個模組、管住一輪最多跑幾個模組、把每個模組的進度送出去給畫面用 |
-| Module | 一輪裡的五類工作，各有現成模組可挑：**Perceive** 整理使用者輸入（打字、圖片或語音）、**Plan** 決定接下來交給誰、**Retrieve** 找資料（關鍵字或語意）、**Action** 產生回覆（文字、模型生成、工具請求或語音）、**Reflect** 檢查回覆有沒有依據 |
-| Memory | 記住同一個對話前面談過什麼，五類模組都讀得到 |
-| Data | 模組之間傳遞的內容，一輪之內共用同一份，每個模組把自己的結果加上去 |
+| 感知（Perceive） | 原樣帶過、純文字、文字加圖片、即時語音 |
+| 規劃（Plan） | 判斷下一步該做什麼 |
+| 查找（Retrieve） | 不查直接過、關鍵字比對、語意相似 |
+| 行動（Action） | 直接作答、模型生成、呼叫工具、語音輸出 |
+| 反思（Reflect） | 檢查回應答不答得上、檢查行動結果有沒有出錯 |
 
-## 一輪怎麼跑
+上表每一類選一個模組就組成一條完整的流程，不需要自己實作。要換掉其中一個就依照同一組介面寫一個放進來，其他模組不受影響。
 
-每個模組做完會指定接下來交給誰，所以同一輪裡可以查完資料發現不夠再查一次，也可以在 Reflect
-沒過之後回頭重新規劃，直到某個模組指定結束為止；Workflow 另有次數上限，避免在同幾個模組之間繞不出來。
+## 為什麼要使用 Agentic SDK？
 
-## 可以換掉哪些東西
+Agentic SDK 的目的是為了讓各類 AI 晶片上的模型都能變成落地的應用。它不限定晶片供應商，只要推論服務提供 OpenAI 相容端點就接得上；接上之後再透過 AI Hub 交到場域手上驗證，晶片廠商也可以用自己的硬體交出場域驗收過的應用成果。
 
-四層裡有三處可以換成自己的實作：換掉五類裡的任何一類模組（傳入一個自訂物件即可，其餘四類照舊）、
-換掉 Memory 存放對話的方式（五類模組完全不變）、或換掉模組使用的推論服務（把 `base_url`
-指向另一個服務，程式碼結構不變，因為需要模型的模組都走 OpenAI 相容介面）。
-Workflow 與 Data 兩層是固定的，各模組需要哪些端點見[模組家族](https://r300-ai.github.io/Agentic-SDK/modules/)。
+1. **自訂 AI 晶片部署** — 部署在 AI 晶片上的模型只要封裝成 OpenAI 相容端點就能接進流程，使原本只提供推論的運算資源直接升級成一個 AI　代理。
+2. **快速整合代理技術** — 把自己開發的模型或方法按照介面規範包成其中一類的模組，就可以直接整合內建的模組組合完整的代理服務。
+3. **落地應用驗證** — [Playground](playground/README.md) 這個網頁工具不用寫程式就能把模組組成流程並試跑，使落地場域可以在整套系統建置完成前先確認效果。
 
-## 交出去之後由誰接手
-
-模組交出的是資料，實際的動作由使用這個程式庫的應用程式執行：Action 產生標準格式的工具請求，
-外部 API 由應用程式呼叫；語音模組產生與接收音訊資料，播放與收音由應用程式的音訊裝置負責；
-Workflow 送出每個模組的進度事件，畫面怎麼呈現由應用程式決定。
-
-## 網頁版 Playground
-
-專案內附一個網頁版的 Playground，不寫程式也能使用：在頁面上挑選每一類要用哪個模組、填入知識庫內容，
-就能與組出來的 agent 對話，結果可以存起來重複使用，也可以匯出成 Python 程式碼。
-它跑在 repo 裡，需要先 clone 專案，啟動方式與環境設定見 [playground/README.md](playground/README.md)。
+場域試用的的 Playground可以直接「檢視程式碼」取得整條流程的完整語法，再把端點換成現場晶片上的推論服務就能上線運作。
 
 ## 安裝
 
-需要 Python 3.11 以上、3.13 以下，開發環境建議 3.12；下面第一行的 `@v0.1.0` 是版本標籤，
+需要 Python 3.11 以上、3.13 以下，開發環境建議 3.12；下面第一行的 `@v0.2.0` 是版本標籤，
 指定它才會固定在該版的行為，省略時裝到 `main` 的最新內容，而 `main` 改變行為時程式不會報錯、只是結果不一樣。
 
 ```bash
-python -m pip install "git+https://github.com/R300-AI/Agentic-SDK.git@v0.1.0"
+python -m pip install "git+https://github.com/R300-AI/Agentic-SDK.git@v0.2.0"
 python -c "import agentic_sdk; print('Agentic SDK import ok')"
 ```
 
@@ -136,20 +122,26 @@ print(workflow.run("特休有幾天？").final_message)
 
 ## 延伸閱讀
 
-上面三個例子只用到關鍵字檢索與直接回覆，其餘功能各有教材，共九份，
-完整順序見 [Notebook 教材總覽](https://r300-ai.github.io/Agentic-SDK/tutorials/)，可直接執行的檔案在 `notebooks/`。
+其餘功能的說明與可直接執行的教材都在 [Agentic SDK 文件網站](https://r300-ai.github.io/Agentic-SDK/)。Runner 上看到的推論過程、選擇面板與語音插話，都各自對應下面一份教材。「安裝與第一條流程」是其餘各份的共同基準，之後可以挑需要的看。
 
-| 功能 | 教材 |
-| --- | --- |
-| 語意檢索整批文件 | [教材 05](https://r300-ai.github.io/Agentic-SDK/tutorials/search-documents-and-answer/) |
-| 工具呼叫 | [教材 06](https://r300-ai.github.io/Agentic-SDK/tutorials/call-tools-from-a-workflow/) |
-| 執行事件與進度顯示 | [教材 02](https://r300-ai.github.io/Agentic-SDK/tutorials/watch-a-workflow-run/)、[教材 03](https://r300-ai.github.io/Agentic-SDK/tutorials/configure-workflow-events/) |
-| 語音對話與中途打斷 | [教材 08](https://r300-ai.github.io/Agentic-SDK/tutorials/talk-to-a-workflow/) |
-| 自訂模組 | [五大模組的共同寫法](https://r300-ai.github.io/Agentic-SDK/tutorials/module-writing-basics/) |
-| 現成模組與參數 | [模組家族](https://r300-ai.github.io/Agentic-SDK/modules/) |
+* [安裝與第一條流程](https://r300-ai.github.io/Agentic-SDK/tutorials/getting-started/)
+* [用內建模組組出流程](https://r300-ai.github.io/Agentic-SDK/tutorials/build-and-run-a-workflow/)
+* [推論過程即時顯示](https://r300-ai.github.io/Agentic-SDK/tutorials/watch-a-workflow-run/)
+* [自訂推論過程顯示的內容](https://r300-ai.github.io/Agentic-SDK/tutorials/configure-workflow-events/)
+* [記住前幾輪的對話](https://r300-ai.github.io/Agentic-SDK/tutorials/multi-turn-conversation/)
+* [回答依據檢查](https://r300-ai.github.io/Agentic-SDK/tutorials/search-documents-and-answer/)
+* [工具呼叫與選擇面板](https://r300-ai.github.io/Agentic-SDK/tutorials/call-tools-from-a-workflow/)
+* [自訂模組](https://r300-ai.github.io/Agentic-SDK/tutorials/module-writing-basics/)
+* [語音回答與插話中斷](https://r300-ai.github.io/Agentic-SDK/tutorials/talk-to-a-workflow/)
 
 ## 貢獻者
 
 [![Contributors](https://contrib.rocks/image?repo=R300-AI/Agentic-SDK)](https://github.com/R300-AI/Agentic-SDK/graphs/contributors)
 
-由工業技術研究院的團隊開發與維護，參與方式與目前的貢獻者名單見 [CONTRIBUTING.md](CONTRIBUTING.md)。
+由工業技術研究院的團隊開發與維護。[貢獻指南](CONTRIBUTING.md)列出每一位貢獻者的所屬單位與負責範疇，哪一塊有問題就找負責那一塊的人。
+
+## 參與方式
+
+新的團隊或個人要參與，請先與維護窗口聯繫確認要投入的範圍。範圍談定之後開一張[新單位加入貢獻](https://github.com/R300-AI/Agentic-SDK/issues/new?template=new-unit.yml)，把貢獻範疇與所屬單位登記下來再開始動工。送出 Pull Request 前的檢查項目與提交訊息格式見[貢獻指南](CONTRIBUTING.md)。
+
+維護窗口：<!-- 待填：姓名與聯絡方式 -->

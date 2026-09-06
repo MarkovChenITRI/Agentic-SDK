@@ -83,3 +83,6 @@ spikes/
 CONTEXT.md
 examples/aihub/
 examples/lanew/*.png
+
+# 版本紀錄由發布流程維護，不放進 repo
+CHANGELOG.md
